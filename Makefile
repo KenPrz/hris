@@ -28,31 +28,18 @@ test-backend: ## Pest, against the compose Postgres
 	# backend/phpunit.xml hardcodes DB_HOST=127.0.0.1 / DB_PORT=5433 for the native
 	# path (./vendor/bin/pest run straight from backend/, no Docker involved). Inside
 	# the api container, 127.0.0.1 is the api container itself; Postgres is at `db`.
+	# DB_HOST and DB_PORT are the only two values that legitimately differ between
+	# the two topologies, so they stay unforced in phpunit.xml and are overridden
+	# here via `exec -e`, which always wins over the container's ambient environment
+	# for the exec'd process.
 	#
-	# PHPUnit's <env> directives only apply when `force="true"` OR the variable is
-	# still unset — none of ours set force, so any value already present in the
-	# process environment silently wins over phpunit.xml. The api container's own
-	# `environment:` block (compose.dev.yml) already exports DB_HOST=db and
-	# DB_PORT=5432, so those two happen to fall through correctly on their own.
-	# DB_DATABASE and APP_ENV do NOT fall through correctly, though: the api
-	# container's ambient env carries the dev-server's DB_DATABASE=hris and
-	# APP_ENV=local (so hot-reloading `artisan` picks them up), which — by that same
-	# force=false rule — would silently beat phpunit.xml's testing-specific
-	# DB_DATABASE=hris_test and APP_ENV=testing. Left alone, the suite would run
-	# against the *dev* database in dev mode, not the test database in testing mode
-	# (tests/Feature/System/ConfigurationTest.php catches this: it asserts
-	# HRIS_ORGANIZATION_NAME is the testing value).
-	#
-	# Fix: pass the testing values explicitly via `exec -e`, which always wins over
-	# the container's ambient environment for the exec'd process. phpunit.xml is left
-	# untouched, so the native path (no ambient env at all, getenv() all false) keeps
-	# using its own literals unchanged.
+	# Every other testing value (APP_ENV, DB_DATABASE, HRIS_ORGANIZATION_NAME, etc.)
+	# now carries force="true" in phpunit.xml, so it wins over whatever the api
+	# container's own `environment:` block (compose.dev.yml) exports for the dev
+	# server — no need to duplicate those values here as a second source of truth.
 	$(DEV) exec -T \
-		-e APP_ENV=testing \
 		-e DB_HOST=db \
 		-e DB_PORT=5432 \
-		-e DB_DATABASE=hris_test \
-		-e HRIS_ORGANIZATION_NAME="Test Company Inc." \
 		--user hris api ./vendor/bin/pest
 
 test-web: ## Vitest + typecheck + build

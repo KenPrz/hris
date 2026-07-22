@@ -20,30 +20,67 @@
             <directory>app</directory>
         </include>
     </source>
+    <!--
+        PHPUnit's <env> loses to an ambient variable unless the entry carries
+        force="true" — and the api container's `environment:` block (compose.dev.yml)
+        already exports several of these names for the dev server. Forcing every
+        entry here keeps testing values authoritative no matter which environment the
+        suite runs in (native or containerized). DB_HOST and DB_PORT are the
+        deliberate exceptions, left unforced: they are the only two values that
+        legitimately differ between the native topology (Postgres on 127.0.0.1:5433)
+        and the containerized one (Postgres on db:5432), so the Makefile's
+        `docker compose exec -e` overrides are meant to win for those two only.
+
+        force="true" alone is not enough for Laravel, though: it only updates
+        putenv()/$_ENV, but PHP's CLI SAPI always pre-populates $_SERVER from the
+        real process environment, and Laravel's env() resolution (vlucas/phpdotenv's
+        ServerConstAdapter) checks $_SERVER first — a stale ambient value there wins
+        over a forced <env>. The <server> block below mirrors the same forced values;
+        PHPUnit always writes <server> entries into $_SERVER unconditionally, which is
+        what actually makes them win. DB_HOST/DB_PORT stay out of <server> for the
+        same reason they stay unforced above.
+    -->
     <php>
-        <env name="APP_ENV" value="testing"/>
-        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
-        <env name="APP_TIMEZONE" value="UTC"/>
-        <env name="BCRYPT_ROUNDS" value="4"/>
-        <env name="CACHE_STORE" value="array"/>
+        <env name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <env name="APP_TIMEZONE" value="UTC" force="true"/>
+        <env name="BCRYPT_ROUNDS" value="4" force="true"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
         <!--
             Real Postgres, never SQLite. We depend on SELECT ... FOR UPDATE, partial
             unique indexes, jsonb, timestamptz and exclusion constraints; SQLite
             silently lacks all of them, so a green SQLite suite would actively mislead
             about whether our concurrency invariants hold. See docs/01-architecture.md.
         -->
-        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="5433"/>
-        <env name="DB_DATABASE" value="hris_test"/>
-        <env name="DB_USERNAME" value="hris"/>
-        <env name="DB_PASSWORD" value="hris"/>
-        <env name="DB_URL" value=""/>
-        <env name="HRIS_VERSION" value="test"/>
-        <env name="HRIS_CURRENCY" value="PHP"/>
-        <env name="HRIS_ORGANIZATION_NAME" value="Test Company Inc."/>
-        <env name="MAIL_MAILER" value="array"/>
-        <env name="QUEUE_CONNECTION" value="sync"/>
-        <env name="SESSION_DRIVER" value="array"/>
+        <env name="DB_DATABASE" value="hris_test" force="true"/>
+        <env name="DB_USERNAME" value="hris" force="true"/>
+        <env name="DB_PASSWORD" value="hris" force="true"/>
+        <env name="DB_URL" value="" force="true"/>
+        <env name="HRIS_VERSION" value="test" force="true"/>
+        <env name="HRIS_CURRENCY" value="PHP" force="true"/>
+        <env name="HRIS_ORGANIZATION_NAME" value="Test Company Inc." force="true"/>
+        <env name="MAIL_MAILER" value="array" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+
+        <server name="APP_ENV" value="testing"/>
+        <server name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <server name="APP_TIMEZONE" value="UTC"/>
+        <server name="BCRYPT_ROUNDS" value="4"/>
+        <server name="CACHE_STORE" value="array"/>
+        <server name="DB_CONNECTION" value="pgsql"/>
+        <server name="DB_DATABASE" value="hris_test"/>
+        <server name="DB_USERNAME" value="hris"/>
+        <server name="DB_PASSWORD" value="hris"/>
+        <server name="DB_URL" value=""/>
+        <server name="HRIS_VERSION" value="test"/>
+        <server name="HRIS_CURRENCY" value="PHP"/>
+        <server name="HRIS_ORGANIZATION_NAME" value="Test Company Inc."/>
+        <server name="MAIL_MAILER" value="array"/>
+        <server name="QUEUE_CONNECTION" value="sync"/>
+        <server name="SESSION_DRIVER" value="array"/>
     </php>
 </phpunit>
