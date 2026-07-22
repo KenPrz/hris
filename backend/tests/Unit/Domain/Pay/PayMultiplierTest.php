@@ -48,11 +48,13 @@ dataset('overtime rates', [
     'ordinary day' => [DayType::Ordinary, false, 12500],
     'ordinary day on a rest day' => [DayType::Ordinary, true, 16900],
     'special working day' => [DayType::SpecialWorking, false, 12500],
+    'special working day on a rest day' => [DayType::SpecialWorking, true, 16900],
     'special non-working day' => [DayType::SpecialNonWorking, false, 16900],
     'special non-working day on a rest day' => [DayType::SpecialNonWorking, true, 19500],
     'regular holiday' => [DayType::RegularHoliday, false, 26000],
     'regular holiday on a rest day' => [DayType::RegularHoliday, true, 33800],
     'double regular holiday' => [DayType::DoubleRegularHoliday, false, 39000],
+    'double regular holiday on a rest day' => [DayType::DoubleRegularHoliday, true, 50700],
 ]);
 
 it('pays overtime at +25% on an ordinary day and +30% everywhere else', function (DayType $type, bool $restDay, int $expected): void {
