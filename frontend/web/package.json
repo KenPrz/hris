@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 5176",
     "build": "next build",
+    "dev": "next dev -p 5176",
+    "lint": "eslint",
     "start": "next start -p 5176",
     "test": "vitest run",
     "typecheck": "tsgo --noEmit"
