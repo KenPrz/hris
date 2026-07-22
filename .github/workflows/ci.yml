@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          # Must match backend/phpunit.xml's forced DB_DATABASE/DB_USERNAME/DB_PASSWORD.
+          POSTGRES_DB: hris_test
+          POSTGRES_USER: hris
+          POSTGRES_PASSWORD: hris
+        # 5433 on the host, because phpunit.xml's unforced DB_HOST/DB_PORT default to
+        # 127.0.0.1:5433 — the native topology. The runner is a native topology.
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U hris -d hris_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql, pgsql, bcmath, intl
+      # --no-scripts: composer's post-autoload-dump runs `artisan package:discover`,
+      # which boots the framework — and AppServiceProvider::assertConfigured() refuses
+      # to boot without HRIS_CURRENCY/HRIS_ORGANIZATION_NAME, neither of which exists on
+      # a clean runner. Same problem, same fix, as ../pos/backend/Dockerfile's prod
+      # stage. Discovery instead runs lazily on pest's own boot below, by which point
+      # phpunit.xml has forced both values.
+      - run: composer install --no-interaction --prefer-dist --no-scripts
+        working-directory: backend
+      # The Global Constraint binds app/ AND tests/, but tests/Arch/ConventionsTest.php's
+      # rule is ->expect('App') only, and Pest arch cannot reach namespace-less Pest test
+      # files at all. Everything complies today; this is what keeps it that way. grep -rL
+      # lists files NOT matching, so a non-empty list is the failure.
+      - name: declare(strict_types=1) in app/ and tests/
+        working-directory: backend
+        run: |
+          offenders=$(grep -rL --include='*.php' 'declare(strict_types=1);' app tests || true)
+          if [ -n "$offenders" ]; then
+            echo "Missing declare(strict_types=1):"
+            echo "$offenders"
+            exit 1
+          fi
+      - run: ./vendor/bin/pest
+        working-directory: backend
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: '24', cache: npm, cache-dependency-path: frontend/web/package-lock.json }
+      - run: npm ci
+        working-directory: frontend/web
+      # `make test-web` does not run lint — it is a CI-only gate, so a lint failure
+      # never blocks a local `make test` mid-change.
+      - run: npm run lint
+        working-directory: frontend/web
+      - run: npm test
+        working-directory: frontend/web
+      - run: npm run typecheck
+        working-directory: frontend/web
+      - run: npm run build
+        working-directory: frontend/web

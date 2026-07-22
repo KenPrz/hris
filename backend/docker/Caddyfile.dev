@@ -1,0 +1,11 @@
+# backend/docker/Caddyfile.dev — plain HTTP for the dev compose network
+{
+    frankenphp
+    auto_https off
+}
+
+:8000 {
+    root * /app/public
+    encode zstd gzip
+    php_server
+}

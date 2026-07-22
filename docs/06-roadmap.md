@@ -48,20 +48,31 @@ because M1 builds them and M2–M8 are only allowed to consume them.
   `app/Exceptions/Domain` with the `DomainException` base and its render hook, and the
   directory layout. `/api/v1/health` is built **as a real action** — controller → request
   → action → resource — so the very first endpoint sets the shape every later one copies.
-- Framework exceptions (404, 405, validation) mapped into the error envelope explicitly.
-  POS learned this the hard way: handling only `DomainException` leaves Laravel's default
-  shape leaking through and breaks the one-code-path promise before it's a day old.
+- Framework exceptions mapped into the error envelope, and the envelope **closed** rather
+  than enumerated: named handlers for validation/401/403/404/405/429, then a catch-all for
+  every `HttpExceptionInterface` and — outside debug — every uncaught `Throwable`. POS
+  learned the first half the hard way: handling only `DomainException` leaves Laravel's
+  default shape leaking through and breaks the one-code-path promise before it's a day
+  old. The second half is the same lesson one level up — an enumerated list fails silently
+  on the case nobody remembered.
 - `phpunit.xml` repointed at **real Postgres**, not the SQLite it ships with. We depend on
   `SELECT … FOR UPDATE`, partial unique indexes, `jsonb`, `timestamptz`, and range
   overlap constraints. A green SQLite suite would actively mislead.
 - `tests/Arch/` from day one, not retrofitted: actions never touch HTTP, actions are
-  `final`, no `env()` outside `config/`, `declare(strict_types=1)` everywhere.
-- `config/hris.php` with `timezone`, `currency` (PHP), and the fail-fast boot check.
-  Nothing calls `env()` outside it.
+  `final`, no `env()` outside `config/` (the rule is the *directory* — stock `config/app.php`
+  and `config/database.php` call it constantly and must), `declare(strict_types=1)` everywhere.
+- `config/hris.php` with `version`, `currency` (PHP), and `organization_name`, plus
+  `AppServiceProvider::assertConfigured()` as the fail-fast boot check. That check also
+  enforces the UTC Global Constraint — but the timezone itself is **not** an `hris.php`
+  key; it is Laravel's own `config('app.timezone')`, from `APP_TIMEZONE`. Only add a key
+  here when the value is genuinely ours. `env()` is never called outside `config/`, which
+  an arch test enforces.
 - `frontend/web/`: Next.js 16 + React 19 + TS, `/api` rewrite so the browser sees one
   origin and CORS never comes up.
-- `git init`, `.gitignore`, `Makefile` (`make dev`, `make test`, `make seed`), CI running
-  `pest` + `typecheck` + `build`.
+- `git init`, `.gitignore`, `Makefile` — `make help` lists every target: `dev`, `dev-down`,
+  `dev-key`, `test`, `test-backend`, `test-web`, `clean`. No `seed` target yet; there is
+  nothing to seed until M2 brings tables. CI runs `pest` on the backend and
+  `lint` + `test` + `typecheck` + `build` on the web.
 - `CLAUDE.md` documenting how to run all of it, pointing at `docs/README.md` as the
   source of truth.
 
@@ -71,6 +82,26 @@ because M1 builds them and M2–M8 are only allowed to consume them.
 display timezone on `offices`. A Laravel app defaulted to `Asia/Manila` will write local
 times into `timestamptz` columns and be wrong in a way that only shows up when a second
 office opens in another zone — by which point the data is already mixed.
+
+**Status: complete.** Notes from actually building it, for whoever hits the same walls:
+
+- `postgres:18` moved the recommended mount to `/var/lib/postgresql` (not `.../data`);
+  mounting the old path makes the container restart-loop on first boot.
+- Laravel's `phpunit.xml` ships pointing at in-memory SQLite. Repointed at real
+  Postgres per the testing rule — deliberate, not an oversight.
+- The framework's own exceptions (404, 405, validation) needed explicit mapping into
+  the error envelope; handling only `DomainException` leaves Laravel's default shape
+  leaking through, which breaks the one-code-path promise in `03-api.md`.
+- `erasableSyntaxOnly` in the Next tsconfig forbids constructor parameter properties.
+  `ApiError` declares its fields explicitly because of it.
+- `docker compose exec` defaults to root. Against a bind mount that leaves root-owned
+  files the host user cannot write; every Makefile `exec` passes `--user`.
+- PHPUnit's `<env force="true">` only writes `putenv()`/`$_ENV`, but Laravel resolves
+  `env()` through phpdotenv's `ServerConstAdapter` — `$_SERVER` first, first definition
+  wins — and PHP's CLI SAPI pre-populates `$_SERVER` from the process environment. A
+  testing value therefore needs a mirrored `<server>` entry to beat an ambient one;
+  `DB_HOST`/`DB_PORT` are excluded from both blocks because they are the only values
+  that legitimately differ between the native and containerized topologies.
 
 ## M1 — Time and pay primitives
 

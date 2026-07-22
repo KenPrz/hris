@@ -4,16 +4,16 @@ Design-first. Read in order; each assumes the one before it.
 
 | Doc | What's in it |
 | --- | --- |
-| 00-overview.md | What we're building, why hours-before-payroll, principles, v1 decisions, non-goals, glossary. *(M0)* |
-| 01-architecture.md | Stack and versions, topology, time and money rules, timezone handling, auth, idempotency, concurrency, error format, testing. *(M0)* |
+| [00-overview.md](00-overview.md) | What we're building, why hours-before-payroll, principles, v1 decisions, non-goals, glossary. |
+| [01-architecture.md](01-architecture.md) | Stack and versions, topology, time and money rules, timezone handling, auth, idempotency, concurrency, error format, testing. |
 | 02-data-model.md | Full Postgres schema with rationale. The core artifact. *(M2)* |
 | 03-api.md | REST surface, auth flows, request lifecycle, the device ingestion contract, error codes. *(M2)* |
-| 04-backend-conventions.md | Action-class architecture: controller → request → action → resource. Rules, layering, worked example, configuration. *(M0)* |
+| [04-backend-conventions.md](04-backend-conventions.md) | Action-class architecture: controller → request → action → resource. Rules, layering, worked example, configuration. |
 | 05-rbac.md | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. *(M2)* |
 | [06-roadmap.md](06-roadmap.md) | Milestones M0–M8, the invariants they're measured against, and the deferred table. |
 
-Written as each milestone reaches it — the marker says which. `06-roadmap.md` is the
-only one that exists today, and it is where to start.
+Written as each milestone reaches it — the marker says which. The three unmarked docs
+above plus `06-roadmap.md` exist today; `02`, `03`, and `05` arrive with M2.
 
 ## Design records
 
@@ -46,5 +46,7 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0 in [06-roadmap.md](06-roadmap.md): Docker Compose + Laravel + Next.js skeleton that
-boots, with `/api/v1/health` built as a real action.
+M0 is complete — the skeleton boots, `/api/v1/health` is a real action, and CI runs the
+gates. Next is M1 in [06-roadmap.md](06-roadmap.md): the time and pay primitives, built
+before any schema, with the whole DOLE premium matrix as a table-driven unit test and
+zero database.
