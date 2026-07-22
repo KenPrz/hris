@@ -27,7 +27,13 @@ jobs:
         with:
           php-version: '8.5'
           extensions: pdo_pgsql, pgsql, bcmath, intl
-      - run: composer install --no-interaction --prefer-dist
+      # --no-scripts: composer's post-autoload-dump runs `artisan package:discover`,
+      # which boots the framework — and AppServiceProvider::assertConfigured() refuses
+      # to boot without HRIS_CURRENCY/HRIS_ORGANIZATION_NAME, neither of which exists on
+      # a clean runner. Same problem, same fix, as ../pos/backend/Dockerfile's prod
+      # stage. Discovery instead runs lazily on pest's own boot below, by which point
+      # phpunit.xml has forced both values.
+      - run: composer install --no-interaction --prefer-dist --no-scripts
         working-directory: backend
       - run: ./vendor/bin/pest
         working-directory: backend

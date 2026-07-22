@@ -103,6 +103,10 @@ actions is how this pattern rots into the service-layer tangle it exists to avoi
 
 ## Input DTOs
 
+This illustrates the shape using `RecordPunch`, which lands in M3 — it and `PunchSource`
+don't exist in `app/` yet. `CheckHealth` is the only action today, and it takes no input,
+so it has no FormRequest and no Input DTO.
+
 ```php
 final readonly class RecordPunchInput
 {
@@ -353,7 +357,7 @@ different owners, and neither lives in both places.
 | --- | --- | --- |
 | Currency (PHP) | `config/hris.php` | Fixed at setup. Changing it is a data migration. |
 | Organization name | `config/hris.php` | Changes roughly never; a deploy is fine. |
-| App timezone (UTC) | `config/hris.php` / `.env` | Structural. Display timezone is per-office. |
+| App timezone (UTC) | `config/app.php` (Laravel's own), `.env` | Structural. Display timezone is per-office. |
 | Session TTL, rate limits | `config/hris.php` | Security knobs. Should go through review. |
 | Idempotency key TTL | `config/hris.php` | Engineering detail; no admin has an opinion. |
 | **Statutory pay-rate floors** | `config/hris.php` | The Labor Code sets them, not an admin. Validated against on every `pay_rules` write. |
