@@ -293,14 +293,47 @@ Per-day shift rostering with swaps. Tenure-tiered leave accrual. A mobile applic
 Offline punch capture. Each appears in the roadmap's deferred table with the trigger that
 would revive it.
 
-## Open questions
+## Resolved after M0
 
-None blocking M0. Two worth deciding before M4:
+Both questions left open at M0 were settled on 2026-07-23, before M1. Both went the same
+way — **configurable per office** — which is a deliberate acceptance of cost, so the cost
+is recorded here rather than discovered later.
 
-- **Cutoff cadence** — semi-monthly (1–15, 16–EOM) is assumed as the default and is what
-  most PH employers run, but whether it is configurable per office or fixed system-wide
-  should be settled before `cutoff_periods` is migrated.
-- **Meal break handling** — assumed a fixed unpaid 60 minutes per Art. 83, deducted from
-  the worked span. Whether break punches are ever captured explicitly (rather than
-  assumed) changes `PunchPairer`'s contract, so it should be decided in M1 rather than
-  discovered in M5.
+### Meal breaks — configurable per office
+
+An office elects one of two policies:
+
+- **Assumed** — a fixed unpaid break of N minutes is deducted from any worked span
+  exceeding a threshold. A day is two punches.
+- **Explicit** — employees punch out and back in for the break, so a normal day is four
+  punches and actual break time is measured rather than assumed.
+
+Consequences M1 must absorb:
+
+- **`PunchPairer` pairs arbitrary even punch counts**, not just two. An odd count is
+  reported as unpaired rather than guessed at.
+- **The deduction is its own pure policy object, not a constant.** It takes the policy and
+  its parameters as constructor arguments and never reads config — per the layering rule,
+  a value object that calls `config()` stops being unit-testable without a booted
+  container.
+- **The test matrix roughly doubles**, because every worked-span case has to be proven
+  under both policies.
+
+What it buys: an employee who works through lunch is visible and payable under the
+explicit policy, which the assumed policy cannot express at all. What it costs: two code
+paths through the most-executed function in the engine, forever.
+
+The office column selecting the policy lands in M2; M1 builds both paths as pure
+functions with the policy passed in.
+
+### Cutoff cadence — configurable per office
+
+Each office elects semi-monthly (1–15, 16–EOM), monthly, or weekly. `cutoff_periods`
+therefore carries a cadence and a generator per type, and every cutoff query is
+office-aware.
+
+Semi-monthly remains the seeded default — it is what most PH employers run — but it is a
+default, not an assumption baked into the schema. Month-end handling (28/29/30/31) is the
+edge case that needs pinning by test regardless of cadence.
+
+This affects M2's migration and M6's period generation. It does not affect M1.

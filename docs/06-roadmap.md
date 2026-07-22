@@ -120,8 +120,14 @@ expensive bugs live and it is the foundation everything else computes on.
   `BasisPoints`. Table-driven, pure, no database.
 - `NightDiffSplitter` — splits a worked interval against 22:00–06:00, correctly across
   midnight, returning `Minutes` in and out of the window.
-- `PunchPairer` — pure over an ordered list of punch times: pairs in/out, reports odd
-  counts as unpaired rather than guessing.
+- `PunchPairer` — pure over an ordered list of punch times. Pairs **arbitrary even
+  counts**, not just one in/out pair, because meal breaks are configurable per office and
+  an explicit-break day is four punches. An odd count is reported as unpaired rather than
+  guessed at.
+- `MealBreakPolicy` — `Assumed(minutes, appliesOverMinutes)` or `Explicit`. Takes its
+  parameters as constructor arguments and never reads config; the office column that
+  selects it lands in M2. Both paths are built here so the engine never has to branch on
+  a policy it cannot test.
 - `OvertimeThreshold` — minutes beyond the scheduled day, given a schedule span.
 - `frontend/web/src/lib/duration.ts` and `money.ts` — the browser mirrors.
 
