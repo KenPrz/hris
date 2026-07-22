@@ -28,5 +28,85 @@ services:
       retries: 10
       start_period: 10s
 
+  api:
+    build: { context: backend, target: dev }
+    # Dev-only: Docker creates a fresh named volume root-owned, and the image's
+    # `USER hris` can't write into api_vendor — first boot's `composer install`
+    # fails with "vendor/... could not be created". `user: root` here only gets the
+    # container's *starting* process to root so the command below can chown
+    # api_vendor once; every long-running process then runs via `su hris`, which
+    # matches the host user by construction (Dockerfile: `useradd -u 1000 hris`).
+    user: root
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      APP_ENV: local
+      # Soft default, not `:?required` — a required var with no default fails
+      # interpolation for the WHOLE compose file, including `up -d db` alone. The
+      # loud failure lives in backend/docker/entrypoint.sh instead.
+      APP_KEY: ${HRIS_DEV_APP_KEY:-}
+      APP_DEBUG: "true"
+      APP_TIMEZONE: UTC
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: hris
+      DB_USERNAME: hris
+      DB_PASSWORD: ${HRIS_DEV_DB_PASSWORD:-hris}
+      HRIS_CURRENCY: PHP
+      HRIS_ORGANIZATION_NAME: "Dev Company Inc."
+    healthcheck:
+      # Ready means "composer install finished AND the app answers" — first boot
+      # installs vendor into a fresh named volume, which takes minutes.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 600s
+    ports:
+      - "${HRIS_DEV_API_PORT:-8001}:8000"
+    volumes:
+      - ./backend:/app
+      - api_vendor:/app/vendor
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$(stat -c %u /app/vendor)" = "$(id -u hris)" ]; then
+          echo "api_vendor already owned by hris — skipping chown"
+        else
+          echo "api_vendor not owned by hris yet — chowning (first boot only)"
+          chown -R hris:hris /app/vendor
+        fi
+        exec su hris -s /bin/sh -c 'composer install --no-interaction && exec entrypoint.sh frankenphp run --config /etc/frankenphp/Caddyfile'
+
+  web:
+    build: { context: frontend/web, target: dev }
+    # Same fresh-named-volume problem as api. `su node`, not `su hris` — node:24-alpine
+    # already ships a `node` user at uid/gid 1000, which matches the host, so everything
+    # written under the bind mount (including .next) lands owned by the host user.
+    user: root
+    environment:
+      API_ORIGIN: http://api:8000
+      PORT: 5176
+    ports:
+      - "${HRIS_DEV_WEB_PORT:-5176}:5176"
+    volumes:
+      - ./frontend/web:/app
+      - web_node_modules:/app/node_modules
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$(stat -c %u /app/node_modules)" = "$(id -u node)" ]; then
+          echo "web_node_modules already owned by node — skipping chown"
+        else
+          echo "web_node_modules not owned by node yet — chowning (first boot only)"
+          chown -R node:node /app/node_modules
+        fi
+        exec su node -s /bin/sh -c 'npm install && npm run dev'
+
 volumes:
   pgdata:
+  api_vendor:
+  web_node_modules:
