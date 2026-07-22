@@ -48,20 +48,31 @@ because M1 builds them and M2–M8 are only allowed to consume them.
   `app/Exceptions/Domain` with the `DomainException` base and its render hook, and the
   directory layout. `/api/v1/health` is built **as a real action** — controller → request
   → action → resource — so the very first endpoint sets the shape every later one copies.
-- Framework exceptions (404, 405, validation) mapped into the error envelope explicitly.
-  POS learned this the hard way: handling only `DomainException` leaves Laravel's default
-  shape leaking through and breaks the one-code-path promise before it's a day old.
+- Framework exceptions mapped into the error envelope, and the envelope **closed** rather
+  than enumerated: named handlers for validation/401/403/404/405/429, then a catch-all for
+  every `HttpExceptionInterface` and — outside debug — every uncaught `Throwable`. POS
+  learned the first half the hard way: handling only `DomainException` leaves Laravel's
+  default shape leaking through and breaks the one-code-path promise before it's a day
+  old. The second half is the same lesson one level up — an enumerated list fails silently
+  on the case nobody remembered.
 - `phpunit.xml` repointed at **real Postgres**, not the SQLite it ships with. We depend on
   `SELECT … FOR UPDATE`, partial unique indexes, `jsonb`, `timestamptz`, and range
   overlap constraints. A green SQLite suite would actively mislead.
 - `tests/Arch/` from day one, not retrofitted: actions never touch HTTP, actions are
-  `final`, no `env()` outside `config/`, `declare(strict_types=1)` everywhere.
-- `config/hris.php` with `timezone`, `currency` (PHP), and the fail-fast boot check.
-  Nothing calls `env()` outside it.
+  `final`, no `env()` outside `config/` (the rule is the *directory* — stock `config/app.php`
+  and `config/database.php` call it constantly and must), `declare(strict_types=1)` everywhere.
+- `config/hris.php` with `version`, `currency` (PHP), and `organization_name`, plus
+  `AppServiceProvider::assertConfigured()` as the fail-fast boot check. That check also
+  enforces the UTC Global Constraint — but the timezone itself is **not** an `hris.php`
+  key; it is Laravel's own `config('app.timezone')`, from `APP_TIMEZONE`. Only add a key
+  here when the value is genuinely ours. `env()` is never called outside `config/`, which
+  an arch test enforces.
 - `frontend/web/`: Next.js 16 + React 19 + TS, `/api` rewrite so the browser sees one
   origin and CORS never comes up.
-- `git init`, `.gitignore`, `Makefile` (`make dev`, `make test`, `make seed`), CI running
-  `pest` + `typecheck` + `build`.
+- `git init`, `.gitignore`, `Makefile` — `make help` lists every target: `dev`, `dev-down`,
+  `dev-key`, `test`, `test-backend`, `test-web`, `clean`. No `seed` target yet; there is
+  nothing to seed until M2 brings tables. CI runs `pest` on the backend and
+  `lint` + `test` + `typecheck` + `build` on the web.
 - `CLAUDE.md` documenting how to run all of it, pointing at `docs/README.md` as the
   source of truth.
 
