@@ -151,7 +151,9 @@ Full reasoning lives in the docs; these are the ones that cause real damage.
 - **Tests run against real PostgreSQL, never SQLite.** See above; `phpunit.xml` is that
   way on purpose.
 - **Success is always `{"data": ...}`; errors are always `{"error": ...}`.** Never both,
-  never a bare array. One definition: `app/Exceptions/ApiErrorEnvelope.php`.
+  never a bare array. One definition: `app/Exceptions/ApiErrorEnvelope.php`, and it is
+  **closed, not enumerated** — under `api/*` every HTTP exception, and outside debug every
+  uncaught throwable, lands in the envelope. → `docs/04-backend-conventions.md`
 - **One system action = one route = one controller = one Action class.** Actions take an
   Input DTO, return a domain object, and know nothing about HTTP. Serialization is the
   controller's job. → `docs/04-backend-conventions.md`

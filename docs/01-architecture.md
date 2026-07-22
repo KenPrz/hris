@@ -182,10 +182,15 @@ Never both, never a bare array.
 
 One definition: `app/Exceptions/ApiErrorEnvelope.php`, registered from
 `bootstrap/app.php`. It renders our `DomainException` hierarchy **and** the framework's
-own exceptions — validation, 401, 403, 404, 405, 429 — into the same shape. Mapping only
-our own is the failure POS documented: every 404 comes back in Laravel's default shape,
-and the promise that a client has exactly one error code path is false from the first
-mistyped URL.
+own exceptions into the same shape. Mapping only our own is the failure POS documented:
+every 404 comes back in Laravel's default shape, and the promise that a client has exactly
+one error code path is false from the first mistyped URL.
+
+The envelope is **closed, not enumerated**: under `api/*` every HTTP exception, and outside
+debug every uncaught throwable, is caught by a final fallback rather than by a list of
+mapped classes. An enumerated list has to be extended for each new failure mode, and the
+ones that get forgotten fail silently in the framework's shape. See
+`04-backend-conventions.md` for the layering and the status → `code` table.
 
 `code` is stable and machine-readable; clients branch on it and never on `message`.
 `details` is always an object — cast, so empty details serialize `{}` and not `[]`.

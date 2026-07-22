@@ -236,15 +236,47 @@ A single place renders every `DomainException` into the envelope from `03-api.md
 shape cannot drift: `app/Exceptions/ApiErrorEnvelope.php`, registered from `bootstrap/app.php`.
 
 **HRIS-specific, and learned the hard way in POS:** that file also maps the *framework's*
-own exceptions — validation, 401, 403, 404, 405, 429 — into the same envelope. Handling
-only `DomainException` leaves Laravel's default shape leaking through for every 404, and
-"one shape, everywhere, so the client has one code path" stops being true before the API
-is a day old. Two details in there are deliberate:
+own exceptions into the same envelope. Handling only `DomainException` leaves Laravel's
+default shape leaking through for every 404, and "one shape, everywhere, so the client has
+one code path" stops being true before the API is a day old.
+
+**The envelope is closed, not enumerated.** Under `api/*`, *every* HTTP exception — and,
+outside debug, *every* uncaught throwable — comes back as `{"error": {code, message,
+details}}`. There is no list of mapped statuses to keep in sync.
+
+That distinction is the whole point. An enumerated envelope is a list you have to remember
+to extend every time a new failure mode appears, and the ones you forget do not fail loudly
+— they fail *silently*, in the framework's shape, and you find out from a client. This
+codebase already had one: a render callback typed on `AuthorizationException` that could
+never fire, because `Handler::render()` runs `prepareException()` first and rewrites that
+class — into `AccessDeniedHttpException` without a status, into a plain `HttpException`
+*with* one. So 403 worked by accident and `Response::denyAsNotFound()` — which is how
+`00-overview.md`'s "refusals are 404, not 403" rule is written in a policy — escaped
+entirely. The most privacy-sensitive refusal in the system was the one outside the shape.
+
+How it is layered, in registration order (`renderViaCallbacks()` walks the callbacks in
+order and takes the first non-null response, so specific always beats general):
+
+1. `DomainException` — our own business-rule failures, each with its own code.
+2. The named framework cases: validation, `AuthenticationException` (401),
+   `AccessDeniedHttpException` (403), `NotFoundHttpException` (404),
+   `MethodNotAllowedHttpException` (405), `TooManyRequestsHttpException` (429).
+3. `HttpExceptionInterface` — the close. Status → `code` from a table in the file
+   (`409 => conflict`, `419 => token_mismatch`, …); anything unlisted derives `http_<status>`,
+   which is still stable and machine-readable.
+4. `Throwable` → 500 `internal_error`, **only when `app.debug` is false**. In debug the
+   callback returns `null` so Laravel's own detailed error page still surfaces locally.
+
+Three details in there are deliberate:
 
 - Validation failures render **400, not Laravel's default 422**. `03-api.md` reserves 422
   for requests that are structurally fine but semantically rejected.
 - `details` is cast to an object, so empty details serialize as `{}` rather than `[]`. A
   client typing it as `Record<string, unknown>` should never be handed a JSON array.
+- The catch-all's `message` is **canned per status, never the exception's own**. The
+  fallback cannot know whether a message is safe to show, and
+  `denyAsNotFound('not the owner of salary #5')` would leak precisely what the 404 exists
+  to hide. `message` is human-readable and must never be parsed; `code` is the contract.
 
 Every `code` in the `03-api.md` error table is one class. The table and the
 `app/Exceptions/Domain/` directory should be diffable against each other.
