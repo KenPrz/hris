@@ -73,7 +73,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function isErrorBody(body: unknown): body is ApiErrorBody {
-  return typeof body === 'object' && body !== null && 'error' in body
+  // `'error' in body` is not enough: `{"error": null}` passes it and then `body.error.code`
+  // throws a TypeError, which is not an ApiError and defeats the whole point of this
+  // module — that every failed request rejects with something the UI can branch on.
+  if (typeof body !== 'object' || body === null || !('error' in body)) return false
+
+  const error: unknown = (body as { error: unknown }).error
+
+  return typeof error === 'object' && error !== null && typeof (error as { code: unknown }).code === 'string'
 }
 
 function isSuccessBody<T>(body: unknown): body is ApiSuccess<T> {

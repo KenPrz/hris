@@ -13,7 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        health: '/up',
+        // No `health: '/up'`. It is a second health endpoint with no action, no entry in
+        // routes/api.php, and no error envelope — it returns HTML. GET /api/v1/health is
+        // the real one, built as a real action. See routes/api.php.
     )
     ->withMiddleware(function (Middleware $middleware): void {
         //

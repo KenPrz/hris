@@ -45,6 +45,15 @@ describe('api.health', () => {
     })
   })
 
+  it('rejects a malformed error body with an ApiError, not a TypeError', async () => {
+    // `{"error": null}` satisfies a naive `'error' in body` guard and then explodes on
+    // `body.error.code`. A TypeError is not something the UI can branch on.
+    stubFetch(500, { error: null })
+
+    await expect(api.health()).rejects.toBeInstanceOf(ApiError)
+    await expect(api.health()).rejects.toMatchObject({ code: 'unexpected_response', status: 500 })
+  })
+
   it('reports an unreachable network as a real, showable state', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
 
