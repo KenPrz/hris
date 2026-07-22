@@ -72,6 +72,26 @@ display timezone on `offices`. A Laravel app defaulted to `Asia/Manila` will wri
 times into `timestamptz` columns and be wrong in a way that only shows up when a second
 office opens in another zone — by which point the data is already mixed.
 
+**Status: complete.** Notes from actually building it, for whoever hits the same walls:
+
+- `postgres:18` moved the recommended mount to `/var/lib/postgresql` (not `.../data`);
+  mounting the old path makes the container restart-loop on first boot.
+- Laravel's `phpunit.xml` ships pointing at in-memory SQLite. Repointed at real
+  Postgres per the testing rule — deliberate, not an oversight.
+- The framework's own exceptions (404, 405, validation) needed explicit mapping into
+  the error envelope; handling only `DomainException` leaves Laravel's default shape
+  leaking through, which breaks the one-code-path promise in `03-api.md`.
+- `erasableSyntaxOnly` in the Next tsconfig forbids constructor parameter properties.
+  `ApiError` declares its fields explicitly because of it.
+- `docker compose exec` defaults to root. Against a bind mount that leaves root-owned
+  files the host user cannot write; every Makefile `exec` passes `--user`.
+- PHPUnit's `<env force="true">` only writes `putenv()`/`$_ENV`, but Laravel resolves
+  `env()` through phpdotenv's `ServerConstAdapter` — `$_SERVER` first, first definition
+  wins — and PHP's CLI SAPI pre-populates `$_SERVER` from the process environment. A
+  testing value therefore needs a mirrored `<server>` entry to beat an ambient one;
+  `DB_HOST`/`DB_PORT` are excluded from both blocks because they are the only values
+  that legitimately differ between the native and containerized topologies.
+
 ## M1 — Time and pay primitives
 
 Before any schema. Pure integer functions, no I/O, no container. This is where the
