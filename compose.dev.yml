@@ -1,0 +1,32 @@
+# compose.dev.yml — the full dev stack: `make dev`.
+# Native dev (artisan serve + npm run dev + any Postgres) remains fully supported.
+name: hris-dev
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: hris
+      POSTGRES_USER: hris
+      POSTGRES_PASSWORD: ${HRIS_DEV_DB_PASSWORD:-hris}
+      # Deterministic collation. Left to the host locale, index ordering can differ
+      # between machines (and a glibc upgrade can silently corrupt text indexes even
+      # on one machine). Only takes effect on a fresh volume — initdb args are read
+      # once, at first cluster creation.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      # 5433, not 5432 — ../pos holds 5432 on this host.
+      - "${HRIS_DEV_DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # Depends on the DB accepting queries, not just the port being open —
+      # pg_isready returns true during recovery, before it can serve anything.
+      test: ["CMD-SHELL", "pg_isready -U hris -d hris -q && psql -U hris -d hris -qtAc 'select 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
