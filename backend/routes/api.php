@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
 use App\Http\Controllers\Attendance\PunchController;
@@ -38,6 +39,11 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('/me/attendance', ListMyAttendanceController::class);
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
+
+        // Any employee may file for their own attendance — deliberately not admin-gated
+        // and not behind idempotency middleware (a considered one-off submission, not a
+        // retryable network event).
+        Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,
