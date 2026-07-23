@@ -74,8 +74,17 @@ test('only RecordEmploymentChange writes the employment cache columns', function
     // ['current_office_id' => $value]. A rule built on it would silently never fire for
     // this case (verified empirically: it kept passing even with a second writer of
     // current_office_id present), so this asserts the guarantee directly: grep app/ for
-    // any file that writes one of the three cache columns as a mass-assignment/array key,
-    // and require RecordEmploymentChange.php to be the only one.
+    // any file that writes one of the three cache columns, and require
+    // RecordEmploymentChange.php to be the only one.
+    //
+    // Three write forms are matched, per column:
+    //   - mass assignment:      'current_office_id' => ...   (create()/update()/fill())
+    //   - property assignment:  $employee->current_office_id = ...
+    //   - setAttribute:         $employee->setAttribute('current_office_id', ...)
+    // A bare `=` is required (not `==`, `===`, `=>`, `<=`, `>=`, `!=`) so that reads like
+    // `where('current_office_id', '=', $x)` and relation definitions like
+    // `belongsTo(Employee::class, 'current_reports_to_id')` — a quoted string followed by
+    // `)`, never `=>` or `=` — are left alone.
     $columns = ['current_office_id', 'current_department_id', 'current_reports_to_id'];
 
     $writers = [];
@@ -89,10 +98,15 @@ test('only RecordEmploymentChange writes the employment cache columns', function
         $contents = $file->getContents();
 
         foreach ($columns as $column) {
-            // Matches an array-literal write like 'current_office_id' => ... or
-            // "current_office_id" => ..., which is how Eloquent mass-assignment
-            // (create()/update()/fill()) targets a column.
-            if (preg_match('/[\'"]'.preg_quote($column, '/').'[\'"]\s*=>/', $contents) === 1) {
+            $quoted = preg_quote($column, '/');
+
+            $pattern = '/'
+                .'[\'"]'.$quoted.'[\'"]\s*=>'          // mass assignment: 'col' => ...
+                .'|->'.$quoted.'\b\s*=(?!=|>)'         // property assignment: ->col = (not ==, ===, =>)
+                .'|setAttribute\(\s*[\'"]'.$quoted.'[\'"]' // setAttribute('col', ...)
+                .'/';
+
+            if (preg_match($pattern, $contents) === 1) {
                 $writers[$file->getRelativePathname()] = true;
             }
         }
