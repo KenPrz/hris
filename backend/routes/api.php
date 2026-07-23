@@ -6,6 +6,9 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Attendance\Adjustments\ApproveController as ApproveAdjustmentController;
+use App\Http\Controllers\Attendance\Adjustments\CancelController as CancelAdjustmentController;
+use App\Http\Controllers\Attendance\Adjustments\RejectController as RejectAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
@@ -44,6 +47,14 @@ Route::prefix('v1')->group(function (): void {
         // and not behind idempotency middleware (a considered one-off submission, not a
         // retryable network event).
         Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
+
+        // Transitions on the shared requests spine. Any authorized approver or the
+        // requester themself may act — authority is enforced inside the actions
+        // (RequestAuthority for approve/reject, requester-identity for cancel), not by a
+        // route-level gate, so these stay in the plain auth:sanctum group.
+        Route::post('/attendance/adjustments/{request}/approve', ApproveAdjustmentController::class);
+        Route::post('/attendance/adjustments/{request}/reject', RejectAdjustmentController::class);
+        Route::post('/attendance/adjustments/{request}/cancel', CancelAdjustmentController::class);
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,

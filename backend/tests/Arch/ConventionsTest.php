@@ -173,6 +173,23 @@ test('every Attendance controller references a scope or self check', function ()
     // present; this greps every controller under Attendance/ for one of the two and fails
     // if neither is found, so a future controller that loads and serializes an
     // AttendanceLog with no scope/self check at all is caught here rather than in review.
+    //
+    // The three Task 7 transition controllers (Adjustments/Approve|Reject|CancelController)
+    // are a third, deliberately different shape: they serve a Request, not an AttendanceLog,
+    // and their authorization boundary is RequestAuthority (approve/reject) or
+    // requester-identity (cancel) — enforced inside the row-locked action, not by an
+    // EmployeeScope query or a `user()->employee` read in the controller itself (an
+    // approver need not even have an Employee record: a bare system-admin account can
+    // approve). Neither grep pattern can see that boundary, so they are exempted by name
+    // here rather than papering over the gap with an incidental string match; the
+    // guarantee they'd otherwise assert is instead proven by the 404-vs-409 matrix in
+    // tests/Feature/Attendance/AdjustmentTransitionsTest.php.
+    $exemptTransitionControllers = [
+        'Adjustments/ApproveController.php',
+        'Adjustments/RejectController.php',
+        'Adjustments/CancelController.php',
+    ];
+
     $offenders = [];
 
     $files = (new Finder)
@@ -186,6 +203,10 @@ test('every Attendance controller references a scope or self check', function ()
     ];
 
     foreach ($files as $file) {
+        if (in_array($file->getRelativePathname(), $exemptTransitionControllers, true)) {
+            continue;
+        }
+
         $contents = $file->getContents();
 
         $guarded = false;
