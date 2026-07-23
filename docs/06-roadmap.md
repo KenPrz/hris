@@ -280,8 +280,9 @@ turned on — for whoever extends the schema next:
   shift templates** — the schema this milestone builds has no table for any of them; holiday
   calendars, pay-rule rows, and shift templates are M4's domain and land with their tables.
   The seeded company is one org, two offices (Manila, Cebu), four departments, and ten
-  employees with a real reporting chain — one Art. 82-exempt manager with reports, one
-  punch-only worker with no login — plus a System Admin and an HR Admin per office. Only
+  employees with a real reporting chain — an Art. 82-exempt manager per office (each with
+  reports), one punch-only worker with no login — plus a System Admin and an HR Admin per
+  office. Only
   **`EmployeePolicy`** ships (end to end, as the two-check `can()`-AND-`EmployeeScope`
   proof); the leave/schedule/holiday/cutoff policies arrive with their features in M4–M6.
   Refusals are **404 for out-of-scope subjects, 403 for unauthorized actors** — the
