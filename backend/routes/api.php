@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
@@ -30,6 +31,8 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('/employees', ListEmployeesController::class);
         Route::get('/employees/{employee}', ShowEmployeeController::class);
+
+        Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,
