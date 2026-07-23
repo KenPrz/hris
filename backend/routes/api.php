@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\LogoutController;
+use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
 
@@ -13,4 +16,11 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::get('/health', HealthController::class);
+
+    Route::post('/login', LoginController::class)->middleware('throttle:login');
+
+    Route::middleware('auth:sanctum')->group(function (): void {
+        Route::post('/logout', LogoutController::class);
+        Route::get('/me', MeController::class);
+    });
 });
