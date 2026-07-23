@@ -29,7 +29,10 @@ final class NightDiffSplitter
         $night = 0;
 
         // The window recurs daily. Walk one day before the interval starts through one
-        // day after it ends, so a band straddling either edge is still counted.
+        // day after it ends, so a band straddling either edge is still counted. The
+        // one-day slack on each side is always enough regardless of interval length:
+        // each night band is 480 minutes and bands are spaced 1440 apart, so a band
+        // that overlaps the interval at all must open within one day of an endpoint.
         $firstDay = intdiv($interval->startMinute, self::MINUTES_PER_DAY) - 1;
         $lastDay = intdiv($interval->endMinute, self::MINUTES_PER_DAY) + 1;
 
