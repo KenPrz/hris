@@ -331,6 +331,132 @@ seeders and migrations too and would pollute the trail HR is one day asked to de
 
 ---
 
+## Attendance: the append-only ledger *(M3)*
+
+The raw record you show a DOLE inspector. **Nothing ever updates or deletes a row** — a
+correction is a *new* row (a manual punch), never an edit. This is the single most
+load-bearing property of the table, and it is enforced from two directions: no route mutates
+it (there is no `PATCH`/`PUT`/`DELETE` anywhere under `attendance`), and exactly one class
+writes it.
+
+```sql
+create table attendance_logs (
+  id            uuid primary key default uuidv7(),
+  employee_id   uuid not null references employees(id),
+  office_id     uuid not null references offices(id),   -- SNAPSHOT at punch time (see below)
+  punched_at    timestamptz not null,                   -- the instant, stored UTC
+  direction     text not null,                          -- 'in' | 'out'
+  source        text not null,                          -- 'web' | 'manual' | 'device'
+  verification  text not null,                          -- 'verified' | 'flagged'
+  flag_reason   text,                                   -- e.g. 'ip_not_allowlisted', 'outside_geofence'
+  recorded_by   uuid references users(id),              -- who created the row (the employee, or HR)
+  ip_address    text,                                   -- inet stored as text; cast in the model
+  device_id     text,                                   -- for a future device; null for web/manual
+  geo_lat       numeric(10,7),
+  geo_lng       numeric(10,7),
+  created_at    timestamptz not null default now(),
+
+  check (direction    in ('in','out')),
+  check (source       in ('web','manual','device')),
+  check (verification in ('verified','flagged'))
+);
+
+create index attendance_logs_employee_punched on attendance_logs (employee_id, punched_at);
+```
+
+**The `office_id` is a snapshot, not a live join.** A punch records the office it belonged
+to *at the instant it happened*, captured from the employee's `current_office_id` at
+ingestion. Verification (IP allowlist, geofence) runs against *that* office, and M5 later
+converts `punched_at` (UTC) → office-local wall-clock → business day using this stored
+office — so a mid-period transfer never retroactively reinterprets an old punch's timezone
+or fence. It is the same snapshot discipline the current-state cache uses for a different
+reason: freeze the fact at the moment it was true.
+
+**String columns, PHP enums, `CHECK` constraints — the `DayType`/`employment_type`
+pattern.** `direction`, `source`, and `verification` are plain `text` in the database, cast
+to PHP backed string enums (`App\Domain\Attendance\PunchDirection`, `PunchSource`,
+`PunchVerification`) in the model, with a `CHECK` constraint mirroring each enum's values so
+the DB still rejects garbage. Postgres native enums are avoided deliberately: adding a value
+to one is an `ALTER TYPE` migration dance, while a `text`-plus-`CHECK` column is both simpler
+to evolve and cast-friendly. `AttendanceLogSchemaTest` pins the `CHECK` value lists and the
+enum cases together so the two cannot drift.
+
+**`ip_address` is `text`, not Postgres `inet`.** The value is cast in the model; storing it
+as text keeps the column trivially portable and sidesteps `inet` literal handling, at the
+cost of the DB not validating IP shape — which the application does. `geo_lat`/`geo_lng` are
+`numeric(10,7)`, the same precision as the office `geofence_*` columns they are checked
+against.
+
+### The single-writer invariant
+
+**Exactly one class writes `attendance_logs`: `App\Actions\Attendance\RecordPunch`.** It
+snapshots the office, resolves the punch time (server-`now()` for self-service, the supplied
+timestamp for a manual HR entry), runs `PunchVerifier`, and appends the row — inside one
+transaction, the same one `EnsureIdempotency` opens for a keyed request. It only ever
+`create()`s; it never updates, deletes, or saves-over a row.
+
+Two guards make that trustworthy, the sibling of the `RecordEmploymentChange` cache-writer
+guard above:
+
+1. **`tests/Arch/ConventionsTest.php`'s *"only RecordPunch writes attendance_logs"*** greps
+   every file under `app/` that references `AttendanceLog` or `attendance_logs` for any write
+   form — `create(`, `new AttendanceLog`, `->update(`, `->delete(`, `->save(`,
+   `updateOrCreate(`, `firstOrCreate(`, `->upsert(`, and raw
+   `DB::table('attendance_logs')->insert/update/upsert/delete(` — and asserts
+   `RecordPunch.php` is the only match. The model definition and `app/Http/Resources/` (a
+   read-only presentation layer that structurally cannot write) are exempted.
+2. **`tests/Feature/Attendance/AppendOnlyTest.php`** proves the append-only property end to
+   end: it scans the registered route list and asserts no `PATCH`/`PUT`/`DELETE` route has
+   `attendance` in its URI (with a companion check that attendance routes *do* exist, so the
+   assertion is not vacuous), and it reads `RecordPunch.php` and asserts the sole writer
+   contains a `create(` and none of the mutating forms. Nothing else writes; the thing that
+   writes only appends.
+
+**No unique constraint that would reject a genuine double punch.** Idempotency (below)
+catches accidental *retries* by key; two genuinely distinct punches a second apart are both
+legal and both stored. The log is a ledger — M5's pairer decides what a sequence of punches
+means, and a `UNIQUE` here would throw away a real event to prevent a duplicate the
+idempotency layer already prevents at the right level.
+
+The composite index `(employee_id, punched_at)` serves the one query the read API and M5
+run: an employee's punches within a time range.
+
+## Idempotency keys *(M3)*
+
+Replay protection for mutating requests, ported from POS unchanged.
+
+```sql
+create table idempotency_keys (
+  key           text primary key,       -- the client-supplied Idempotency-Key
+  request_hash  text not null,          -- sha256(user + method + path + body)
+  response_code integer not null,
+  response_body jsonb not null,
+  created_at    timestamptz not null default now()
+);
+
+create index idempotency_keys_created_at on idempotency_keys (created_at);   -- pruning window
+```
+
+A client-generated key stores the original outcome so a retried request — a flaky mobile
+connection, a double-tap — replays the stored response instead of doing the work twice. The
+key row and the work it guards **commit in one transaction**, which the `EnsureIdempotency`
+middleware (aliased `idempotent`) opens and the nested action joins: either both the punch
+row and its key land, or neither does, so a stored key can never point at a row that was
+rolled back.
+
+**The hash folds in the acting user**, so a key is confined to whoever minted it — the same
+key replayed by a different user is a `409 idempotency_key_reused`, not a leak of the first
+user's cached response. Reusing a key with a *different* body is likewise `409`, because the
+key is a promise about one specific request, not a general mutex. Only a `2xx` response is
+stored; a failed request leaves no key, so a corrected retry can proceed. `created_at` and
+its index exist for a later pruning job — a key is only useful within a retry window.
+
+The self-service punch route requires an `Idempotency-Key` header (`03-api.md`); the manual
+HR route deliberately does not — an HR correction is a considered one-off, not a retryable
+network event.
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -346,3 +472,8 @@ Stated plainly, since these are the reasons for the constraints above:
   single-writer action.)
 - A period's past state cannot be rewritten by a later change. (Append-only history;
   `effective_to` derived, never stored, so no row is ever mutated to "close" it.)
+- An attendance punch cannot be edited or deleted, through the API or otherwise. A
+  correction is a new (manual) row. (`RecordPunch` is the sole writer and only `create`s; no
+  route mutates the table — arch guard + `AppendOnlyTest`.)
+- A retried mutation cannot write a second row or replay another user's response.
+  (`idempotency_keys`, user-scoped hash, key-and-row in one transaction.)

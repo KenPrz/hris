@@ -12,8 +12,9 @@ Design-first. Read in order; each assumes the one before it.
 | [05-rbac.md](05-rbac.md) | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. |
 | [06-roadmap.md](06-roadmap.md) | Milestones M0–M8, the invariants they're measured against, and the deferred table. |
 
-Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; all seven docs
-exist today.
+Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; M3 extended
+`02` (the `attendance_logs` ledger and `idempotency_keys`), `03` (the punch and read
+endpoints), and `06` (M3's status). All seven docs exist today.
 
 ## Design records
 
@@ -46,9 +47,13 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0, M1, and M2 are complete — the skeleton boots, the DOLE premium matrix is a green
-table-driven unit test, and the schema, auth, and office-scoped RBAC are built and proven
-by the four-actor scope matrix. `migrate:fresh --seed` produces a Manila/Cebu company you
-can log into as each of the four scopes. Next is M3 in [06-roadmap.md](06-roadmap.md): the
-first vertical slice — punch in, punch out, correct a day — where the design language also
-lands.
+M0 through M3 are complete — the skeleton boots, the DOLE premium matrix is a green
+table-driven unit test, the schema/auth/office-scoped RBAC are proven by the four-actor
+scope matrix, and timekeeping **ingestion** now turns a punch into an append-only,
+forensically intact `attendance_logs` row: self-service and manual-HR punch endpoints,
+idempotency ported from POS, flag-not-reject verification, and a raw month read grouped by
+office-local date — with the ledger provably append-only (`02-data-model.md`, `03-api.md`).
+`migrate:fresh --seed` produces a Manila/Cebu company you can log into as each of the four
+scopes, and `scripts/e2e-timekeeping.sh` walks the punch path end to end. Next is **M3.5**
+in [06-roadmap.md](06-roadmap.md): the frontend foundation — the IBM/Carbon design language,
+the auth UI, and the punch and attendance screens, built against M3's real API.

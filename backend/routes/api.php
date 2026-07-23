@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
+use App\Http\Controllers\Attendance\ListMyAttendanceController;
+use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
@@ -30,6 +34,10 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('/employees', ListEmployeesController::class);
         Route::get('/employees/{employee}', ShowEmployeeController::class);
+        Route::get('/employees/{employee}/attendance', ListEmployeeAttendanceController::class);
+
+        Route::get('/me/attendance', ListMyAttendanceController::class);
+        Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,
@@ -39,6 +47,10 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/employees', CreateEmployeeController::class);
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
+
+            // Manual entry is deliberately not behind `idempotent` — HR entering a
+            // correction is a considered one-off, not a retryable network event.
+            Route::post('/attendance/punch', ManualPunchController::class);
         });
     });
 });

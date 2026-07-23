@@ -172,6 +172,97 @@ A second change on the same `effective_from` is a domain failure, not a silent s
 `422 employment_record_exists`, with `employee_id` and `effective_from` in `details`
 (`02-data-model.md`).
 
+## Attendance *(M3)*
+
+The append-only punch ledger (`02-data-model.md`): every punch is a new row, nothing is ever
+edited or deleted, and a correction is a new (manual) row. There is deliberately **no**
+`PATCH`/`PUT`/`DELETE` under `attendance` — `AppendOnlyTest` asserts it.
+
+### Self-service punch
+
+```
+POST /api/v1/attendance/punch         # auth:sanctum; Idempotency-Key REQUIRED
+  Idempotency-Key: <client-generated string>
+  { "direction": "in" | "out" }
+  → 201 { data: { id, employee_id, office_id, punched_at, direction, source,
+                  verification, flag_reason } }
+```
+
+A signed-in employee clocks in or out. **The server sets `punched_at`** — always its own
+clock, never a client-supplied time, so no one can backdate their own punch — and stamps
+`source: web` and `recorded_by` = the caller's user id. The office it belongs to is snapshot
+from the employee's `current_office_id` at this instant (`02-data-model.md`).
+
+**The `Idempotency-Key` header is required**, folded into validation so a missing key is the
+ordinary `400 validation_failed`, not a silent bypass. A retry with the same key replays the
+stored response and writes **no second row**; the key and the row commit in one transaction.
+A user with no linked employee record cannot punch — `422 not_an_employee`.
+
+**Verification flags, it never rejects.** The punch IP is checked against the snapshot
+office's `ip_allowlist`; pass → `verification: verified`, fail → `verification: flagged`,
+`flag_reason: ip_not_allowlisted`. The geofence check is wired identically but fires only
+when `geo_lat`/`geo_lng` are present. **Either way the punch lands `201`** — the Labor Code
+cares that time was worked, not which network recorded it; a flag is metadata for HR to
+review, not a gate at the door. Promoting a flag to a hard block per office is a later change
+the `ip_allowlist` column already accommodates.
+
+### Manual HR entry — HR only, never self
+
+```
+POST /api/v1/admin/attendance/punch   # auth:sanctum + HR/admin actor; NOT idempotent
+  { "employee_id": "0199…", "direction": "in" | "out",
+    "punched_at": "2026-03-01T17:30:00+08:00" }   # supplied time REQUIRED
+  → 201 { data: { …, source: "manual", … } }
+```
+
+HR (or a system admin) records a punch **on an employee's behalf** — the path for
+login-less punch-only workers and for backfilling a gap when a device was down. It is the
+one path that accepts an explicit `punched_at`, because that is its whole purpose; the row
+carries `source: manual` and `recorded_by` = the HR user.
+
+This is **strictly an HR/admin tool, and never for your own record** — separation of duties,
+you do not enter your own time. Three boundaries, each a distinct status:
+
+```
+  → 403 forbidden          # a plain employee or manager: they may not manually punch at all
+  → 422 cannot_punch_self  # an HR/admin targeting their OWN employee record
+  → 404 not_found          # target employee is outside the actor's scope (an HR admin can
+                           #   only backfill within the offices they administer; a system
+                           #   admin can target anyone) — the 404-not-403 subject rule
+```
+
+`403` is an *actor* refusal (a non-HR caller — leaks no specific employee), while `404` is
+an out-of-scope *subject* (indistinguishable from nonexistent, per the M2 rule in
+`05-rbac.md`). The endpoint is not behind `idempotent`: an HR correction is a considered
+one-off, not a retryable network event.
+
+> **Note — self-corrections are a later milestone.** An employee fixing their *own* missed
+> punch does **not** go through this endpoint. That flows through a dedicated attendance
+> **adjustment request** (a note, an optional attachment, approved by the employee's
+> `reports_to` or HR), which is its own milestone (`06-roadmap.md`). M3 ships raw ingestion
+> only; it does not build the request/approval flow.
+
+### Reading a month of punches
+
+```
+GET /api/v1/me/attendance?month=YYYY-MM               # auth:sanctum — own punches
+GET /api/v1/employees/{employee}/attendance?month=    # auth:sanctum + EmployeeScope
+  → { data: { "2026-03-02": [ { id, employee_id, office_id, punched_at, direction,
+                                source, verification, flag_reason }, … ], … } }
+```
+
+Returns the raw `attendance_logs` rows **grouped by office-local calendar date** — each
+punch's `punched_at` (UTC) converted to *its snapshot office's* timezone, then bucketed by
+that local date; keys are `YYYY-MM-DD` strings, punches within a day ordered by time.
+`month` defaults to the current month if omitted.
+
+This is the **raw** ledger: because `direction` is explicit, the view labels "in / out" with
+**no pairing and no business-day logic** — a night shift's out-punch at 06:00 appears on its
+own local calendar date, honestly, and turning punches into paid hours is M5's job. Flagged
+punches appear here exactly as recorded. The employee-scoped variant reuses `EmployeeScope`
+and the 404-not-403 rule unchanged — an HR admin sees their office's punches, a manager
+their reports', and an out-of-scope subject `404`s.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -196,8 +287,11 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 403 | `forbidden` | An unauthorized **actor** (a non-admin hitting an admin route). |
 | 404 | `not_found` | A missing resource **or** an out-of-scope **subject** (the 404-not-403 rule). |
 | 405 | `method_not_allowed` | Wrong HTTP verb on a real route. |
+| 409 | `idempotency_key_reused` | An `Idempotency-Key` replayed with a *different* body, or by a *different* user than minted it (the hash folds in the acting user). |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
+| 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch or read their own attendance. |
+| 422 | `cannot_punch_self` | An HR/admin using the manual entry endpoint to record their *own* punch (separation of duties). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 
@@ -207,7 +301,14 @@ you). See `05-rbac.md`.
 
 ## What is not here yet
 
-Attendance, schedules, holidays, leave, cutoffs, and payroll export are their own
-milestones (`06-roadmap.md`); their endpoints land with them. The device ingestion contract
-for biometric hardware is specified from M3 in this document when the punch endpoint lands,
-so the deferred hardware integration needs a driver, not a redesign.
+Schedules, holidays, leave, cutoffs, and payroll export are their own milestones
+(`06-roadmap.md`); their endpoints land with them. So does the attendance **adjustment
+request** flow — an employee correcting their own missed punch, approved by their manager or
+HR — which is a later milestone, not part of M3's raw ingestion.
+
+The **device ingestion contract** for biometric hardware is exposed, not built: the punch
+payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —
+the shape a device's middleware would POST — but device *authentication* (a device registry
++ per-device tokens) and *batch* ingestion defer with the hardware that needs them. Both live
+punch paths are Sanctum-authed today; adding a device later is a new auth guard and a
+`source: device` path into the same `RecordPunch`, no schema change and no new writer.
