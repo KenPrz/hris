@@ -8,7 +8,11 @@ use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
 use App\Http\Controllers\Attendance\Adjustments\ApproveController as ApproveAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\CancelController as CancelAdjustmentController;
+use App\Http\Controllers\Attendance\Adjustments\DownloadAttachmentController;
+use App\Http\Controllers\Attendance\Adjustments\ListMineController as ListMineAdjustmentsController;
+use App\Http\Controllers\Attendance\Adjustments\ListPendingController as ListPendingAdjustmentsController;
 use App\Http\Controllers\Attendance\Adjustments\RejectController as RejectAdjustmentController;
+use App\Http\Controllers\Attendance\Adjustments\ShowController as ShowAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
@@ -47,6 +51,12 @@ Route::prefix('v1')->group(function (): void {
         // and not behind idempotency middleware (a considered one-off submission, not a
         // retryable network event).
         Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
+        Route::get('/attendance/adjustments', ListMineAdjustmentsController::class);
+
+        // /pending must be registered before the {request} show route below, or "pending"
+        // is captured as a {request} route-model-binding id (a UUID column, so it would
+        // 404 via ModelNotFoundException rather than ever reaching ListPendingController).
+        Route::get('/attendance/adjustments/pending', ListPendingAdjustmentsController::class);
 
         // Transitions on the shared requests spine. Any authorized approver or the
         // requester themself may act — authority is enforced inside the actions
@@ -55,6 +65,12 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/attendance/adjustments/{request}/approve', ApproveAdjustmentController::class);
         Route::post('/attendance/adjustments/{request}/reject', RejectAdjustmentController::class);
         Route::post('/attendance/adjustments/{request}/cancel', CancelAdjustmentController::class);
+
+        // Show and the attachment stream share one visibility check (requester, or an
+        // authorized approver) — see ShowController/DownloadAttachmentController. The
+        // attachment route stays a private, app-mediated stream, never a public/object URL.
+        Route::get('/attendance/adjustments/{request}', ShowAdjustmentController::class);
+        Route::get('/attendance/adjustments/{request}/attachment', DownloadAttachmentController::class);
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,
