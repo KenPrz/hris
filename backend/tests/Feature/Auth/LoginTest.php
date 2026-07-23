@@ -32,6 +32,20 @@ it('gives the same answer for an unknown email as for a wrong password', functio
         ->assertJsonPath('error.code', 'invalid_credentials');
 });
 
+it('returns a byte-identical body for an unknown email and a wrong password', function (): void {
+    // The response body (status + JSON) must be indistinguishable so the endpoint cannot be
+    // used to enumerate accounts. The || in the controller must not short-circuit Hash::check
+    // for a missing user either, or the two paths would differ in timing even with an
+    // identical body — see LoginController.
+    User::factory()->create(['email' => 'maria@delsan.test', 'password' => Hash::make('secret-pw')]);
+
+    $wrongPassword = $this->postJson('/api/v1/login', ['email' => 'maria@delsan.test', 'password' => 'wrong']);
+    $unknownEmail = $this->postJson('/api/v1/login', ['email' => 'nobody@delsan.test', 'password' => 'whatever']);
+
+    expect($unknownEmail->getStatusCode())->toBe($wrongPassword->getStatusCode());
+    expect($unknownEmail->getContent())->toBe($wrongPassword->getContent());
+});
+
 it('rate-limits repeated login attempts', function (): void {
     User::factory()->create(['email' => 'maria@delsan.test', 'password' => Hash::make('secret-pw')]);
 
