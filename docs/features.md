@@ -81,7 +81,7 @@ before any of it was wired to a button.
   (with a required real name), and recording an employment change are all done by a system
   administrator, through the app.
 
-## Timekeeping *(M3 — in progress)*
+## Timekeeping *(M3)*
 
 - **An attendance record that is never rewritten.** Every punch is a permanent, dated row —
   a clock-in, a clock-out — kept exactly as it happened. A correction is a new entry, never

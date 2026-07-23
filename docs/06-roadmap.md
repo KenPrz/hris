@@ -330,6 +330,62 @@ provably append-only. `scripts/e2e-timekeeping.sh` proves it end to end.
 **M3 explicitly does NOT own** pairing, business-day attribution (a night shift's 06:00
 out-punch), missing-clock-out detection, or any pay computation — all compute-time (M5).
 
+**Status: complete.** A seeded employee punches in and out (idempotent under a retried key),
+an off-network punch lands `flagged` rather than refused, HR backfills a missed punch as
+`manual` within their scope, and `GET /me/attendance?month=` returns them grouped by
+office-local date — over a ledger provably append-only. **199 backend tests** (M0–M2's 163 +
+M3's feature/unit + the arch suite, 16 of which mechanically pin the invariants), plus
+`scripts/e2e-timekeeping.sh`, which walks the whole path against the running API. What the
+building turned on and reconciled to, for whoever extends ingestion next:
+
+- **The ledger is append-only, proven two ways at once.** `RecordPunch` is the *only* writer
+  (a grep-based arch guard, `only RecordPunch writes attendance_logs`, matches every write
+  form — `create`, `new`, `->update`/`->delete`/`->save`, `updateOrCreate`/`firstOrCreate`,
+  `->upsert`, raw `DB::table('attendance_logs')->insert/update/upsert/delete` — and asserts
+  it is the sole match), and it only ever `create`s. `AppendOnlyTest` closes the loop: no
+  `PATCH`/`PUT`/`DELETE` route exists anywhere under `attendance`, and the sole writer
+  contains no mutating form. Nothing else writes; the thing that writes only appends.
+- **Enums are `text` columns + PHP backed enums + `CHECK` constraints** — the M2
+  `DayType`/`employment_type` pattern, never a Postgres native enum (adding a value to which
+  is an `ALTER TYPE` dance). `direction`/`source`/`verification` cast in the model; a schema
+  test pins the `CHECK` lists against the enum cases so they cannot drift.
+- **`office_id` is a snapshot**, captured from `current_office_id` at ingestion, so a later
+  transfer never reinterprets an old punch's timezone or geofence. The same discipline the
+  current-state cache uses, for the same reason.
+- **Idempotency is ported from POS with a user-scoped hash.** The key and the row commit in
+  one transaction (the middleware opens it, `RecordPunch` joins it); the hash folds in the
+  acting user, so a key replayed by a different user — or with a different body — is
+  `409 idempotency_key_reused`, never a leak of the first user's cached response. Only `2xx`
+  stores a key. The self-service route requires the header (a missing key is
+  `400 validation_failed`); the manual route deliberately is not idempotent.
+- **Verification flags, never rejects.** An off-allowlist IP lands `flagged` /
+  `ip_not_allowlisted` with a `201`, never a 4xx — the Labor Code cares that time was worked,
+  not which network recorded it. The seeder gives the Manila office an `ip_allowlist` so this
+  path has live data; Cebu has none, so its punches are `verified` unconditionally.
+- **Manual entry is HR-only-never-self.** A plain employee/manager cannot manually punch at
+  all (`403`, an actor refusal); an HR/admin targeting their *own* record is
+  `422 cannot_punch_self` (separation of duties — you do not enter your own time); an
+  out-of-scope target is `404` (the subject rule). This differs from the spec's original
+  "scoped by `EmployeeScope`" line, which described only the scope dimension; the built
+  endpoint adds the actor and self checks. **Self-corrections are a separate milestone:** an
+  employee fixing their own missed punch goes through an attendance **adjustment request**
+  (note + optional attachment, approved by `reports_to` or HR), which M3 does *not* build.
+- **The read is the raw ledger, grouped by office-local date, with no pairing.** Each punch
+  converts to *its snapshot office's* timezone and buckets by that local date, so a
+  cross-midnight out-punch lands on its own calendar day — honest, and interpretation is M5's
+  job. The device contract (`source`/`device_id`/geo/idempotency) is exposed in the payload
+  but device auth and batch ingestion defer with the hardware.
+- **Known wall to carry into M5: the manual endpoint drops a supplied UTC offset.**
+  `ManualPunchController` does `Carbon::parse($punched_at)`, then the model's `datetime` cast
+  formats it in the app timezone (UTC) *without* first converting an offset-aware value — the
+  classic Laravel gotcha — so `2026-07-01T08:00:00+08:00` (00:00Z) is stored as `08:00Z`, an
+  8-hour error. Self-service is unaffected (it uses server `now()`, already UTC).
+  `ManualPunchTest` asserts `source`/`direction`/`recorded_by`/scope but never the stored
+  *instant*, so the suite is green over it. For the current raw-read-by-date feature the
+  punch still lands on the right calendar day for a mid-day time, but a near-midnight backfill
+  would bucket a day off. Flagged here rather than fixed in this milestone — the fix is to
+  normalize to UTC before the write, with a test that pins the stored instant.
+
 ### Milestones resequenced after M2
 
 | Was | Now |

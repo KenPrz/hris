@@ -60,6 +60,12 @@ final class CompanySeeder extends Seeder
             'name' => 'Manila HQ',
             'code' => 'MNL',
             'timezone' => 'Asia/Manila',
+            // Manila enforces an office network so M3's flag-not-reject path has live data:
+            // a self-service punch from off this /24 lands `flagged` (never refused), while a
+            // manual HR backfill — which carries no request IP — stays `verified`. Cebu has
+            // no allowlist, so its punches are `verified` unconditionally. A documentation
+            // range (RFC 5737 TEST-NET-3), never a real network. See scripts/e2e-timekeeping.sh.
+            'ip_allowlist' => ['203.0.113.0/24'],
         ]);
         $cebu = Office::create([
             'organization_id' => $org->id,
