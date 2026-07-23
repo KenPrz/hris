@@ -55,6 +55,34 @@ it('rejects a state outside the CHECK', function (): void {
 });
 
 it('keeps the CHECK lists in sync with the enum cases', function (): void {
+    // Golden list — documents the intended values and catches an enum rename.
     expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment'])
         ->and(array_map(fn ($c) => $c->value, RequestState::cases()))->toBe(['pending', 'approved', 'rejected', 'cancelled']);
+
+    // Live-constraint parity — reads the actual CHECK from Postgres so the migration's
+    // value list cannot drift from the enum independently (adding a case without widening
+    // the CHECK, or vice versa, fails here).
+    $checkValues = function (string $constraint): array {
+        $def = DB::selectOne(
+            'SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = ?',
+            [$constraint],
+        );
+
+        expect($def)->not->toBeNull("constraint {$constraint} should exist");
+
+        preg_match_all("/'([^']+)'/", $def->def, $m);
+
+        return array_values(array_unique($m[1]));
+    };
+
+    $sorted = function (array $v): array {
+        sort($v);
+
+        return $v;
+    };
+
+    expect($sorted($checkValues('requests_type_check')))
+        ->toBe($sorted(array_map(fn ($c) => $c->value, RequestType::cases())))
+        ->and($sorted($checkValues('requests_state_check')))
+        ->toBe($sorted(array_map(fn ($c) => $c->value, RequestState::cases())));
 });
