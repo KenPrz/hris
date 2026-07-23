@@ -333,7 +333,7 @@ out-punch), missing-clock-out detection, or any pay computation — all compute-
 **Status: complete.** A seeded employee punches in and out (idempotent under a retried key),
 an off-network punch lands `flagged` rather than refused, HR backfills a missed punch as
 `manual` within their scope, and `GET /me/attendance?month=` returns them grouped by
-office-local date — over a ledger provably append-only. **199 backend tests** (M0–M2's 163 +
+office-local date — over a ledger provably append-only. **201 backend tests** (M0–M2's 163 +
 M3's feature/unit + the arch suite, 16 of which mechanically pin the invariants), plus
 `scripts/e2e-timekeeping.sh`, which walks the whole path against the running API. What the
 building turned on and reconciled to, for whoever extends ingestion next:
@@ -375,16 +375,16 @@ building turned on and reconciled to, for whoever extends ingestion next:
   cross-midnight out-punch lands on its own calendar day — honest, and interpretation is M5's
   job. The device contract (`source`/`device_id`/geo/idempotency) is exposed in the payload
   but device auth and batch ingestion defer with the hardware.
-- **Known wall to carry into M5: the manual endpoint drops a supplied UTC offset.**
-  `ManualPunchController` does `Carbon::parse($punched_at)`, then the model's `datetime` cast
-  formats it in the app timezone (UTC) *without* first converting an offset-aware value — the
-  classic Laravel gotcha — so `2026-07-01T08:00:00+08:00` (00:00Z) is stored as `08:00Z`, an
-  8-hour error. Self-service is unaffected (it uses server `now()`, already UTC).
-  `ManualPunchTest` asserts `source`/`direction`/`recorded_by`/scope but never the stored
-  *instant*, so the suite is green over it. For the current raw-read-by-date feature the
-  punch still lands on the right calendar day for a mid-day time, but a near-midnight backfill
-  would bucket a day off. Flagged here rather than fixed in this milestone — the fix is to
-  normalize to UTC before the write, with a test that pins the stored instant.
+- **A supplied UTC offset was being dropped — found and fixed in this milestone.** A manual
+  entry supplying `2026-07-01T08:00:00+08:00` (the instant `00:00Z`) was stored as `08:00Z`,
+  an 8-hour error: the model's `datetime` cast formatted the offset-aware Carbon in the app
+  timezone *without* first normalizing to UTC — the classic Laravel gotcha. It slipped through
+  Task 6 because `ManualPunchTest` asserted `source`/`direction`/`recorded_by`/scope but never
+  the stored *instant*. `RecordPunch` — the one writer — now normalizes with `->utc()` before
+  the write, and new tests pin the stored instant at the DB layer (a raw
+  `DB::table('attendance_logs')->value('punched_at')` read), for both a supplied offset and the
+  server-now path. The lesson for M5: assert the stored *instant*, never just the wire string
+  or the rendered date.
 
 ### Milestones resequenced after M2
 
