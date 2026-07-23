@@ -42,12 +42,46 @@ it('provisions a login for an existing employee', function (): void {
     Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
 
     $this->postJson("/api/v1/admin/employees/{$employee->id}/user", [
+        'name' => 'New Hire',
         'email' => 'newhire@delsan.test',
         'password' => 'provisioned-pw',
     ])->assertCreated();
 
     expect($employee->refresh()->user)->not->toBeNull()
-        ->and($employee->user->email)->toBe('newhire@delsan.test');
+        ->and($employee->user->email)->toBe('newhire@delsan.test')
+        ->and($employee->user->name)->toBe('New Hire');
+});
+
+it('refuses to provision a login for an employee who already has one', function (): void {
+    $employee = Employee::factory()->for(User::factory())->create();
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+
+    $this->postJson("/api/v1/admin/employees/{$employee->id}/user", [
+        'name' => 'New Hire',
+        'email' => 'newhire@delsan.test',
+        'password' => 'provisioned-pw',
+    ])->assertStatus(422)->assertJsonPath('error.code', 'employee_already_has_login');
+});
+
+it('records an employment change for an existing employee over HTTP', function (): void {
+    $org = Organization::factory()->create();
+    $office = Office::factory()->for($org)->create();
+    $dept = Department::factory()->for($office)->create();
+    $employee = Employee::factory()->for($org)->create(['current_office_id' => null]);
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+
+    $this->postJson("/api/v1/admin/employees/{$employee->id}/employment", [
+        'effective_from' => '2026-02-01',
+        'office_id' => $office->id,
+        'department_id' => $dept->id,
+        'employment_type' => 'regular',
+        'is_art82_exempt' => false,
+        'base_rate_cents' => 61000,
+    ])->assertCreated();
+
+    $employee->refresh();
+    expect($employee->employmentRecords)->toHaveCount(1)
+        ->and($employee->current_office_id)->toBe($office->id);
 });
 
 it('forbids a non-admin from creating employees', function (): void {
