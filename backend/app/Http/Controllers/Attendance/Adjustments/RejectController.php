@@ -17,9 +17,9 @@ final class RejectController
     // $http is the FormRequest; $request is the route-bound App\Models\Request.
     public function __invoke(RejectAdjustmentRequest $http, Request $request, RejectRequest $action): JsonResponse
     {
-        $decisionNote = $http->string('decision_note')->toString();
+        $decisionNote = $http->input('decision_note');
 
-        $result = $action->execute($request, $http->user(), $decisionNote);
+        $result = $action->execute($request, $http->user(), is_string($decisionNote) ? $decisionNote : null);
 
         return RequestResource::make($result)->response();
     }

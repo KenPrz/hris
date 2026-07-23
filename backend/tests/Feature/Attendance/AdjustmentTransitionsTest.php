@@ -178,6 +178,62 @@ it('400s a reject with no decision_note', function (): void {
     expect($request->fresh()->state)->toBe(RequestState::Pending);
 });
 
+it('404s when an out-of-scope employee tries to reject WITH a valid note — existence must not leak', function (): void {
+    $office = officeForAdjustments();
+    [, $requester] = employeeWithUser($office);
+    $request = pendingAddRequest($requester);
+
+    $otherOffice = officeForAdjustments();
+    [$unrelatedUser] = employeeWithUser($otherOffice);
+
+    Sanctum::actingAs($unrelatedUser);
+
+    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [
+        'decision_note' => 'Not enough evidence.',
+    ])
+        ->assertStatus(404)
+        ->assertJsonPath('error.code', 'not_found');
+
+    expect($request->fresh()->state)->toBe(RequestState::Pending);
+});
+
+it('404s (never 400) when an out-of-scope employee rejects with an EMPTY body — the existence-leak case', function (): void {
+    $office = officeForAdjustments();
+    [, $requester] = employeeWithUser($office);
+    $request = pendingAddRequest($requester);
+
+    $otherOffice = officeForAdjustments();
+    [$unrelatedUser] = employeeWithUser($otherOffice);
+
+    Sanctum::actingAs($unrelatedUser);
+
+    // Before the fix, FormRequest validation of decision_note ran BEFORE the action's
+    // authority check, so an out-of-scope prober sending an empty body got 400
+    // validation_failed — proof the request exists — instead of the 404 an unauthorized
+    // actor must always see, indistinguishable from a nonexistent request.
+    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [])
+        ->assertStatus(404)
+        ->assertJsonPath('error.code', 'not_found');
+
+    expect($request->fresh()->state)->toBe(RequestState::Pending);
+});
+
+it('409s a reject of an already-decided (approved) request even with no note', function (): void {
+    $office = officeForAdjustments();
+    [$managerUser, $manager] = employeeWithUser($office);
+    [, $requester] = employeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    $request = pendingAddRequest($requester);
+
+    Sanctum::actingAs($managerUser);
+    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")->assertOk();
+
+    // Already approved, and no decision_note in the body: pending-ness (409) still wins
+    // over note-validation (400) — the ordering is authority -> pending -> note.
+    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [])
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'request_not_pending');
+});
+
 it('lets the requester cancel their own pending request', function (): void {
     $office = officeForAdjustments();
     [$requesterUser, $requester] = employeeWithUser($office);
