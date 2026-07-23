@@ -91,6 +91,15 @@ test('only RecordEmploymentChange writes the employment cache columns', function
     // `where('current_office_id', '=', $x)` and relation definitions like
     // `belongsTo(Employee::class, 'current_reports_to_id')` — a quoted string followed by
     // `)`, never `=>` or `=` — are left alone.
+    //
+    // The mass-assignment form ('col' => ...) is textually identical whether it is a write
+    // (Employee::create(['current_office_id' => $x])) or a read used to shape output
+    // (['current_office_id' => $employee->current_office_id] in a JsonResource). A
+    // JsonResource is a read-only presentation layer that structurally cannot call
+    // create()/update()/fill()/save(), so a 'col' => in app/Http/Resources is always a
+    // read-mapping, never a write — that sub-pattern is skipped there. The property and
+    // setAttribute forms genuinely indicate a write anywhere, including an accidental one
+    // in a Resource, so those stay global.
     $columns = ['current_office_id', 'current_department_id', 'current_reports_to_id'];
 
     $writers = [];
@@ -102,18 +111,26 @@ test('only RecordEmploymentChange writes the employment cache columns', function
 
     foreach ($files as $file) {
         $contents = $file->getContents();
+        $isResource = str_contains(str_replace('\\', '/', $file->getRelativePathname()), 'Http/Resources/');
 
         foreach ($columns as $column) {
             $quoted = preg_quote($column, '/');
 
-            $pattern = '/'
-                .'[\'"]'.$quoted.'[\'"]\s*=>'          // mass assignment: 'col' => ...
-                .'|->'.$quoted.'\b\s*=(?!=|>)'         // property assignment: ->col = (not ==, ===, =>)
-                .'|setAttribute\(\s*[\'"]'.$quoted.'[\'"]' // setAttribute('col', ...)
-                .'/';
+            $patterns = [
+                '/->'.$quoted.'\b\s*=(?!=|>)/',                    // property assignment: ->col = (not ==, ===, =>)
+                '/setAttribute\(\s*[\'"]'.$quoted.'[\'"]/',        // setAttribute('col', ...)
+            ];
 
-            if (preg_match($pattern, $contents) === 1) {
-                $writers[$file->getRelativePathname()] = true;
+            if (! $isResource) {
+                $patterns[] = '/[\'"]'.$quoted.'[\'"]\s*=>/';      // mass assignment: 'col' => ...
+            }
+
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $contents) === 1) {
+                    $writers[$file->getRelativePathname()] = true;
+
+                    break 2;
+                }
             }
         }
     }

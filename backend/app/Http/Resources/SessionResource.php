@@ -7,7 +7,6 @@ namespace App\Http\Resources;
 use App\Actions\Auth\SessionData;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Arr;
 
 /** @mixin SessionData */
 final class SessionResource extends JsonResource
@@ -23,12 +22,12 @@ final class SessionResource extends JsonResource
                 'email' => $s->user->email,
                 'name' => $s->user->name,
             ],
-            // Arr::only reads a subset of the employment cache columns; it never assigns
-            // them. See ConventionsTest — only RecordEmploymentChange is allowed to write
-            // those columns, and its grep is text-based, so this stays a plain read.
-            'employee' => $s->employee === null ? null : Arr::only($s->employee->toArray(), [
-                'id', 'employee_no', 'current_office_id', 'current_department_id',
-            ]),
+            'employee' => $s->employee === null ? null : [
+                'id' => $s->employee->id,
+                'employee_no' => $s->employee->employee_no,
+                'current_office_id' => $s->employee->current_office_id,
+                'current_department_id' => $s->employee->current_department_id,
+            ],
             'is_system_admin' => $s->isSystemAdmin,
             'has_reports' => $s->hasReports,
             'hr_offices' => $s->hrOffices,
