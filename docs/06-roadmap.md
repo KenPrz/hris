@@ -187,7 +187,8 @@ the matrix next:
 - All migrations from `02-data-model.md`, including partial indexes and check constraints.
   Three tiers as explicit FKs (`organizations` → `offices` → `departments`), never a tree,
   so office scoping stays a plain `WHERE office_id = ?`.
-- `employees` with `reports_to_id` (self-FK) and denormalized `organization_id`.
+- `employees` with a denormalized `organization_id` and `current_reports_to_id` — a
+  self-FK cache of the effective-dated `reports_to_id` that lives on `employment_records`.
 - `employment_records` — effective-dated. `is_art82_exempt`, `employment_type`, and base
   rate change mid-career, and a promotion must not retroactively strip last month's
   overtime.
@@ -203,8 +204,10 @@ the matrix next:
   primary key and therefore `NOT NULL`.
 - `app/Domain/Scope/EmployeeScope` — returns a **query constraint, not a boolean**, so it
   composes into every index query and there is exactly one place the boundary is defined.
-- Policies: `EmployeePolicy`, `RequestPolicy`, `SchedulePolicy`, `HolidayPolicy`,
-  `PayRulePolicy`. Each checks the verb via `can()` **and** the subject via `EmployeeScope`.
+- Policies: only `EmployeePolicy` ships end to end in M2, as the proof of the two-check
+  shape (verb via `can()` **and** subject via `EmployeeScope`); `RequestPolicy`,
+  `SchedulePolicy`, `HolidayPolicy`, and `PayRulePolicy` arrive with their features in
+  M4–M6, built on the same shape.
 - `spatie/laravel-activitylog` installed; logging happens inside actions, never in model
   observers — an observer fires for seeders and migrations too, and pollutes the trail HR
   will one day be asked to defend.
