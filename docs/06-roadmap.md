@@ -291,42 +291,72 @@ turned on — for whoever extends the schema next:
   Refusals are **404 for out-of-scope subjects, 403 for unauthorized actors** — the
   four-actor matrix asserts both shapes, and that matrix is the milestone's proof.
 
-## M3 — Vertical slice: punch in, punch out, correct day
+## M3 — Timekeeping ingestion
 
-The thinnest end-to-end proof, and the milestone where the design language lands. It runs
-against M2's *seeded* schedules and holidays; making those admin-editable is M4's job.
+Punch ingestion and nothing downstream of it: turning a punch into an append-only,
+forensically intact row in `attendance_logs`. See
+`docs/superpowers/specs/2026-07-24-m3-timekeeping-ingestion-design.md`.
 
-- **Design language.** `npx getdesign@latest add ibm` → root `DESIGN.md` (the authority)
-  → hand-written `src/styles/carbon.css` `@theme` block. Tokens enter code in exactly one
-  place. `--radius: 0px` is the brand.
-- Tier-1 `components/ui/*` and tier-2 generics (`DataTable`, `StatusPill`, `EmptyState`,
-  `ConfirmDialog`, `SectionHeader`, `FieldRow`, `StatCard`, `AppSidebar`), ported from POS.
-- Domain components: `<MonthCalendar>`, `<DayCell>`, `<Duration>`, `<DayTypeTag>`.
-- `lib/api.ts` (unwraps `{data}`, throws typed `ApiError` from `{error}`), `lib/keys.ts`
-  (the query-key factory — the only place a key string is written), `lib/date.ts`.
-- `EnsureIdempotency` middleware, ported from POS. Punches need it from the first day:
-  a mobile client on a flaky connection retries, and a double punch is a double day.
-- `POST /api/v1/attendance/punch` — self-service, Sanctum-authed, `Idempotency-Key`
-  required, records source (`web`) and metadata (IP against the office allowlist).
-- `ComputeDailySummary` action → a `daily_attendance_summaries` row carrying the full
-  breakdown in integer minutes and basis points, plus `rule_version_id` pinning which
-  effective-dated `pay_rules` row produced it.
-- `GET /api/v1/me/attendance?month=` and `/me` with the punch card and the calendar.
+**Rescoped from the original "vertical slice."** That slice reached a full computed pay
+breakdown, which needs holidays, schedules, and `pay_rules` — none of which exist (M2 built
+org/employees/RBAC only; the earlier "runs against M2's seeded schedules and holidays" line
+was a stale assumption). Rather than pull the configuration layer forward, the compute
+engine is resequenced to land *after* its inputs, and the frontend becomes its own
+milestone. See the resequencing table below.
 
-**Done when:** clock in at 13:00 and out at 23:30 on a seeded regular holiday that falls on
-a rest day, and the calendar shows — from a 10h 30m span, less the 1h unpaid meal break —
-8h at 260%, then 1h 30m of overtime that is *also* inside the night window and therefore
-lands at 371.8% (200% × 130% rest day × 130% overtime × 110% night differential). One
-worked day that exercises the entire matrix at once. `scripts/e2e-workday.sh` proves it
-end to end.
+- `attendance_logs` — append-only ledger: `punched_at` (timestamptz UTC), `direction`
+  (`in`/`out`, explicit), `source` (`web`/`manual`/`device`), `verification`
+  (`verified`/`flagged`) + `flag_reason`, a **snapshot** `office_id`, `recorded_by`, and
+  device/geo metadata columns. String columns + PHP backed enums + `CHECK` constraints (the
+  M2 `DayType` pattern), never a Postgres native enum.
+- `RecordPunch` — the one writer (arch-guarded). Self-service stamps server time
+  (`source: web`); manual HR entry accepts an explicit time (`source: manual`,
+  `recorded_by`), scoped by `EmployeeScope`.
+- `EnsureIdempotency` middleware, ported from POS. `Idempotency-Key` required — a retry
+  replays and writes no second row; the key and the row commit together.
+- Verification is **flag, never reject**: an off-allowlist IP lands `flagged`, never a 4xx,
+  because the Labor Code cares that time was worked, not which network recorded it.
+- The **device contract is exposed, not built**: the payload accepts `source`/`device_id`/
+  geo/idempotency, but device auth and batch ingestion defer with the hardware.
+- `GET /api/v1/me/attendance?month=` and the scoped `/employees/{employee}/attendance` —
+  raw punches grouped by office-local calendar date, labelled from the explicit direction,
+  **no pairing and no business-day logic** (that is M5).
 
-**Why the design language here and not later:** POS did its UI rework as a separate
-milestone after six screens existed, and paid for it — the rework doc is a list of screens
-re-skinned. Four screens of debt is cheaper than sixty.
+**Done when:** a seeded employee punches in and out (idempotent under retry), an off-network
+punch lands flagged rather than refused, HR backfills a missed punch as `manual`, and
+`GET /me/attendance?month=` returns them grouped by office-local date — with the raw log
+provably append-only. `scripts/e2e-timekeeping.sh` proves it end to end.
+
+**M3 explicitly does NOT own** pairing, business-day attribution (a night shift's 06:00
+out-punch), missing-clock-out detection, or any pay computation — all compute-time (M5).
+
+### Milestones resequenced after M2
+
+| Was | Now |
+| --- | --- |
+| M3 — vertical slice (ingest → compute → calendar) | M3 — Timekeeping ingestion (above) |
+| — | **M3.5 — Frontend foundation**: the IBM/Carbon design language, tier-1/2 components, `lib/api.ts`/`keys.ts`/`date.ts`, the auth UI, and the punch + attendance screens, built against M3's real API |
+| M4 — Configuration spine | M4 — Configuration spine (unchanged in content) |
+| M5 — Requests & approvals | **M5 — Compute engine**: `ComputeDailySummary` → `daily_attendance_summaries`, consuming M3's punches and M4's config |
+| M6 — Cutoffs & payroll export | M6 — Requests & approvals |
+| M7 — Admin portal & audit | M7 — Cutoffs & payroll export |
+| M8 — Containerization | (folds into the earlier milestones; final hardening as needed) |
+
+The compute engine moves after the configuration spine because it reads schedules,
+holidays, and `pay_rules` to resolve a day-type, a rest day, scheduled hours, and a
+multiplier. Building it against seeded stubs M4 then reshapes would mean building the
+system's highest-stakes code twice.
+
+**The resequencing table above is the authority for milestone order.** The detailed
+sections below (`## M5` onward) still carry their *pre-resequencing* titles and content —
+"Requests and approvals," "Cutoffs," and so on. Each is renumbered and re-specced through
+its own brainstorm when it is reached (as M3 was here); until then, read the table for
+order and the sections below for the substance of each unit of work, not their heading
+number.
 
 ## M4 — Configuration spine
 
-Everything M3 read from seeders becomes admin-editable, per office.
+Everything M3.5 and M5 will read becomes admin-editable, per office.
 
 - Holiday calendar CRUD per office per year, with clone-from-previous-year. PH holidays
   are set by **annual presidential proclamation** — the dates move, Eid'l Fitr and Eid'l
