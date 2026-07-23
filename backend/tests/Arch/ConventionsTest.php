@@ -47,9 +47,19 @@ arch('the domain layer never reads configuration')
 arch('domain value objects are final')
     ->expect('App\Domain')
     ->toBeClasses()
-    ->ignoring('App\Domain\Pay\DayType')
+    ->ignoring([
+        'App\Domain\Pay\DayType',
+        'App\Domain\Attendance\PunchDirection',
+        'App\Domain\Attendance\PunchSource',
+        'App\Domain\Attendance\PunchVerification',
+    ])
     ->toBeFinal()
-    ->ignoring('App\Domain\Pay\DayType');
+    ->ignoring([
+        'App\Domain\Pay\DayType',
+        'App\Domain\Attendance\PunchDirection',
+        'App\Domain\Attendance\PunchSource',
+        'App\Domain\Attendance\PunchVerification',
+    ]);
 
 arch('controllers are final single-action classes')
     ->expect('App\Http\Controllers')
