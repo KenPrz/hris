@@ -14,13 +14,19 @@ Design-first. Read in order; each assumes the one before it.
 
 Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; M3 extended
 `02` (the `attendance_logs` ledger and `idempotency_keys`), `03` (the punch and read
-endpoints), and `06` (M3's status). All seven docs exist today.
+endpoints), and `06` (M3's status). M3.6 extended `02` (the `requests` spine,
+`attendance_adjustment_details`, `attendance_annulments`, the effective-ledger definition,
+and the Media Library `media` table), `03` (the adjustment submit/decide/read endpoints),
+`06` (M3.6's status), and `features.md` (filing and approving a correction). All seven docs
+exist today.
 
 ## Design records
 
 | Spec | Covers |
 | --- | --- |
 | [superpowers/specs/2026-07-23-hris-foundation-design.md](superpowers/specs/2026-07-23-hris-foundation-design.md) | The decisions v1 is built on, and where HRIS deliberately diverges from POS. |
+| [superpowers/specs/2026-07-24-m3-timekeeping-ingestion-design.md](superpowers/specs/2026-07-24-m3-timekeeping-ingestion-design.md) | M3: turning a punch into an append-only ledger row. |
+| [superpowers/specs/2026-07-24-attendance-adjustments-design.md](superpowers/specs/2026-07-24-attendance-adjustments-design.md) | M3.6: the shared `requests` spine, the annulment model, and the effective ledger. |
 
 ## The five-line version
 
@@ -47,13 +53,18 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0 through M3 are complete — the skeleton boots, the DOLE premium matrix is a green
+M0 through M3.6 are complete — the skeleton boots, the DOLE premium matrix is a green
 table-driven unit test, the schema/auth/office-scoped RBAC are proven by the four-actor
-scope matrix, and timekeeping **ingestion** now turns a punch into an append-only,
-forensically intact `attendance_logs` row: self-service and manual-HR punch endpoints,
-idempotency ported from POS, flag-not-reject verification, and a raw month read grouped by
-office-local date — with the ledger provably append-only (`02-data-model.md`, `03-api.md`).
-`migrate:fresh --seed` produces a Manila/Cebu company you can log into as each of the four
-scopes, and `scripts/e2e-timekeeping.sh` walks the punch path end to end. Next is **M3.5**
-in [06-roadmap.md](06-roadmap.md): the frontend foundation — the IBM/Carbon design language,
-the auth UI, and the punch and attendance screens, built against M3's real API.
+scope matrix, timekeeping **ingestion** turns a punch into an append-only, forensically
+intact `attendance_logs` row, and an employee can now **correct their own attendance**
+through a request a manager or HR approves — `add`/`void`/`amend`, a required note, an
+optional RustFS-backed attachment via Media Library, the correction superseding the ledger
+via an append-only annulment record rather than ever editing a punch
+(`02-data-model.md`, `03-api.md`). `migrate:fresh --seed` produces a Manila/Cebu company you
+can log into as each of the four scopes (with a seeded punch pair ready to void or amend),
+`scripts/e2e-timekeeping.sh` walks the punch path end to end, and
+`scripts/e2e-adjustments.sh` walks a correction from submission through approval to the
+ledger. **266 backend tests, 17 arch tests, 16 frontend tests.** Next is **M3.5** in
+[06-roadmap.md](06-roadmap.md): the frontend foundation — the IBM/Carbon design language,
+the auth UI, and the punch and attendance screens, built against the real API M3 and M3.6
+now expose.

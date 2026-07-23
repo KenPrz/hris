@@ -457,6 +457,162 @@ network event.
 
 ---
 
+## Requests, adjustments, and the annulment ledger *(M3.6)*
+
+An employee correcting their **own** attendance goes through a request, not a self-service
+punch — `RecordPunch`'s self-service route stamps server-now and cannot backdate; a missed
+or wrong punch instead needs a note, an optional attachment, and someone else's approval.
+See `docs/superpowers/specs/2026-07-24-attendance-adjustments-design.md`.
+
+```sql
+create table requests (
+  id            uuid primary key default uuidv7(),
+  type          text not null,                    -- 'attendance_adjustment' (widens later)
+  employee_id   uuid not null references employees(id),   -- the requester
+  state         text not null default 'pending',  -- 'pending'|'approved'|'rejected'|'cancelled'
+  note          text not null,                     -- required on submission
+  decided_by    uuid references users(id),
+  decided_at    timestamptz,
+  decision_note text,                              -- required on rejection (app-enforced)
+  created_at    timestamptz not null,
+  updated_at    timestamptz not null,
+
+  check (type  in ('attendance_adjustment')),
+  check (state in ('pending','approved','rejected','cancelled'))
+);
+
+create index requests_employee_id_state_index on requests (employee_id, state);
+create index requests_type_state_index on requests (type, state);   -- the approval queue query
+```
+
+**The shared spine.** `requests` is deliberately generic — leave and overtime (later
+milestones) reuse this same table and its `pending → approved | rejected | cancelled` state
+machine rather than each growing a parallel one. Every type gets its own 1:1 detail table for
+its type-specific columns, the same split `employment_records` uses for history versus
+`employees`' identity columns.
+
+```sql
+create table attendance_adjustment_details (
+  request_id    uuid primary key references requests(id) on delete cascade,
+  operation     text not null,                     -- 'add' | 'void' | 'amend'
+  target_log_id uuid references attendance_logs(id),   -- required for void/amend
+  direction     text,                               -- required for add/amend
+  punched_at    timestamptz,                        -- required for add/amend, stored UTC
+
+  check (operation in ('add','void','amend')),
+  check (direction is null or direction in ('in','out'))
+);
+```
+
+**The primary key IS `requests.id`** — no separate generated id, no separate uniqueness rule
+to maintain. One request, one detail row, enforced by the database rather than by
+convention. Which fields are required depends on `operation` (an `add` needs
+`direction`/`punched_at` and no target; a `void` needs only `target_log_id`; an `amend`
+needs all three) — enforced at the HTTP layer (`SubmitAdjustmentRequest`'s
+`required_if` rules), not by a CHECK, since expressing a three-way conditional-required
+constraint in SQL would duplicate that validation in a second, harder-to-read place.
+
+```sql
+create table attendance_annulments (
+  id                uuid primary key default uuidv7(),
+  attendance_log_id uuid not null unique references attendance_logs(id),
+  request_id        uuid not null references requests(id),
+  created_at        timestamptz not null default now()
+);
+```
+
+**How a void/amend supersedes a punch without ever mutating it.** `attendance_logs` stays
+append-only — approving a `void` or `amend` never updates or deletes the target row. Instead
+it records a new fact: "this punch is annulled, by this request." `unique(attendance_log_id)`
+makes "at most one annulment per punch" a database invariant, not just an application check
+— a double-void race hits a `QueryException`, not a silent double-annul. An `amend` is
+implemented as exactly this annulment **plus** a fresh `RecordPunch` call for the corrected
+time — a void-and-add pair, never an in-place correction.
+
+**The effective ledger is `attendance_logs` minus `attendance_annulments`** — the set of
+punches an inspector-facing raw dump and a pay computation disagree about. Concretely: a
+punch's id has no matching row in `attendance_annulments`. This is defined here because it is
+the single most important thing for whoever builds the M5 compute engine to get right about
+attendance — **M5 must read the effective ledger, not the raw table.** M3.6 itself does
+**not** wire this filter into any read endpoint: `GET /me/attendance` and
+`GET /employees/{employee}/attendance` (`03-api.md`) are, by design, the raw append-only
+ledger — "the record you'd show a DOLE inspector" includes an annulled punch, because it
+still happened and was still recorded. An approved void is provable today only by its
+absence from the effective-ledger *query* (`AttendanceLog::whereNotIn('id',
+AttendanceAnnulment::select('attendance_log_id'))`, exercised in
+`tests/Feature/Attendance/ApplyAdjustmentTest.php`), not by any HTTP response changing shape.
+
+### The two single-writer invariants
+
+Attendance now has **two** append-only tables, each with exactly one writer, guarded the same
+way for the same reason: a corrective fact is always a new row, never an edit.
+
+1. **`RecordPunch` is still the only writer of `attendance_logs`**, unchanged from M3 — an
+   approved `add`/`amend` adjustment calls it exactly like self-service or manual entry does,
+   just with `source: adjustment` and `recorded_by` the approver. See the M3 section above.
+2. **`App\Actions\Attendance\RecordAnnulment` is the only writer of
+   `attendance_annulments`.** It only ever `create()`s, called from
+   `ApplyAttendanceAdjustment` under the request's row lock, after validating the target is
+   the requester's, exists, and isn't already annulled. `tests/Arch/ConventionsTest.php`'s
+   *"only RecordAnnulment writes attendance_annulments"* mirrors the `attendance_logs` guard
+   exactly (same grep-based write-form scan, same model-file exemption), and asserts
+   `RecordAnnulment.php` is the sole match — a later action reading the table (e.g. the
+   approval-time "already annulled?" check) does not trip it, only a write does.
+
+**Approval is serialized, not just validated.** `ApproveRequest` takes `SELECT ... FOR
+UPDATE` on the `requests` row before dispatching the effect, so two concurrent approvals on
+the same request cannot both apply — the second blocks on the lock, then, once the first
+commits, re-reads the row as no longer pending and takes the `409` branch instead of
+double-applying. `tests/Feature/Attendance/ApproveRequestConcurrencyTest.php` proves this
+with two genuinely separate Postgres backend sessions (a forked PHP process holding the lock
+open), not just a sequential same-process retry.
+
+### Media Library: the `media` table and the attachment disk
+
+```sql
+create table media (
+  id                    bigint primary key generated always as identity,
+  model_type            text not null,
+  model_id              uuid not null,             -- uuidMorphs, not the package default
+  uuid                  uuid unique,
+  collection_name       varchar not null,
+  name                  varchar not null,
+  file_name             varchar not null,
+  mime_type             varchar,
+  disk                  varchar not null,
+  conversions_disk      varchar,
+  size                  bigint not null,
+  manipulations         json not null,
+  custom_properties     json not null,
+  generated_conversions json not null,
+  responsive_images     json not null,
+  order_column          integer,
+  created_at            timestamptz,
+  updated_at            timestamptz
+);
+
+create index media_model_type_model_id_index on media (model_type, model_id);
+```
+
+Published by `spatie/laravel-medialibrary` and edited once: `morphs('model')` (the package
+default, `bigint`) → `uuidMorphs('model')`, because every owning model's primary key here is
+a uuidv7 string — the bigint form would silently truncate or fail to match. `Request`
+implements `HasMedia`/`InteractsWithMedia` with a single `attachment` media collection
+(`singleFile()`, so a re-upload replaces rather than appends), accepting only
+`application/pdf`, `image/jpeg`, `image/png`.
+
+**The `attachments` disk is S3-protocol, backed by RustFS in dev, `visibility: private`.**
+`config('media-library.disk_name')` is `attachments`; `config('filesystems.disks.attachments')`
+points at `ATTACHMENTS_S3_*` env vars (endpoint, key, secret, bucket, path-style addressing
+— RustFS/MinIO need path-style, not vhost-style). There is no public URL generation and no
+direct object link anywhere in the API: `GET /attendance/adjustments/{request}/attachment`
+streams the file through the app after the same visibility check as the request's `show`
+route (`03-api.md`), so RustFS itself is never reachable from outside the container network.
+Feature tests use `Storage::fake('attachments')`; only `scripts/e2e-adjustments.sh` exercises
+a live RustFS round-trip.
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -477,3 +633,8 @@ Stated plainly, since these are the reasons for the constraints above:
   route mutates the table — arch guard + `AppendOnlyTest`.)
 - A retried mutation cannot write a second row or replay another user's response.
   (`idempotency_keys`, user-scoped hash, key-and-row in one transaction.)
+- A punch cannot be annulled twice, and nothing but `RecordAnnulment` can write
+  `attendance_annulments`. (`unique(attendance_log_id)` + arch guard.)
+- A pending request cannot be decided twice, by two approvers racing each other or by one
+  approver double-clicking. (`SELECT ... FOR UPDATE` on the request row, re-checked as
+  pending after the lock is acquired.)

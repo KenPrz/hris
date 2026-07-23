@@ -4,7 +4,12 @@
 # ---- base: FrankenPHP + the extensions this app needs -----------------------
 FROM dunglas/frankenphp:php8.5 AS base
 
-RUN install-php-extensions pdo_pgsql pgsql bcmath intl opcache
+# exif is spatie/image's (a laravel-medialibrary dependency) hard platform requirement —
+# missing it doesn't fail the build, it fails composer install at container boot with
+# "requires ext-exif -> it is missing", which left the api_vendor volume stuck half
+# up-to-date (older packages present, medialibrary never actually installed) the first
+# time this image tried to pick up M3.6's Media Library dependency. Found running Task 9.
+RUN install-php-extensions pdo_pgsql pgsql bcmath intl opcache exif
 
 # The base image has no composer binary; take the official static one.
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
