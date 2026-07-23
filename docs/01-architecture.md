@@ -224,11 +224,11 @@ silently lacks all of them — it does not error, it ignores them — so a green
 would actively mislead about whether the concurrency and effective-dating invariants
 hold. The suite would be fastest exactly when it is least trustworthy.
 
-The suite today is 23 tests: unit and feature coverage of the health action, the boot
-assertions, and the error envelope, plus eight architecture tests in
+The suite today is 115 backend tests: unit and feature coverage of the health action, the boot
+assertions, and the error envelope, plus 88 unit tests for the time and pay primitives, plus 10 architecture tests in
 `tests/Arch/ConventionsTest.php` that enforce `04-backend-conventions.md` mechanically —
 actions never touch HTTP, actions are final, controllers are final and invokable, the
-domain layer is framework-agnostic, no `env()` outside `config/`, no debug helpers,
+domain layer is framework-agnostic, the domain layer never reads configuration, domain value objects are final, no `env()` outside `config/`, no debug helpers,
 domain exceptions extend the base, `strict_types` everywhere. If an arch test fails, the
 code broke a documented rule; change the code, not the rule.
 

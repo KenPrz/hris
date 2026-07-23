@@ -79,7 +79,7 @@ paid.
 `tests/Arch/ConventionsTest.php` mechanically enforces what is mechanically checkable —
 rules 1 and 2 in full (actions never touch `Request`, `Response`, `JsonResponse`,
 `JsonResource`, or `FormRequest`), plus actions are final, controllers are final and
-invokable, the domain layer is framework-agnostic, domain exceptions extend the base, no
+invokable, the domain layer is framework-agnostic, the domain layer never reads configuration, domain value objects are final, domain exceptions extend the base, no
 `env()` outside `config/`, no debug helpers, `strict_types` everywhere. Rules 3, 4, 5,
 and 6 are review's job until the code exists to check them against. A convention nobody
 checks is a suggestion.
