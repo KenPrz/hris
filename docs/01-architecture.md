@@ -82,6 +82,18 @@ through it, rounding half away from zero. One place a centavo can be created or
 destroyed. Don't add a second: the moment there are two, the two disagree on a boundary
 case and the disagreement is discovered by an employee counting their own payslip.
 
+**Time is represented as integer minutes from the start of the business day, in the
+office's local wall-clock time.** Values may exceed 1440: a 22:00 → 06:00 night shift is
+`1320 → 1800`. Converting UTC `timestamptz` punches into office-local business-day minutes
+is the engine's job (M5), not the primitives'. This is what lets night-differential
+splitting be plain integer arithmetic rather than dragging a timezone database into a value
+object.
+
+**`BasisPoints::times()` carries its own copy of the half-away-from-zero rounding rule**
+rather than calling into `Money`. Exposing `Money`'s rule publicly would invite call sites
+to round outside `fraction()`, which is the single thing that rule exists to prevent. The
+duplication is four lines and is deliberate.
+
 `Minutes`, `Money`, and `BasisPoints` are built in M1, before any schema, because a bug
 in them found in M1 costs an afternoon and the same bug found after a cutoff closes costs
 a recomputation of every payslip since.
@@ -212,11 +224,11 @@ silently lacks all of them — it does not error, it ignores them — so a green
 would actively mislead about whether the concurrency and effective-dating invariants
 hold. The suite would be fastest exactly when it is least trustworthy.
 
-The suite today is 23 tests: unit and feature coverage of the health action, the boot
-assertions, and the error envelope, plus eight architecture tests in
+The suite today is 115 backend tests: unit and feature coverage of the health action, the boot
+assertions, and the error envelope, plus 88 unit tests for the time and pay primitives, plus 10 architecture tests in
 `tests/Arch/ConventionsTest.php` that enforce `04-backend-conventions.md` mechanically —
 actions never touch HTTP, actions are final, controllers are final and invokable, the
-domain layer is framework-agnostic, no `env()` outside `config/`, no debug helpers,
+domain layer is framework-agnostic, the domain layer never reads configuration, domain value objects are final, no `env()` outside `config/`, no debug helpers,
 domain exceptions extend the base, `strict_types` everywhere. If an arch test fails, the
 code broke a documented rule; change the code, not the rule.
 

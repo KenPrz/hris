@@ -28,7 +28,20 @@ arch('the domain layer is framework-agnostic')
     ->not->toUse([
         'Illuminate\Http',
         'Illuminate\Foundation',
+        'Illuminate\Support\Facades',
+        'Illuminate\Database',
     ]);
+
+arch('the domain layer never reads configuration')
+    ->expect('App\Domain')
+    ->not->toUse(['config', 'env', 'app', 'resolve']);
+
+arch('domain value objects are final')
+    ->expect('App\Domain')
+    ->toBeClasses()
+    ->ignoring('App\Domain\Pay\DayType')
+    ->toBeFinal()
+    ->ignoring('App\Domain\Pay\DayType');
 
 arch('controllers are final single-action classes')
     ->expect('App\Http\Controllers')

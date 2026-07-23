@@ -58,7 +58,12 @@ exception, not a precedent: monitoring needs a body describing the failure eithe
 6. **Models stay thin.** Casts, relations, scopes. No business logic.
 7. **A computation that produces a premium reads `is_art82_exempt` first.** Managerial
    employees and field personnel are outside Art. 82: no overtime, no night differential,
-   no holiday premium, no service incentive leave. `tests/Arch/` enforces this from M1.
+   no holiday premium, no service incentive leave. Enforcement is by type signature, not by
+   arch test: `PayMultiplier::forWorkedTime()` and `forUnworkedDay()` take
+   `bool $isArt82Exempt` as a **mandatory** parameter with no default, so it is not possible
+   to compute a premium without stating the employee's status. That is stronger than a
+   static rule — an arch test can only see that a symbol was referenced, while a required
+   parameter makes the omission fail to compile.
 
 Rule 1 is the one that pays. Because an action has no HTTP dependency, the same
 `ComputeDailySummary` is callable from a controller, an Artisan command, a seeder, a
@@ -74,7 +79,7 @@ paid.
 `tests/Arch/ConventionsTest.php` mechanically enforces what is mechanically checkable —
 rules 1 and 2 in full (actions never touch `Request`, `Response`, `JsonResponse`,
 `JsonResource`, or `FormRequest`), plus actions are final, controllers are final and
-invokable, the domain layer is framework-agnostic, domain exceptions extend the base, no
+invokable, the domain layer is framework-agnostic, the domain layer never reads configuration, domain value objects are final, domain exceptions extend the base, no
 `env()` outside `config/`, no debug helpers, `strict_types` everywhere. Rules 3, 4, 5,
 and 6 are review's job until the code exists to check them against. A convention nobody
 checks is a suggestion.

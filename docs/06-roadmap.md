@@ -120,8 +120,14 @@ expensive bugs live and it is the foundation everything else computes on.
   `BasisPoints`. Table-driven, pure, no database.
 - `NightDiffSplitter` — splits a worked interval against 22:00–06:00, correctly across
   midnight, returning `Minutes` in and out of the window.
-- `PunchPairer` — pure over an ordered list of punch times: pairs in/out, reports odd
-  counts as unpaired rather than guessing.
+- `PunchPairer` — pure over an ordered list of punch times. Pairs **arbitrary even
+  counts**, not just one in/out pair, because meal breaks are configurable per office and
+  an explicit-break day is four punches. An odd count is reported as unpaired rather than
+  guessed at.
+- `MealBreakPolicy` — `Assumed(minutes, appliesOverMinutes)` or `Explicit`. Takes its
+  parameters as constructor arguments and never reads config; the office column that
+  selects it lands in M2. Both paths are built here so the engine never has to branch on
+  a policy it cannot test.
 - `OvertimeThreshold` — minutes beyond the scheduled day, given a schedule span.
 - `frontend/web/src/lib/duration.ts` and `money.ts` — the browser mirrors.
 
@@ -152,6 +158,29 @@ for holiday overtime at 2am, and getting that wrong underpays quietly for years.
 **Why first:** the same reasoning POS used for `Money`. A multiplier bug found here costs
 an afternoon. Found after a cutoff closes, it costs a recomputation of every payslip since
 the mistake, plus the conversation about why.
+
+**Status: complete.** The whole matrix is a table-driven unit test — 88 unit tests, zero
+database, no container booted. What the building actually turned on, for whoever extends
+the matrix next:
+
+- The rest-day adjustment is a **lookup table, not a formula.** Special non-working on a
+  rest day is a flat **150%**, not 130% × 130% = 169%. Deriving the matrix from a rule is
+  the single most likely way to get it wrong; `PayMultiplier::WORKED_BASE` pins every cell
+  by hand and a unit test asserts this one is not 169%.
+- Night differential **compounds on the already-premium rate**, not on base pay. Holiday
+  overtime at 2am is 200% × 130% × 110% = **286%**, not 210%. The night factor is applied
+  last and multiplicatively, and getting it wrong underpays quietly for years.
+- `PunchPairer` pairs **arbitrary even counts**, because meal breaks are per-office
+  configurable and an explicit-break day is four punches. An odd count is reported as
+  unpaired, never guessed at.
+- `NightDiffSplitter` works in minutes from the business-day start, so the 22:00–06:00
+  window simply **recurs every 1440 minutes** and a shift crossing midnight needs no
+  special case — and no timezone database inside a value object.
+- Art. 82 enforcement is **by mandatory parameter, not an arch test.** `forWorkedTime()`
+  and `forUnworkedDay()` take `bool $isArt82Exempt` with no default, so a premium cannot
+  be computed without stating the employee's status — see `04-backend-conventions.md`
+  rule 7. A required parameter fails to compile when omitted; an arch test only sees that a
+  symbol was referenced.
 
 ## M2 — Schema, auth, and RBAC
 
