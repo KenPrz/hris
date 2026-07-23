@@ -60,6 +60,18 @@ return [
             'report' => false,
         ],
 
+        'attachments' => [
+            'driver' => 's3',
+            'key' => env('ATTACHMENTS_S3_KEY'),
+            'secret' => env('ATTACHMENTS_S3_SECRET'),
+            'region' => env('ATTACHMENTS_S3_REGION', 'us-east-1'),
+            'bucket' => env('ATTACHMENTS_S3_BUCKET', 'hris-attachments'),
+            'endpoint' => env('ATTACHMENTS_S3_ENDPOINT'),
+            'use_path_style_endpoint' => true,   // RustFS/MinIO need path-style, not vhost-style
+            'throw' => true,
+            'visibility' => 'private',
+        ],
+
     ],
 
     /*

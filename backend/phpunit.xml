@@ -59,6 +59,13 @@
         <env name="DB_USERNAME" value="hris" force="true"/>
         <env name="DB_PASSWORD" value="hris" force="true"/>
         <env name="DB_URL" value="" force="true"/>
+        <!--
+            Real Postgres runs the suite, not real RustFS. Feature tests exercise Media
+            Library through Storage::fake('attachments'); leaving the ATTACHMENTS_S3_*
+            vars unset here (and FILESYSTEM_DISK forced back to local) means no test
+            depends on a live object store existing.
+        -->
+        <env name="FILESYSTEM_DISK" value="local" force="true"/>
         <env name="HRIS_VERSION" value="test" force="true"/>
         <env name="HRIS_CURRENCY" value="PHP" force="true"/>
         <env name="HRIS_ORGANIZATION_NAME" value="Test Company Inc." force="true"/>
@@ -76,6 +83,7 @@
         <server name="DB_USERNAME" value="hris"/>
         <server name="DB_PASSWORD" value="hris"/>
         <server name="DB_URL" value=""/>
+        <server name="FILESYSTEM_DISK" value="local"/>
         <server name="HRIS_VERSION" value="test"/>
         <server name="HRIS_CURRENCY" value="PHP"/>
         <server name="HRIS_ORGANIZATION_NAME" value="Test Company Inc."/>
