@@ -6,6 +6,8 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
+use App\Http\Controllers\Attendance\ListMyAttendanceController;
 use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
@@ -32,7 +34,9 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('/employees', ListEmployeesController::class);
         Route::get('/employees/{employee}', ShowEmployeeController::class);
+        Route::get('/employees/{employee}/attendance', ListEmployeeAttendanceController::class);
 
+        Route::get('/me/attendance', ListMyAttendanceController::class);
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each

@@ -158,6 +158,48 @@ test('every Employees controller references an authorization boundary', function
     expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Employees/ serve employees without referencing an authorization boundary (EmployeeScope or a ->cannot()/->can()/->authorize()/Gate:: call): '.implode(', ', $offenders));
 });
 
+test('every Attendance controller references a scope or self check', function (): void {
+    // Sibling to the Employees rule above, adapted to the M3 read paths. A read
+    // controller under Attendance/ is guarded one of two ways: it is self-only, loading
+    // the caller's OWN employee via `$request->user()->employee` (ListMyAttendanceController,
+    // PunchController), or it is scoped by EmployeeScope for a subject taken from the
+    // route (ListEmployeeAttendanceController). Either reference proves a boundary is
+    // present; this greps every controller under Attendance/ for one of the two and fails
+    // if neither is found, so a future controller that loads and serializes an
+    // AttendanceLog with no scope/self check at all is caught here rather than in review.
+    $offenders = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app/Http/Controllers/Attendance'))
+        ->name('*.php');
+
+    $patterns = [
+        '/EmployeeScope/',
+        '/user\(\)->employee\b/',
+    ];
+
+    foreach ($files as $file) {
+        $contents = $file->getContents();
+
+        $guarded = false;
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $guarded = true;
+
+                break;
+            }
+        }
+
+        if (! $guarded) {
+            $offenders[] = $file->getRelativePathname();
+        }
+    }
+
+    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Attendance/ serve attendance data without referencing a scope or self check (EmployeeScope or $request->user()->employee): '.implode(', ', $offenders));
+});
+
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
     // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
     // dependency graph built from `use` statements and function-call nodes — it does not
