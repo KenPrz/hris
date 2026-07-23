@@ -32,9 +32,20 @@ final class RbacSeeder extends Seeder
             Permission::findOrCreate($name);
         }
 
+        // Flush BETWEEN create and sync, not just at the end. findOrCreate's first lookup
+        // loads the registrar's permission collection into cache while it is still empty
+        // and caches that empty result; syncPermissions() then resolves permission *names*
+        // against that stale collection and throws PermissionDoesNotExist for a permission
+        // that was just inserted. This bites on a fresh boot (migrate:fresh --seed) where
+        // nothing warmed the cache with the real rows first. Flushing here forces the sync
+        // to reload from the DB. See docs/05-rbac.md (Caching).
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+
         $role = Role::findOrCreate('HR Admin');
         $role->syncPermissions(self::HR_PERMISSIONS);
 
+        // And once more after writing, so any caller that reads permissions in the same
+        // process (the CompanySeeder assigning the role next) sees the fresh set.
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
     }
 }

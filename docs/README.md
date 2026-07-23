@@ -6,14 +6,14 @@ Design-first. Read in order; each assumes the one before it.
 | --- | --- |
 | [00-overview.md](00-overview.md) | What we're building, why hours-before-payroll, principles, v1 decisions, non-goals, glossary. |
 | [01-architecture.md](01-architecture.md) | Stack and versions, topology, time and money rules, timezone handling, auth, idempotency, concurrency, error format, testing. |
-| 02-data-model.md | Full Postgres schema with rationale. The core artifact. *(M2)* |
-| 03-api.md | REST surface, auth flows, request lifecycle, the device ingestion contract, error codes. *(M2)* |
+| [02-data-model.md](02-data-model.md) | Full Postgres schema with rationale. The core artifact. |
+| [03-api.md](03-api.md) | REST surface, auth flows, the `/me` session envelope, error codes. |
 | [04-backend-conventions.md](04-backend-conventions.md) | Action-class architecture: controller → request → action → resource. Rules, layering, worked example, configuration. |
-| 05-rbac.md | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. *(M2)* |
+| [05-rbac.md](05-rbac.md) | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. |
 | [06-roadmap.md](06-roadmap.md) | Milestones M0–M8, the invariants they're measured against, and the deferred table. |
 
-Written as each milestone reaches it — the marker says which. The three unmarked docs
-above plus `06-roadmap.md` exist today; `02`, `03`, and `05` arrive with M2.
+Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; all seven docs
+exist today.
 
 ## Design records
 
@@ -46,7 +46,9 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0 is complete — the skeleton boots, `/api/v1/health` is a real action, and CI runs the
-gates. Next is M1 in [06-roadmap.md](06-roadmap.md): the time and pay primitives, built
-before any schema, with the whole DOLE premium matrix as a table-driven unit test and
-zero database.
+M0, M1, and M2 are complete — the skeleton boots, the DOLE premium matrix is a green
+table-driven unit test, and the schema, auth, and office-scoped RBAC are built and proven
+by the four-actor scope matrix. `migrate:fresh --seed` produces a Manila/Cebu company you
+can log into as each of the four scopes. Next is M3 in [06-roadmap.md](06-roadmap.md): the
+first vertical slice — punch in, punch out, correct a day — where the design language also
+lands.
