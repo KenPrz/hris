@@ -222,3 +222,66 @@ test('only RecordEmploymentChange writes the employment cache columns', function
 
     expect(array_keys($writers))->toBe(['Actions/Employees/RecordEmploymentChange.php']);
 });
+
+test('only RecordPunch writes attendance_logs', function (): void {
+    // Same mechanism as the cache-column guard above, adapted to a single append-only
+    // table rather than a set of columns: toOnlyBeUsedIn() walks a use-statement/call-node
+    // graph and would not reliably catch a write buried in an array literal or a
+    // model-static call chain, so this asserts the guarantee directly by grepping app/ for
+    // any file that writes an AttendanceLog and requiring RecordPunch.php to be the only
+    // one.
+    //
+    // A write is only reachable from a file that references the AttendanceLog class at
+    // all — attendance_logs has no raw DB::table('attendance_logs') writer anywhere in
+    // this codebase, so gating on "file mentions AttendanceLog" first (rather than
+    // grepping ->update(/->delete( across all of app/, which would flag every unrelated
+    // model's update/delete calls) keeps the rule precise while still catching the forms
+    // called out in the spec:
+    //   - AttendanceLog::query()->create(   / AttendanceLog::create(   (mass-assignment create)
+    //   - new AttendanceLog                  (construct-then-save)
+    //   - ->update(                          / ->delete(               (any mutation once the
+    //     file is already known to touch the model — attendance_logs is append-only, so
+    //     even a single update/delete call in an AttendanceLog-referencing file is a
+    //     violation, not just a suspicious pattern)
+    // The factory in database/ is exempt — the guard scans app/ only.
+    $writers = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app'))
+        ->name('*.php');
+
+    $patterns = [
+        '/AttendanceLog::query\(\)\s*->\s*create\(/',
+        '/AttendanceLog::create\(/',
+        '/new\s+AttendanceLog\b/',
+        '/->update\(/',
+        '/->delete\(/',
+    ];
+
+    foreach ($files as $file) {
+        $contents = $file->getContents();
+
+        // The model definition itself always mentions "AttendanceLog" and defines
+        // relations, casts, etc. — none of which are writes. Exempt it explicitly rather
+        // than relying on the write patterns never matching it, since a future cast or
+        // scope method could easily contain the substring "->update(" incidentally.
+        if ($file->getRelativePathname() === 'Models/AttendanceLog.php') {
+            continue;
+        }
+
+        if (! str_contains($contents, 'AttendanceLog')) {
+            continue;
+        }
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $writers[$file->getRelativePathname()] = true;
+
+                break;
+            }
+        }
+    }
+
+    expect(array_keys($writers))->toBe(['Actions/Attendance/RecordPunch.php']);
+});
