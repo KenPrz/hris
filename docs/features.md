@@ -99,7 +99,15 @@ before any of it was wired to a button.
   the labor rules care that the time was worked, and a supervisor sorts out anything that
   looks off. (The same applies to a location check, once a mobile app exists.)
 
+- **HR can record punches on someone's behalf.** An HR admin can enter a punch for an
+  employee in their office at a specific time — essential for the workers who only ever
+  punch a clock and never sign in to the portal, and for fixing gaps when a device was
+  down. This is strictly an HR tool: you can never enter a punch for *yourself* this way
+  (your own attendance goes through clocking in, or a correction request), and HR can only
+  do it for employees in the offices they administer.
+
 ---
 
-*(More M3 timekeeping features — HR correcting a missed punch, and viewing your month of
-attendance — will be listed here as they ship.)*
+*(More M3 timekeeping features — viewing your month of attendance — will be listed here as
+they ship. Employees correcting their **own** missed punches, through a request their
+manager or HR approves, is a dedicated feature coming in its own milestone.)*
