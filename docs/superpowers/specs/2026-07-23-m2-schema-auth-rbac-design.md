@@ -208,9 +208,12 @@ One organization, two offices deliberately far apart so a scope leak is visible 
   with `hr_admin_offices` rows for *their own office only*; managers with reports;
   rank-and-file. Including **one Art. 82-exempt manager** so the M1 exemption has live
   data, and **one punch-only worker with no `user_id`** so the nullable-login path is real.
-- The **2026 PH holiday set** as reference data — regular and special, including the
-  movable Eid dates set by proclamation.
 - The seeded `HR Admin` spatie role and its verb catalog.
+
+**Holidays are not seeded in M2.** An earlier draft of this spec listed the 2026 PH holiday
+set here, but §1's schema has no `holidays` table — holiday calendar management is M4's
+domain, and the table lands there. Seeding holidays in M2 would require a table this
+milestone does not build. The holiday set is seeded in M4, alongside the table that holds it.
 
 The seeder prints login credentials for each of the four scopes, as POS's does.
 
@@ -221,6 +224,8 @@ Real Postgres, never SQLite — M2 leans on `uuidv7()`, partial and composite in
 - **The four-actor scope matrix, as feature tests** — the milestone's proof and its
   done-when: an employee 404s on a peer; a Manila HR Admin 404s on a Cebu employee; a
   manager sees exactly their reports and 404s on a peer's report; a System Admin sees all.
+  Note the 404-not-403 rule is about out-of-scope *subjects*; an unauthorized *actor* (a
+  non-admin creating an employee) is a legitimate `403 forbidden`, a different case.
 - **`RecordEmploymentChange` cache coherence** — after a promotion, the history row and the
   three cache columns agree; the arch test proves only that action writes the cache.
 - **Effective-date resolver** — "what was true on date D" picks the correct row across a
