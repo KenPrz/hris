@@ -73,6 +73,28 @@ arch('strict types everywhere')
     ->expect('App')
     ->toUseStrictTypes();
 
+// The show controller authorizes through EmployeePolicy::view() rather than calling
+// EmployeeScope directly (it defers to the policy, which is the single definition of
+// "in scope" shared with the index — see EmployeePolicy). Asserting the bare
+// `->expect('App\Http\Controllers\Employees')->toUse(EmployeeScope::class)` form fails for
+// ShowEmployeeController because it references the policy, not the scope, by name. Scoping
+// this rule to ListEmployeesController keeps the guarantee precise: the index — which loads
+// employees directly, with nothing else standing between it and the database — must never
+// bypass EmployeeScope.
+arch('the employee index goes through EmployeeScope, never a bare Employee query')
+    ->expect('App\Http\Controllers\Employees\ListEmployeesController')
+    ->toUse('App\Domain\Scope\EmployeeScope');
+
+// ShowEmployeeController never references EmployeePolicy by name — it goes through the
+// Gate (`$request->user()->cannot('view', $employee)`), resolved at runtime via the
+// Gate::policy() binding in AppServiceProvider, so there is no `use` statement for a
+// ->toUse() rule to find. Asserting the policy itself is built on EmployeeScope closes the
+// gap: the show path is show -> Gate -> EmployeePolicy -> EmployeeScope, and this plus the
+// rule above together mean no employee read path — index or show — can bypass the scope.
+arch('EmployeePolicy defines "can see" as EmployeeScope membership')
+    ->expect('App\Policies\EmployeePolicy')
+    ->toUse('App\Domain\Scope\EmployeeScope');
+
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
     // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
     // dependency graph built from `use` statements and function-call nodes — it does not

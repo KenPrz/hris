@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Employee;
 use App\Models\User;
+use App\Policies\EmployeePolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -26,6 +28,8 @@ final class AppServiceProvider extends ServiceProvider
         RateLimiter::for('login', fn ($request) => Limit::perMinute(5)->by(
             $request->input('email').'|'.$request->ip()
         ));
+
+        Gate::policy(Employee::class, EmployeePolicy::class);
     }
 
     /**

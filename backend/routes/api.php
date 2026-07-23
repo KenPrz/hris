@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
+use App\Http\Controllers\Employees\ListEmployeesController;
+use App\Http\Controllers\Employees\ShowEmployeeController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,5 +24,8 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/logout', LogoutController::class);
         Route::get('/me', MeController::class);
+
+        Route::get('/employees', ListEmployeesController::class);
+        Route::get('/employees/{employee}', ShowEmployeeController::class);
     });
 });
