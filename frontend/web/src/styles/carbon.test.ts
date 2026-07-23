@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(path.resolve(__dirname, './carbon.css'), 'utf8')
+const globalsCss = readFileSync(path.resolve(__dirname, '../app/globals.css'), 'utf8')
 
 describe('carbon tokens', () => {
   it.each([
@@ -19,5 +20,9 @@ describe('carbon tokens', () => {
 
   it('ships no dark-mode override — DESIGN.md is a light-canvas system', () => {
     expect(css).not.toContain('prefers-color-scheme')
+  })
+
+  it('globals.css carries no dark-mode override either — that is where the create-next-app boilerplate put it', () => {
+    expect(globalsCss).not.toContain('prefers-color-scheme')
   })
 })
