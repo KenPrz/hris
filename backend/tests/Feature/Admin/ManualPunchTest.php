@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\Office;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 
 uses(RefreshDatabase::class);
@@ -31,6 +32,11 @@ it('lets an HR admin backfill a manual punch for an employee in their office', f
     $log = AttendanceLog::first();
     expect($log->recorded_by)->toBe($hrUser->id)
         ->and($log->employee_id)->toBe($target->id);
+
+    // 17:30+08:00 is the instant 09:30 UTC — the offset must not be dropped on write.
+    $stored = DB::table('attendance_logs')->where('id', $log->id)->value('punched_at');
+    expect($log->fresh()->punched_at->utc()->toDateTimeString())->toBe('2026-03-01 09:30:00')
+        ->and($stored)->toBe('2026-03-01 09:30:00+00');
 });
 
 it('403s when a plain employee tries to manually punch', function (): void {

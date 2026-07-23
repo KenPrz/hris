@@ -13,6 +13,7 @@ use App\Models\Office;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -53,6 +54,44 @@ it('stores a manual punch at the supplied time', function (): void {
 
     expect($log->source)->toBe(PunchSource::Manual)
         ->and($log->punched_at->toDateTimeString())->toBe('2026-03-01 17:30:00');
+});
+
+it('stores the correct UTC instant for a manual punch supplied with a non-UTC offset', function (): void {
+    $office = Office::factory()->create(['ip_allowlist' => null]);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+
+    $log = app(RecordPunch::class)->execute(new RecordPunchInput(
+        employeeId: $employee->id,
+        direction: PunchDirection::In,
+        source: PunchSource::Manual,
+        punchedAt: Carbon::parse('2026-07-01T08:00:00+08:00'),   // = 2026-07-01 00:00:00Z
+        recordedBy: User::factory()->create()->id,
+        ipAddress: null, deviceId: null, geoLat: null, geoLng: null,
+    ));
+
+    $stored = DB::table('attendance_logs')->where('id', $log->id)->value('punched_at');
+
+    expect($log->fresh()->punched_at->utc()->toDateTimeString())->toBe('2026-07-01 00:00:00')
+        ->and($stored)->toBe('2026-07-01 00:00:00+00');
+});
+
+it('stores the exact UTC instant for a self-service punch, unaffected by UTC normalization', function (): void {
+    $office = Office::factory()->create(['ip_allowlist' => null]);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+
+    Carbon::setTestNow('2026-03-02 09:00:00');
+    $log = app(RecordPunch::class)->execute(new RecordPunchInput(
+        employeeId: $employee->id,
+        direction: PunchDirection::In,
+        source: PunchSource::Web,
+        punchedAt: null,                // server now
+        recordedBy: $employee->user_id,
+        ipAddress: '198.51.100.4',
+        deviceId: null, geoLat: null, geoLng: null,
+    ));
+    Carbon::setTestNow();
+
+    expect($log->fresh()->punched_at->utc()->toDateTimeString())->toBe('2026-03-02 09:00:00');
 });
 
 it('flags a punch from an IP outside the office allowlist but still stores it', function (): void {

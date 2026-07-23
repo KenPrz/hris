@@ -33,7 +33,7 @@ final class RecordPunch
             return AttendanceLog::query()->create([
                 'employee_id' => $employee->id,
                 'office_id' => $office->id,
-                'punched_at' => $in->punchedAt ?? now(),
+                'punched_at' => ($in->punchedAt ?? now())->utc(),
                 'direction' => $in->direction,
                 'source' => $in->source,
                 'verification' => $result->status,
