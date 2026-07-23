@@ -231,18 +231,26 @@ test('only RecordPunch writes attendance_logs', function (): void {
     // any file that writes an AttendanceLog and requiring RecordPunch.php to be the only
     // one.
     //
-    // A write is only reachable from a file that references the AttendanceLog class at
-    // all — attendance_logs has no raw DB::table('attendance_logs') writer anywhere in
-    // this codebase, so gating on "file mentions AttendanceLog" first (rather than
-    // grepping ->update(/->delete( across all of app/, which would flag every unrelated
-    // model's update/delete calls) keeps the rule precise while still catching the forms
-    // called out in the spec:
+    // A write is only reachable from a file that references AttendanceLog (the class) or
+    // attendance_logs (the raw table name) at all, so gating on "file mentions either"
+    // first (rather than grepping ->update(/->save(/etc. across all of app/, which would
+    // flag every unrelated model's calls) keeps the rule precise while still catching the
+    // forms called out in the spec:
     //   - AttendanceLog::query()->create(   / AttendanceLog::create(   (mass-assignment create)
     //   - new AttendanceLog                  (construct-then-save)
     //   - ->update(                          / ->delete(               (any mutation once the
     //     file is already known to touch the model — attendance_logs is append-only, so
     //     even a single update/delete call in an AttendanceLog-referencing file is a
     //     violation, not just a suspicious pattern)
+    //   - ->save(                            (the idiomatic fetch-mutate-save form — this
+    //     was previously unmatched, so a second writer using it would pass silently)
+    //   - updateOrCreate(   / firstOrCreate(  (Eloquent's other create-or-write helpers)
+    //   - ->upsert(                           (bulk write helper)
+    //   - DB::table('attendance_logs')->insert(/update(/upsert(/delete( — raw query-builder
+    //     writes that bypass the model entirely. Scoped to the write methods specifically
+    //     (not a bare DB::table('attendance_logs') reference) so a future read-only report
+    //     query built on the raw builder — legitimate once Task 7 lands — doesn't trip
+    //     this guard; only insert/update/upsert/delete chained onto the table call count.
     // The factory in database/ is exempt — the guard scans app/ only.
     $writers = [];
 
@@ -257,26 +265,43 @@ test('only RecordPunch writes attendance_logs', function (): void {
         '/new\s+AttendanceLog\b/',
         '/->update\(/',
         '/->delete\(/',
+        '/->save\(/',
+        '/updateOrCreate\(/',
+        '/firstOrCreate\(/',
+        '/->upsert\(/',
+        '/DB::table\(\s*[\'"]attendance_logs[\'"]\s*\)\s*->\s*(insert|insertOrIgnore|insertGetId|update|upsert|delete)\(/',
     ];
 
     foreach ($files as $file) {
-        $contents = $file->getContents();
+        $relativePath = str_replace('\\', '/', $file->getRelativePathname());
 
         // The model definition itself always mentions "AttendanceLog" and defines
         // relations, casts, etc. — none of which are writes. Exempt it explicitly rather
         // than relying on the write patterns never matching it, since a future cast or
         // scope method could easily contain the substring "->update(" incidentally.
-        if ($file->getRelativePathname() === 'Models/AttendanceLog.php') {
+        if ($relativePath === 'Models/AttendanceLog.php') {
             continue;
         }
 
-        if (! str_contains($contents, 'AttendanceLog')) {
+        // A JsonResource is a read-only presentation layer that structurally cannot call
+        // create()/update()/fill()/save()/upsert() on the model it presents — the same
+        // reasoning the cache-writer guard above applies to its mass-assignment
+        // sub-pattern. Exempt the whole directory rather than pattern-by-pattern, since
+        // none of the write patterns here have a legitimate read-only reading in a
+        // Resource the way 'col' => ... does for the cache-column guard.
+        if (str_starts_with($relativePath, 'Http/Resources/')) {
+            continue;
+        }
+
+        $contents = $file->getContents();
+
+        if (! str_contains($contents, 'AttendanceLog') && ! str_contains($contents, 'attendance_logs')) {
             continue;
         }
 
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $contents) === 1) {
-                $writers[$file->getRelativePathname()] = true;
+                $writers[$relativePath] = true;
 
                 break;
             }
