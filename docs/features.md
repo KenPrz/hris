@@ -89,7 +89,17 @@ before any of it was wired to a button.
   Each punch remembers which office it belonged to at the moment it was made, so a later
   transfer never changes what a past day looked like.
 
+- **Clocking in and out.** A signed-in employee records a clock-in or a clock-out from the
+  web with one action. The time is set by the server, not the device — you cannot backdate
+  your own punch. If a shaky connection makes the app retry, the punch is only recorded
+  once, never twice.
+- **Off-network punches are flagged, not blocked.** If a punch comes from outside the
+  office's approved network, it is still recorded — but marked for HR to review, with the
+  reason. Nobody is ever locked out of clocking in because of where they happened to be;
+  the labor rules care that the time was worked, and a supervisor sorts out anything that
+  looks off. (The same applies to a location check, once a mobile app exists.)
+
 ---
 
-*(More M3 timekeeping features — punching in and out, off-network flagging, HR corrections,
-and viewing your attendance — will be listed here as they ship.)*
+*(More M3 timekeeping features — HR correcting a missed punch, and viewing your month of
+attendance — will be listed here as they ship.)*
