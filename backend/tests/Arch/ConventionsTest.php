@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Symfony\Component\Finder\Finder;
+
 /*
 | The rules in docs/04-backend-conventions.md, enforced by CI rather than by review.
 | A convention nobody checks is a suggestion, and this pattern's entire value is that
@@ -64,3 +66,37 @@ arch('domain exceptions extend the base so the render hook catches them')
 arch('strict types everywhere')
     ->expect('App')
     ->toUseStrictTypes();
+
+test('only RecordEmploymentChange writes the employment cache columns', function (): void {
+    // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
+    // dependency graph built from `use` statements and function-call nodes — it does not
+    // see plain string literals sitting inside an array literal like
+    // ['current_office_id' => $value]. A rule built on it would silently never fire for
+    // this case (verified empirically: it kept passing even with a second writer of
+    // current_office_id present), so this asserts the guarantee directly: grep app/ for
+    // any file that writes one of the three cache columns as a mass-assignment/array key,
+    // and require RecordEmploymentChange.php to be the only one.
+    $columns = ['current_office_id', 'current_department_id', 'current_reports_to_id'];
+
+    $writers = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app'))
+        ->name('*.php');
+
+    foreach ($files as $file) {
+        $contents = $file->getContents();
+
+        foreach ($columns as $column) {
+            // Matches an array-literal write like 'current_office_id' => ... or
+            // "current_office_id" => ..., which is how Eloquent mass-assignment
+            // (create()/update()/fill()) targets a column.
+            if (preg_match('/[\'"]'.preg_quote($column, '/').'[\'"]\s*=>/', $contents) === 1) {
+                $writers[$file->getRelativePathname()] = true;
+            }
+        }
+    }
+
+    expect(array_keys($writers))->toBe(['Actions/Employees/RecordEmploymentChange.php']);
+});
