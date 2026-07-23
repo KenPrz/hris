@@ -89,11 +89,64 @@ arch('the employee index goes through EmployeeScope, never a bare Employee query
 // Gate (`$request->user()->cannot('view', $employee)`), resolved at runtime via the
 // Gate::policy() binding in AppServiceProvider, so there is no `use` statement for a
 // ->toUse() rule to find. Asserting the policy itself is built on EmployeeScope closes the
-// gap: the show path is show -> Gate -> EmployeePolicy -> EmployeeScope, and this plus the
-// rule above together mean no employee read path — index or show — can bypass the scope.
+// gap for the one controller checked here: the show path is show -> Gate -> EmployeePolicy
+// -> EmployeeScope. Together, these three rules enforce: the index filters at the query
+// level through EmployeeScope; the policy resolves "can see" as EmployeeScope membership;
+// and (below) every controller under Employees/ must reference an authorization boundary —
+// EmployeeScope or a gate call — so a regression that deletes the show controller's
+// `cannot()` check, or a new sibling controller that loads and serializes an employee with
+// no gate at all, fails CI. The third rule is a source-grep for the *reference*, not a
+// proof the check is semantically correct (right policy ability, right query) — the
+// feature-test matrix in ScopeMatrixTest proves the semantics.
 arch('EmployeePolicy defines "can see" as EmployeeScope membership')
     ->expect('App\Policies\EmployeePolicy')
     ->toUse('App\Domain\Scope\EmployeeScope');
+
+test('every Employees controller references an authorization boundary', function (): void {
+    // Neither of the two rules above forces ShowEmployeeController — or any future
+    // controller dropped into this directory — to gate at all. toUse() only proves that a
+    // file which *does* reference EmployeeScope or EmployeePolicy uses it correctly; it says
+    // nothing about a file that references neither. So this greps every controller under
+    // Employees/ and requires each one to contain either the query-filter pattern
+    // (EmployeeScope, for index-style controllers) or a per-record gate call (->cannot(,
+    // ->can(, ->authorize(, or Gate::, for show-style controllers). A file with neither is
+    // an unguarded read path: it can load and serialize an Employee with nothing standing
+    // between it and the database.
+    $offenders = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app/Http/Controllers/Employees'))
+        ->name('*.php');
+
+    $patterns = [
+        '/EmployeeScope/',
+        '/->cannot\(/',
+        '/->can\(/',
+        '/->authorize\(/',
+        '/Gate::/',
+    ];
+
+    foreach ($files as $file) {
+        $contents = $file->getContents();
+
+        $guarded = false;
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $guarded = true;
+
+                break;
+            }
+        }
+
+        if (! $guarded) {
+            $offenders[] = $file->getRelativePathname();
+        }
+    }
+
+    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Employees/ serve employees without referencing an authorization boundary (EmployeeScope or a ->cannot()/->can()/->authorize()/Gate:: call): '.implode(', ', $offenders));
+});
 
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
     // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
