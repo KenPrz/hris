@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\User;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -12,6 +14,11 @@ final class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         self::assertConfigured();
+
+        // Global oversight. A System Admin passes every gate; returning null (not false)
+        // for everyone else lets the normal policy chain run. Spatie's own recommended
+        // super-admin pattern. See docs/05-rbac.md.
+        Gate::before(fn (User $user): ?bool => $user->is_system_admin ? true : null);
     }
 
     /**
