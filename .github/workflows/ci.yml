@@ -35,14 +35,16 @@ jobs:
       # phpunit.xml has forced both values.
       - run: composer install --no-interaction --prefer-dist --no-scripts
         working-directory: backend
-      # The Global Constraint binds app/ AND tests/, but tests/Arch/ConventionsTest.php's
-      # rule is ->expect('App') only, and Pest arch cannot reach namespace-less Pest test
-      # files at all. Everything complies today; this is what keeps it that way. grep -rL
-      # lists files NOT matching, so a non-empty list is the failure.
-      - name: declare(strict_types=1) in app/ and tests/
+      # The Global Constraint binds app/, database/, AND tests/, but
+      # tests/Arch/ConventionsTest.php's rule is ->expect('App') only — it cannot see
+      # database/ (migrations/factories/seeders are namespace-light or return anonymous
+      # classes) or namespace-less Pest test files at all. Everything complies today; this
+      # is what keeps it that way. grep -rL lists files NOT matching, so a non-empty list
+      # is the failure.
+      - name: declare(strict_types=1) in app/, database/, and tests/
         working-directory: backend
         run: |
-          offenders=$(grep -rL --include='*.php' 'declare(strict_types=1);' app tests || true)
+          offenders=$(grep -rL --include='*.php' 'declare(strict_types=1);' app database tests || true)
           if [ -n "$offenders" ]; then
             echo "Missing declare(strict_types=1):"
             echo "$offenders"

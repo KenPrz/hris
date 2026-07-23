@@ -187,7 +187,8 @@ the matrix next:
 - All migrations from `02-data-model.md`, including partial indexes and check constraints.
   Three tiers as explicit FKs (`organizations` → `offices` → `departments`), never a tree,
   so office scoping stays a plain `WHERE office_id = ?`.
-- `employees` with `reports_to_id` (self-FK) and denormalized `organization_id`.
+- `employees` with a denormalized `organization_id` and `current_reports_to_id` — a
+  self-FK cache of the effective-dated `reports_to_id` that lives on `employment_records`.
 - `employment_records` — effective-dated. `is_art82_exempt`, `employment_type`, and base
   rate change mid-career, and a promotion must not retroactively strip last month's
   overtime.
@@ -203,8 +204,10 @@ the matrix next:
   primary key and therefore `NOT NULL`.
 - `app/Domain/Scope/EmployeeScope` — returns a **query constraint, not a boolean**, so it
   composes into every index query and there is exactly one place the boundary is defined.
-- Policies: `EmployeePolicy`, `RequestPolicy`, `SchedulePolicy`, `HolidayPolicy`,
-  `PayRulePolicy`. Each checks the verb via `can()` **and** the subject via `EmployeeScope`.
+- Policies: only `EmployeePolicy` ships end to end in M2, as the proof of the two-check
+  shape (verb via `can()` **and** subject via `EmployeeScope`); `RequestPolicy`,
+  `SchedulePolicy`, `HolidayPolicy`, and `PayRulePolicy` arrive with their features in
+  M4–M6, built on the same shape.
 - `spatie/laravel-activitylog` installed; logging happens inside actions, never in model
   observers — an observer fires for seeders and migrations too, and pollutes the trail HR
   will one day be asked to defend.
@@ -222,6 +225,71 @@ the matrix next:
 
 **404, not 403.** Telling someone "this exists but isn't yours" leaks the org chart —
 which for salary and disciplinary records is itself the disclosure.
+
+**Status: complete.** The four-actor scope matrix is green; `migrate:fresh --seed` builds a
+Manila/Cebu company you can log into as each of the four scopes. **163 backend tests**
+(M0's 27 + M1's 88 + M2's feature/unit/arch), plus the arch suite that mechanically pins
+the invariants below. What the plan above got reconciled to, and what the building actually
+turned on — for whoever extends the schema next:
+
+- **The `employees.user_id`-to-uuid cascade is wider than it looks.** Flipping `users.id`
+  to `uuid default uuidv7()` (so `employees.user_id` can FK it) forces the change through
+  everything that references a user by id, each an insert-time failure that reads like a
+  framework bug if missed: `sessions.user_id` → `foreignUuid`; Sanctum's
+  `personal_access_tokens` → `uuidMorphs` (default `morphs` is bigint — minting a token
+  fails at insert); `activity_log.causer` → `nullableUuidMorphs`; and spatie's morph keys
+  below.
+- **spatie runs without teams, so roles are global and the morph key is uuid.** The
+  published migration was edited: `model_has_roles.model_id` / `model_has_permissions.model_id`
+  → `uuid` (users are uuidv7); with teams off, `roles` carries no team column and is
+  `unique (name, guard_name)`. `roles`/`permissions` keep their `bigint` PKs deliberately —
+  seeded reference data, never client-visible, the uuidv7 reasons don't apply. Manager is
+  **derived from the org chart, not a role**; System Admin is a **flag via `Gate::before`,
+  not a role** (POS's proof that a global role assignment can't exist carries over); spatie
+  is left carrying exactly one role, `HR Admin`. See `05-rbac.md`.
+- **The self-referencing FK needed a follow-up statement.** `employees.current_reports_to_id`
+  references `employees.id`; adding its FK inline in the `create` runs before the table's
+  own `->primary()` (Postgres's Laravel grammar appends the PK to the end of the command
+  list), and Postgres rejects "no unique constraint matching given keys." A second
+  `Schema::table()` call adds the FK after the PK exists. Commented at the site so it isn't
+  "tidied" back inline.
+- **The current-state cache has a single writer, and the arch guard distinguishes reads
+  from writes.** `RecordEmploymentChange` is the only class that may write
+  `current_office_id`/`current_department_id`/`current_reports_to_id` — one transaction
+  writes history and cache together, so they can't disagree, and it advances the cache only
+  when the new row is the latest effective date (a back-dated correction doesn't move it).
+  A grep-based arch test enforces the single writer across three write forms (mass-assign,
+  property, `setAttribute`); the mass-assign form is textually identical to a *read*-mapping
+  in a `JsonResource`, so `app/Http/Resources/` is exempted from that one sub-pattern —
+  resources read these columns for output and structurally can't call
+  `create`/`update`/`fill`. Manager-derived means moving an employee under a new manager is
+  one `RecordEmploymentChange`, no role edit.
+- **`EmployeeScope` gets a narrow carve-out from the framework-agnostic Domain rule.** It
+  lives in `app/Domain/Scope/` and returns an Eloquent `Builder` — its whole contract — so
+  the arch rule that bars facades/`config()` from Domain `->ignoring()`s it explicitly. The
+  rule was always about config purity, never about barring the ORM from the one class whose
+  job is to hand back a constrained query.
+- **`offices.code` is globally unique; `departments.code` is unique only within its office.**
+  An office code stands alone (URLs, report headers); a department code never appears without
+  its office, so `(office_id, code)` is its real identity — which lets `OPS` name Operations
+  in both Manila and Cebu.
+- **`RbacSeeder` flushes the permission cache *between* create and sync, not just at the
+  end.** `findOrCreate`'s first lookup caches the still-empty permission collection, so a
+  later `syncPermissions()` throws `PermissionDoesNotExist` for a permission just inserted.
+  Surfaces only on a fresh boot (`migrate:fresh --seed`) where nothing warmed the cache
+  first. Fixed by flushing between the two, plus a final flush so `CompanySeeder` (which
+  assigns the role next) reads the fresh set. See `05-rbac.md` (Caching).
+- **Reconciled against the plan bullets above.** M2 seeds **no holidays, no `pay_rules`, no
+  shift templates** — the schema this milestone builds has no table for any of them; holiday
+  calendars, pay-rule rows, and shift templates are M4's domain and land with their tables.
+  The seeded company is one org, two offices (Manila, Cebu), four departments, and ten
+  employees with a real reporting chain — an Art. 82-exempt manager per office (each with
+  reports), one punch-only worker with no login — plus a System Admin and an HR Admin per
+  office. Only
+  **`EmployeePolicy`** ships (end to end, as the two-check `can()`-AND-`EmployeeScope`
+  proof); the leave/schedule/holiday/cutoff policies arrive with their features in M4–M6.
+  Refusals are **404 for out-of-scope subjects, 403 for unauthorized actors** — the
+  four-actor matrix asserts both shapes, and that matrix is the milestone's proof.
 
 ## M3 — Vertical slice: punch in, punch out, correct day
 

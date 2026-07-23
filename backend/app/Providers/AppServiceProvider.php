@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Employee;
+use App\Models\User;
+use App\Policies\EmployeePolicy;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
 
@@ -12,6 +18,18 @@ final class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         self::assertConfigured();
+
+        // Global oversight. A System Admin passes every gate; returning null (not false)
+        // for everyone else lets the normal policy chain run. Spatie's own recommended
+        // super-admin pattern. See docs/05-rbac.md.
+        Gate::before(fn (User $user): ?bool => $user->is_system_admin ? true : null);
+
+        // Five login attempts per minute per email+IP. The envelope renders the 429.
+        RateLimiter::for('login', fn ($request) => Limit::perMinute(5)->by(
+            $request->input('email').'|'.$request->ip()
+        ));
+
+        Gate::policy(Employee::class, EmployeePolicy::class);
     }
 
     /**
