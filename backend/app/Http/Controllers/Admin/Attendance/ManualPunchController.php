@@ -8,9 +8,10 @@ use App\Actions\Attendance\RecordPunch;
 use App\Actions\Attendance\RecordPunchInput;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Attendance\PunchSource;
-use App\Domain\Scope\EmployeeScope;
+use App\Exceptions\Domain\CannotManuallyPunchSelf;
 use App\Http\Requests\ManualPunchRequest;
 use App\Http\Resources\AttendanceLogResource;
+use App\Models\Employee;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,10 +22,22 @@ final class ManualPunchController
     public function __invoke(ManualPunchRequest $request, RecordPunch $action): JsonResponse
     {
         $employeeId = $request->string('employee_id')->toString();
+        $user = $request->user();
+
+        // 422, not 404/403: even an HR/system admin may not manually record their own
+        // punch — separation of duties. You don't enter your own time.
+        if ($user->employee?->id === $employeeId) {
+            throw new CannotManuallyPunchSelf();
+        }
 
         // 404, not 403: an out-of-scope subject is indistinguishable from a nonexistent
-        // one — the M2 rule. HR can only backfill for an employee in their scope.
-        $inScope = EmployeeScope::visibleTo($request->user())->whereKey($employeeId)->exists();
+        // one — the M2 rule. A system admin can target anyone; an HR admin can only
+        // backfill for an employee in one of the offices they administer.
+        $target = Employee::query()->find($employeeId);
+
+        $inScope = $user->is_system_admin
+            || ($target !== null && $user->hrAdminOffices()->where('offices.id', $target->current_office_id)->exists());
+
         if (! $inScope) {
             throw new NotFoundHttpException();
         }
