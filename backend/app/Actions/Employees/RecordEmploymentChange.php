@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\Employees;
 
+use App\Exceptions\Domain\EmploymentRecordExists;
 use App\Models\Employee;
 use App\Models\EmploymentRecord;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,19 @@ final class RecordEmploymentChange
     {
         return DB::transaction(function () use ($in): EmploymentRecord {
             $employee = Employee::query()->lockForUpdate()->findOrFail($in->employeeId);
+
+            // The employee lock above serializes concurrent changes to this employee, so
+            // this pre-check is race-safe: no other request can insert a colliding row
+            // between here and the create() below. The unique constraint on
+            // (employee_id, effective_from) remains the ultimate backstop.
+            $duplicate = EmploymentRecord::query()
+                ->where('employee_id', $in->employeeId)
+                ->where('effective_from', $in->effectiveFrom)
+                ->exists();
+
+            if ($duplicate) {
+                throw new EmploymentRecordExists($in->employeeId, $in->effectiveFrom);
+            }
 
             $record = EmploymentRecord::query()->create([
                 'employee_id' => $in->employeeId,

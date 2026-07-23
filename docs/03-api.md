@@ -164,6 +164,14 @@ Inserts one effective-dated `employment_records` row and advances the `current_*
 **only if** the new row is the latest effective date — a back-dated correction updates
 history but leaves the cache on the genuinely-current record (`02-data-model.md`).
 
+```
+  → 422 employment_record_exists   # a change already exists for this employee on that date
+```
+
+A second change on the same `effective_from` is a domain failure, not a silent second row:
+`422 employment_record_exists`, with `employee_id` and `effective_from` in `details`
+(`02-data-model.md`).
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -189,6 +197,7 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 404 | `not_found` | A missing resource **or** an out-of-scope **subject** (the 404-not-403 rule). |
 | 405 | `method_not_allowed` | Wrong HTTP verb on a real route. |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
+| 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 

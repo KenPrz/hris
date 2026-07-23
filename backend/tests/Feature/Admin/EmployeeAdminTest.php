@@ -84,6 +84,35 @@ it('records an employment change for an existing employee over HTTP', function (
         ->and($employee->current_office_id)->toBe($office->id);
 });
 
+it('refuses a second employment change with the same effective_from', function (): void {
+    $org = Organization::factory()->create();
+    $office = Office::factory()->for($org)->create();
+    $dept = Department::factory()->for($office)->create();
+    $employee = Employee::factory()->for($org)->create(['current_office_id' => null]);
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+
+    $payload = [
+        'effective_from' => '2026-02-01',
+        'office_id' => $office->id,
+        'department_id' => $dept->id,
+        'employment_type' => 'regular',
+        'is_art82_exempt' => false,
+        'base_rate_cents' => 61000,
+    ];
+
+    $this->postJson("/api/v1/admin/employees/{$employee->id}/employment", $payload)
+        ->assertCreated();
+
+    $this->postJson("/api/v1/admin/employees/{$employee->id}/employment", $payload)
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'employment_record_exists');
+
+    // The first change still stands: one record, cache populated from it.
+    $employee->refresh();
+    expect($employee->employmentRecords)->toHaveCount(1)
+        ->and($employee->current_office_id)->toBe($office->id);
+});
+
 it('forbids a non-admin from creating employees', function (): void {
     $office = Office::factory()->create();
     Sanctum::actingAs(User::factory()->create());   // not a system admin

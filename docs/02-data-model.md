@@ -230,8 +230,12 @@ date `D`" is `App\Domain\Employment\EmploymentResolver::on()`, and it is exactly
 query: `where effective_from <= D order by effective_from desc limit 1`.
 
 The `unique (employee_id, effective_from)` constraint makes "two changes on the same day"
-structurally one change — the second write is a `409`-shaped conflict rather than a silent
-second row the resolver would have to tie-break.
+structurally one change — `App\Actions\Employees\RecordEmploymentChange` pre-checks for an
+existing row with the same `(employee_id, effective_from)`, inside the same locked
+transaction that inserts the new one, and throws `EmploymentRecordExists`
+(`422 employment_record_exists`, `03-api.md`) rather than letting a second row reach the
+database. The unique constraint stays as the backstop for the pre-check — belt and
+suspenders, not a silent second row the resolver would have to tie-break.
 
 **Why a full history rather than current columns plus an audit log.** The pay engine (M5)
 computing March's payroll *after* a June promotion must read March's `is_art82_exempt` and
