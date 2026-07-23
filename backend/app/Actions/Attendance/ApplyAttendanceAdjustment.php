@@ -53,7 +53,14 @@ final class ApplyAttendanceAdjustment
 
     private function assertAnnullable(?string $targetLogId, string $requesterEmployeeId): void
     {
-        $target = $targetLogId === null ? null : AttendanceLog::query()->find($targetLogId);
+        // lockForUpdate, not a plain find(): two DIFFERENT requests can both target the
+        // SAME attendance_logs row, and each locks a different requests row in
+        // ApproveRequest, so nothing above this serializes them against each other. This
+        // row lock is what does: a second concurrent approval blocks here until the first
+        // commits, then the exists() check below re-reads the now-committed annulment and
+        // throws cleanly, before RecordAnnulment ever attempts a second insert that would
+        // otherwise hit the unique(attendance_log_id) constraint as an uncaught 500.
+        $target = $targetLogId === null ? null : AttendanceLog::query()->lockForUpdate()->find($targetLogId);
 
         if ($target === null || $target->employee_id !== $requesterEmployeeId) {
             throw new InvalidAdjustmentTarget('The punch to correct is missing or not yours.');
