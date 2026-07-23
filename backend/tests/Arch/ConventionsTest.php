@@ -358,3 +358,67 @@ test('only RecordPunch writes attendance_logs', function (): void {
 
     expect(array_keys($writers))->toBe(['Actions/Attendance/RecordPunch.php']);
 });
+
+test('only RecordAnnulment writes attendance_annulments', function (): void {
+    // Same mechanism as the attendance_logs single-writer guard above, adapted to the
+    // annulment table: gate on "file mentions AttendanceAnnulment or attendance_annulments
+    // at all" first, then flag any of the write forms below. ApplyAttendanceAdjustment (a
+    // later task) will READ attendance_annulments (e.g.
+    // AttendanceAnnulment::query()->where('attendance_log_id', ...)->exists()) — a read,
+    // not a write — so the raw DB::table pattern stays scoped to write verbs only
+    // (insert/insertOrIgnore/insertGetId/update/upsert/delete), and no ->where(/->exists(/
+    // ->find( patterns are added, exactly mirroring the attendance_logs guard's scoping.
+    $writers = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app'))
+        ->name('*.php');
+
+    $patterns = [
+        '/AttendanceAnnulment::query\(\)\s*->\s*create\(/',
+        '/AttendanceAnnulment::create\(/',
+        '/new\s+AttendanceAnnulment\b/',
+        '/->update\(/',
+        '/->delete\(/',
+        '/->save\(/',
+        '/updateOrCreate\(/',
+        '/firstOrCreate\(/',
+        '/->upsert\(/',
+        '/DB::table\(\s*[\'"]attendance_annulments[\'"]\s*\)\s*->\s*(insert|insertOrIgnore|insertGetId|update|upsert|delete)\(/',
+    ];
+
+    foreach ($files as $file) {
+        $relativePath = str_replace('\\', '/', $file->getRelativePathname());
+
+        // The model definition itself always mentions "AttendanceAnnulment" and defines
+        // relations, casts, etc. — none of which are writes. Exempt it explicitly rather
+        // than relying on the write patterns never matching it.
+        if ($relativePath === 'Models/AttendanceAnnulment.php') {
+            continue;
+        }
+
+        // A JsonResource is a read-only presentation layer that structurally cannot call
+        // create()/update()/fill()/save()/upsert() on the model it presents. Exempt the
+        // whole directory, as above.
+        if (str_starts_with($relativePath, 'Http/Resources/')) {
+            continue;
+        }
+
+        $contents = $file->getContents();
+
+        if (! str_contains($contents, 'AttendanceAnnulment') && ! str_contains($contents, 'attendance_annulments')) {
+            continue;
+        }
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $writers[$relativePath] = true;
+
+                break;
+            }
+        }
+    }
+
+    expect(array_keys($writers))->toBe(['Actions/Attendance/RecordAnnulment.php']);
+});
