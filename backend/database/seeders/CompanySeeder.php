@@ -4,17 +4,23 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Actions\Attendance\RecordPunch;
+use App\Actions\Attendance\RecordPunchInput;
 use App\Actions\Employees\CreateEmployee;
 use App\Actions\Employees\CreateEmployeeInput;
 use App\Actions\Employees\ProvisionUser;
 use App\Actions\Employees\ProvisionUserInput;
 use App\Actions\Employees\RecordEmploymentChangeInput;
+use App\Domain\Attendance\PunchDirection;
+use App\Domain\Attendance\PunchSource;
+use App\Models\AttendanceLog;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Office;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -107,7 +113,7 @@ final class CompanySeeder extends Seeder
         );
 
         // Three rank-and-file reports. The first one is the "plain employee" credential.
-        $this->onboard(
+        $miguel = $this->onboard(
             employeeNo: 'MNL-0002',
             organization: $org,
             office: $manila,
@@ -119,6 +125,17 @@ final class CompanySeeder extends Seeder
             actorId: $actor,
             login: ['name' => 'Miguel Santos', 'email' => 'employee.manila@hris.test'],
         );
+
+        // A seeded in/out pair so scripts/e2e-adjustments.sh has a real target_log_id to
+        // void without first having to punch and discover one live. Written through
+        // RecordPunch (the one arch-guarded writer), source=manual, recorded_by the
+        // system admin actor above — never a raw insert, same rule the append-only
+        // ledger holds everywhere else. ip_address is null (a manual entry carries no
+        // request IP, same as the HR-manual-backfill path), so it lands `verified`
+        // regardless of Manila's ip_allowlist. Fixed on 2026-01-15, well clear of
+        // whatever "today" the e2e or timekeeping's own script runs against.
+        $this->seedPunch($miguel, PunchDirection::In, '2026-01-15T00:00:00Z', $actor);
+        $this->seedPunch($miguel, PunchDirection::Out, '2026-01-15T09:00:00Z', $actor);
         $this->onboard(
             employeeNo: 'MNL-0003',
             organization: $org,
@@ -231,6 +248,28 @@ final class CompanySeeder extends Seeder
         $cebuHr->user->hrAdminOffices()->attach($cebu->id);
 
         $this->printCredentials();
+    }
+
+    /**
+     * A seeded punch, written the one legal way: through `RecordPunch`, never a raw
+     * insert. Manual-shaped (`source: manual`, no IP/geo) so it lands `verified`
+     * unconditionally. Gives an M3.6 adjustment (a void or amend) a real
+     * `target_log_id` to point at without the e2e script having to punch and discover
+     * one first.
+     */
+    private function seedPunch(Employee $employee, PunchDirection $direction, string $punchedAtUtc, string $actorId): AttendanceLog
+    {
+        return app(RecordPunch::class)->execute(new RecordPunchInput(
+            employeeId: $employee->id,
+            direction: $direction,
+            source: PunchSource::Manual,
+            punchedAt: Carbon::parse($punchedAtUtc),
+            recordedBy: $actorId,
+            ipAddress: null,
+            deviceId: null,
+            geoLat: null,
+            geoLng: null,
+        ));
     }
 
     private function department(Office $office, string $name, string $code): Department

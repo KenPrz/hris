@@ -26,7 +26,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pdo_pgsql, pgsql, bcmath, intl
+          extensions: pdo_pgsql, pgsql, bcmath, intl, exif
       # --no-scripts: composer's post-autoload-dump runs `artisan package:discover`,
       # which boots the framework — and AppServiceProvider::assertConfigured() refuses
       # to boot without HRIS_CURRENCY/HRIS_ORGANIZATION_NAME, neither of which exists on

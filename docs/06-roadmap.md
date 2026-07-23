@@ -391,6 +391,7 @@ building turned on and reconciled to, for whoever extends ingestion next:
 | Was | Now |
 | --- | --- |
 | M3 — vertical slice (ingest → compute → calendar) | M3 — Timekeeping ingestion (above) |
+| — | **M3.6 — Attendance adjustments & the request/approval subsystem**: an employee files a request to correct a missed/wrong punch (add/void/amend, required note, optional RustFS attachment via Media Library), a manager or HR approves, and the correction supersedes the append-only ledger. Builds the shared `requests` spine + state machine + approval-authority rule that leave and OT reuse. See `docs/superpowers/specs/2026-07-24-attendance-adjustments-design.md`. Pulled forward from the old "Requests & approvals" milestone; independent of the frontend and the config spine. |
 | — | **M3.5 — Frontend foundation**: the IBM/Carbon design language, tier-1/2 components, `lib/api.ts`/`keys.ts`/`date.ts`, the auth UI, and the punch + attendance screens, built against M3's real API |
 | M4 — Configuration spine | M4 — Configuration spine (unchanged in content) |
 | M5 — Requests & approvals | **M5 — Compute engine**: `ComputeDailySummary` → `daily_attendance_summaries`, consuming M3's punches and M4's config |
@@ -409,6 +410,97 @@ sections below (`## M5` onward) still carry their *pre-resequencing* titles and 
 its own brainstorm when it is reached (as M3 was here); until then, read the table for
 order and the sections below for the substance of each unit of work, not their heading
 number.
+
+## M3.6 — Attendance adjustments & the request/approval subsystem
+
+An employee correcting their **own** attendance — a missed punch, a wrong direction, a punch
+that shouldn't exist — files a request instead of a self-service punch (which stamps
+server-now and can't backdate). A manager or HR approves; the correction supersedes the
+append-only ledger without ever mutating it. Pulled forward from the old "Requests &
+approvals" milestone, built independent of the frontend (M3.5) and the config spine (M4);
+see `docs/superpowers/specs/2026-07-24-attendance-adjustments-design.md`.
+
+- The shared `requests` spine (type/state/note/decision), reused later by leave and
+  overtime: `pending → approved | rejected | cancelled`, no draft state.
+- `attendance_adjustment_details` — a true 1:1 (`request_id` IS the primary key) holding
+  `operation` (`add`/`void`/`amend`), an optional `target_log_id`, and the `direction`/
+  `punched_at` an `add`/`amend` needs.
+- `attendance_annulments` — append-only, `unique(attendance_log_id)`: how a `void`/`amend`
+  supersedes a punch without editing or deleting the `attendance_logs` row. The **effective
+  ledger** — `attendance_logs` minus `attendance_annulments` — is defined here for M5 to
+  consume; M3.6 does not wire it into any read endpoint (`02-data-model.md`).
+- `RecordAnnulment` — the one arch-guarded writer of `attendance_annulments`, exactly
+  mirroring `RecordPunch`'s single-writer guard on `attendance_logs`.
+- `ApplyAttendanceAdjustment` — the approval effect: `add` → `RecordPunch`
+  (`source: adjustment`); `void` → `RecordAnnulment`; `amend` → both. Runs inside
+  `ApproveRequest`'s `SELECT ... FOR UPDATE`-locked transaction, so a target that turns out
+  invalid at approval time (`422 invalid_adjustment_target`) rolls back the whole approval —
+  the request stays pending, nothing half-applies.
+- `RequestAuthority::canDecide` — in-scope-minus-self: the requester visible to the approver
+  under `EmployeeScope`, and the approver is never the requester. Cancel has its own,
+  narrower rule: requester-only.
+- `POST /attendance/adjustments` (submit, multipart with an optional attachment),
+  `/approve`, `/reject`, `/cancel`, and the reads — `GET /attendance/adjustments` (mine),
+  `/pending` (the approval queue), `/{request}` (scoped show), `/{request}/attachment`
+  (private, app-mediated download) (`03-api.md`).
+- RustFS (S3-protocol) + `spatie/laravel-medialibrary`, `media.model_id` patched to
+  `uuidMorphs` — the `attachments` disk, private, never a direct object URL.
+
+**Done when:** an employee files a missed-punch adjustment with a note and an attachment;
+their manager or HR approves; the punch appears in the ledger via `RecordPunch`
+(`source: adjustment`); a `void`, approved, records an annulment while the raw row stays
+untouched; self-approval is refused (`404`); an already-decided request refuses further
+transitions (`409`); the attachment downloads only for those who may see the request; two
+concurrent approvals resolve to one winner; and `attendance_annulments` has one arch-guarded
+writer. `scripts/e2e-adjustments.sh` walks the add-with-attachment and void paths against the
+live stack (real RustFS).
+
+**Status: complete.** **266 backend tests** (M0–M3's 201 + 65 for this milestone — schema,
+submit, the three effects, transitions/authority, the two-process concurrency proof, reads,
+and Media Library), **17 arch tests** (16 carried over + *"only RecordAnnulment writes
+attendance_annulments"*), frontend unchanged at **16** (M3.6 is backend-only; M3.5 hasn't
+landed yet). What the building turned on, for whoever extends the requests spine next:
+
+- **The effective ledger is a query, not an endpoint, on purpose.** `attendance_logs` minus
+  `attendance_annulments` is proven in `ApplyAdjustmentTest.php` (a raw
+  `whereNotIn('id', AttendanceAnnulment::select('attendance_log_id'))`), but `GET
+  /me/attendance` and `/employees/{employee}/attendance` deliberately keep returning the
+  **raw** ledger unfiltered — an annulled punch still happened and is still shown, the same
+  "record you'd show an inspector" principle M3 established. Filtering it out is M5's job,
+  when there is a computation that actually needs the effective set; wiring it into the raw
+  read now would blur the one thing M3 exists to keep honest. Whoever builds M5: read the
+  effective ledger, never the raw table, for anything that touches pay.
+- **404-vs-409-vs-422 ordering is load-bearing, and reject's is the subtle one.** Approve and
+  reject both check authority (`404`) before pending-ness (`409`) before their own effect —
+  an out-of-scope prober must never learn a request exists by getting a *different* refusal
+  than a truly-nonexistent id would produce. Reject's `decision_note`-required check sits
+  **inside** the action, after both of those, specifically because validating it in the
+  `FormRequest` (which runs before route-model-bound authority) would let an out-of-scope
+  caller distinguish "exists but hidden" (`400` on an empty body) from "doesn't exist"
+  (`404`) — an existence leak an opus-level review caught before merge, not after. The fix
+  is the ordering itself: authority → pending → note-validation.
+- **The row lock had to be proven with two real Postgres sessions, not two sequential
+  calls.** A same-process "approve twice in a row" test proves the *state guard* (the second
+  call sees `state: approved` and 409s) but never contends for the lock — nothing is held
+  open concurrently in one PHP process. `ApproveRequestConcurrencyTest` forks a genuine
+  second OS process (`proc_open`, a real second Postgres backend) that takes and holds
+  `ApproveRequest`'s exact row lock; this process's concurrent call must actually block at
+  the database level, then see the row already decided once the holder commits. It
+  deliberately skips `RefreshDatabase` (that trait's outer transaction would hide its fixture
+  rows from the second, genuinely separate connection) and cleans up by hand instead.
+- **A missing `ext-exif` PHP extension silently desynced the containerized `api_vendor`
+  volume.** `spatie/image` (a `laravel-medialibrary` dependency) hard-requires it; the dev
+  Dockerfile installed `pdo_pgsql pgsql bcmath intl opcache` but not `exif`, so every
+  container-boot `composer install` refused before touching the filesystem — "Your lock file
+  does not contain a compatible set of packages" — leaving the named volume holding
+  pre-M3.6 packages while `composer.lock`/`installed.json` already described the post-M3.6
+  set. Native `./vendor/bin/pest` (host PHP, which does have `exif`) never saw this, which is
+  why it went unnoticed through Tasks 1–8. Fixed by adding `exif` to the Dockerfile's
+  `install-php-extensions` line; found and fixed running this task's `make test`.
+- **Media Library's `media` table needed one edit, not a fork.** `morphs('model')` (the
+  package's published migration) is `bigint`; every owner here is a uuidv7 string, so it
+  became `uuidMorphs('model')` — the same edit `personal_access_tokens` needed in M2, applied
+  to a third table for the same reason.
 
 ## M4 — Configuration spine
 

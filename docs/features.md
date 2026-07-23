@@ -113,8 +113,32 @@ before any of it was wired to a button.
   exactly as recorded, including any that were flagged for review; turning punches into paid
   hours is a later step.
 
+## Correcting your own attendance *(M3.6)*
+
+- **Filing a correction.** If you missed a punch, punched the wrong direction, or a punch
+  shouldn't be there at all, you file a request — add a missing clock-in/out, void a wrong
+  one, or amend one to the right time — with a required note explaining what happened. You
+  cannot backdate your own clock-in the way a manual HR entry can; a correction always goes
+  through this request, reviewed by someone else, never silently applied.
+- **Attaching proof.** A correction can carry one supporting file — a photo, a PDF — kept
+  private: only you, and whoever is deciding your request, can ever download it. It is never
+  a public link.
+- **Manager or HR approval.** Your direct manager or an HR admin over your office reviews and
+  decides — approve, or reject with a required explanation of why. Nobody can approve their
+  own request, no matter how broad their own reach otherwise is; trying to shows up exactly
+  like the request doesn't exist. A request already decided refuses a second decision. You
+  can withdraw your own pending request at any time before it's decided.
+- **What approval actually does.** An approved *add* becomes a real punch, exactly like
+  clocking in yourself, just recorded as a correction. An approved *void* means that a wrong
+  punch is superseded — never edited or erased, since the raw attendance record is never
+  rewritten (see above), but from that point on it's understood as not counting. An *amend*
+  does both at once: the wrong punch is superseded and the corrected one takes its place.
+- **Reviewing your own requests, and the queue you need to act on.** You can see every
+  correction you've ever filed and its outcome. If you're a manager or HR admin, you see a
+  queue of everyone else's pending requests you're allowed to decide — never your own, and
+  never anyone outside who you already oversee.
+
 ---
 
-*(Employees correcting their **own** missed punches, through a request their manager or HR
-approves, is a dedicated feature coming in its own milestone. Turning punches into computed
-pay — the schedules, holidays, and premium-rate engine — follows after that.)*
+*(Turning punches into computed pay — the schedules, holidays, and premium-rate engine —
+follows in a later milestone, once the configuration spine exists for it to read.)*

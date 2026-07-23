@@ -236,11 +236,10 @@ an out-of-scope *subject* (indistinguishable from nonexistent, per the M2 rule i
 `05-rbac.md`). The endpoint is not behind `idempotent`: an HR correction is a considered
 one-off, not a retryable network event.
 
-> **Note — self-corrections are a later milestone.** An employee fixing their *own* missed
-> punch does **not** go through this endpoint. That flows through a dedicated attendance
-> **adjustment request** (a note, an optional attachment, approved by the employee's
-> `reports_to` or HR), which is its own milestone (`06-roadmap.md`). M3 ships raw ingestion
-> only; it does not build the request/approval flow.
+> **Note — self-corrections don't go through this endpoint.** An employee fixing their
+> *own* missed punch never calls the manual route above — that flows through the
+> attendance **adjustment request** below (a note, an optional attachment, approved by the
+> employee's `reports_to` or HR).
 
 ### Reading a month of punches
 
@@ -262,6 +261,146 @@ own local calendar date, honestly, and turning punches into paid hours is M5's j
 punches appear here exactly as recorded. The employee-scoped variant reuses `EmployeeScope`
 and the 404-not-403 rule unchanged — an HR admin sees their office's punches, a manager
 their reports', and an out-of-scope subject `404`s.
+
+**These two reads stay raw even after M3.6.** An approved `void`/`amend` never changes what
+either endpoint returns — the annulled row is still a real, once-true punch, and this is the
+ledger you'd show an inspector. The **effective ledger** (`02-data-model.md`) that excludes
+an annulled punch is a query, not an endpoint, until M5's compute engine is the thing that
+needs to read it.
+
+## Attendance adjustments *(M3.6)*
+
+An employee's own correction, on the shared `requests` spine (`02-data-model.md`):
+`pending → approved | rejected | cancelled`, one detail table per request type (only
+`attendance_adjustment` exists today), a manager or HR approves — never the requester
+themself, however broad their own scope otherwise reaches.
+
+### Submit
+
+```
+POST /api/v1/attendance/adjustments   # auth:sanctum — any employee, for their own record
+  multipart/form-data:
+    operation:       "add" | "void" | "amend"
+    note:             string, REQUIRED
+    target_log_id:    uuid   — REQUIRED for void/amend (the punch being corrected)
+    direction:        "in" | "out" — REQUIRED for add/amend
+    punched_at:       ISO-8601, offset-bearing — REQUIRED for add/amend
+    attachment:       file, OPTIONAL — pdf/jpg/jpeg/png, ≤10MB
+  → 201 { data: <request, below> }
+  → 400 validation_failed         # missing note/operation, or a required_if field missing
+  → 422 not_an_employee           # the caller has no linked employee record
+```
+
+Deliberately **not** admin-gated (any signed-in employee may file for their own attendance)
+and **not** behind the `idempotent` middleware — a considered one-off submission, not a
+retryable network event, unlike self-service punch. Multipart because of the optional file;
+a submission with no `attachment` field is a plain JSON-shaped form post. `punched_at` is
+normalized to a true UTC instant before the write (the same `->utc()` fix M3's `RecordPunch`
+needed) — submitting `2026-07-01T08:00:00+08:00` stores the `00:00Z` instant it means, not a
+silently-corrupted local-time-as-UTC read. Whether the `void`/`amend` target is actually
+valid (belongs to the requester, still exists, isn't already annulled) is **not** checked at
+submission — only at approval, under the request's row lock (`02-data-model.md`).
+
+The request/detail shape returned by submit, and by every read below:
+
+```json
+{ "data": {
+  "id": "0199…", "type": "attendance_adjustment", "state": "pending",
+  "note": "Forgot to clock in", "employee_id": "0199…",
+  "detail": { "operation": "add", "target_log_id": null, "direction": "in",
+              "punched_at": "2026-07-20T08:00:00+00:00" },
+  "decided_by": null, "decided_at": null, "decision_note": null,
+  "has_attachment": true
+} }
+```
+
+`has_attachment` is a boolean, never the file itself or a URL to it — the file is only ever
+reachable through the scoped download endpoint below.
+
+### Approve / reject / cancel
+
+```
+POST /api/v1/attendance/adjustments/{request}/approve   # auth:sanctum
+  → 200 { data: <request, state: "approved", decided_by, decided_at> }
+  → 404 not_found              # out of the approver's scope, OR the approver IS the requester
+  → 409 request_not_pending    # already approved/rejected/cancelled
+  → 422 invalid_adjustment_target   # a void/amend target is missing, not the requester's,
+                                     #   or already annulled by an earlier approval
+```
+
+```
+POST /api/v1/attendance/adjustments/{request}/reject
+  { "decision_note": string, REQUIRED }
+  → 200 { data: <request, state: "rejected", decision_note> }
+  → 404 not_found              # same authority rule as approve
+  → 409 request_not_pending
+  → 400 validation_failed      # decision_note missing or empty
+```
+
+```
+POST /api/v1/attendance/adjustments/{request}/cancel     # requester only
+  → 200 { data: <request, state: "cancelled"> }
+  → 404 not_found              # the caller is not the requester (narrower than approve/reject)
+  → 409 request_not_pending
+```
+
+**Authority is "in-scope-minus-self": `RequestAuthority::canDecide`** — the requester must
+be visible to the approver under `EmployeeScope::visibleTo()` (self, direct reports, HR's
+office, or system-admin-all) **and** the approver must not be the requester. A manager
+approves their report's request, an HR admin their office's, a system admin anyone's; the
+requester approving their own — however broad their scope otherwise is — is refused exactly
+like an out-of-scope stranger, `404`, never a different status that would confirm "this is
+yours, you just can't approve it." **Cancel has its own, narrower rule**: only the requester
+may cancel, so a manager or HR admin who could approve the request may **not** cancel it on
+the requester's behalf.
+
+**Order of checks, and why it's fixed:** authority (`404`) → pending (`409`) → the effect,
+which can itself fail (`422 invalid_adjustment_target`, rolling back the whole approval —
+the request stays pending). Reject's `decision_note` requiredness is checked **last**,
+*inside* the action, deliberately after authority and pending — validating it at the HTTP
+layer would let an out-of-scope prober distinguish "exists but hidden" (`400` on an empty
+body) from "doesn't exist" (`404`), the exact existence leak the 404-not-403 rule exists to
+close. So an out-of-scope reject with an empty body is still `404`, never `400`.
+
+**Approval is transactional with its effect.** `add` → `RecordPunch` (`source: adjustment`,
+`recorded_by` the approver); `void` → `RecordAnnulment`; `amend` → both. All three, plus the
+request's own state write, happen inside one `SELECT ... FOR UPDATE`-locked transaction — if
+the effect throws, nothing commits, including the state transition.
+
+### List mine, the approval queue, show, and the attachment
+
+```
+GET /api/v1/attendance/adjustments            # auth:sanctum — the caller's own, any state
+  → { data: [ <request>, … ] }
+  → 422 not_an_employee
+
+GET /api/v1/attendance/adjustments/pending    # auth:sanctum — the approval queue
+  → { data: [ <request>, … ] }   # in-scope-minus-self, state=pending only
+```
+
+The pending queue is exactly the set `RequestAuthority::canDecide` would accept one request
+at a time: every pending request whose requester is visible to the caller under
+`EmployeeScope`, excluding the caller's own. (Registered *before* the `{request}` show route
+below — otherwise `/pending` would bind as a `{request}` uuid lookup and 404 via route-model
+binding instead of ever reaching this controller.)
+
+```
+GET /api/v1/attendance/adjustments/{request}            # auth:sanctum
+  → 200 { data: <request> }
+  → 404 not_found   # neither the requester nor an authorized approver
+
+GET /api/v1/attendance/adjustments/{request}/attachment # auth:sanctum
+  → 200 <file stream>
+  → 404 not_found   # unauthorized viewer, OR the request has no attachment at all
+```
+
+Both share one visibility rule: the requester themself, or anyone for whom
+`RequestAuthority::canDecide` is true — the same in-scope-minus-self test approval uses, so
+an approver can review the whole request (including the attachment) before deciding, and
+everyone else gets the identical `404` whether the request doesn't exist, belongs to a
+stranger, or exists but has no file. The attachment is a **private, app-mediated stream**
+(`Media::toResponse()`), never a public or presigned RustFS URL — RustFS itself is only
+reachable from inside the container network (`02-data-model.md`).
 
 ## Errors
 
@@ -288,10 +427,12 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 404 | `not_found` | A missing resource **or** an out-of-scope **subject** (the 404-not-403 rule). |
 | 405 | `method_not_allowed` | Wrong HTTP verb on a real route. |
 | 409 | `idempotency_key_reused` | An `Idempotency-Key` replayed with a *different* body, or by a *different* user than minted it (the hash folds in the acting user). |
+| 409 | `request_not_pending` | Approving, rejecting, or cancelling a request that is already `approved`/`rejected`/`cancelled`. |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
-| 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch or read their own attendance. |
+| 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, or submit/list their own adjustments. |
 | 422 | `cannot_punch_self` | An HR/admin using the manual entry endpoint to record their *own* punch (separation of duties). |
+| 422 | `invalid_adjustment_target` | Approving a `void`/`amend` whose target punch is missing, belongs to someone else, or was already annulled by an earlier approval. |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 
@@ -302,9 +443,9 @@ you). See `05-rbac.md`.
 ## What is not here yet
 
 Schedules, holidays, leave, cutoffs, and payroll export are their own milestones
-(`06-roadmap.md`); their endpoints land with them. So does the attendance **adjustment
-request** flow — an employee correcting their own missed punch, approved by their manager or
-HR — which is a later milestone, not part of M3's raw ingestion.
+(`06-roadmap.md`); their endpoints land with them. Leave and overtime requests reuse the
+`requests` spine M3.6 built above, but their own detail tables and endpoints are not built
+yet.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

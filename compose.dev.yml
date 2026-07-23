@@ -55,6 +55,11 @@ services:
       DB_PASSWORD: ${HRIS_DEV_DB_PASSWORD:-hris}
       HRIS_CURRENCY: PHP
       HRIS_ORGANIZATION_NAME: "Dev Company Inc."
+      ATTACHMENTS_S3_KEY: ${HRIS_DEV_RUSTFS_KEY:-hrislocal}
+      ATTACHMENTS_S3_SECRET: ${HRIS_DEV_RUSTFS_SECRET:-hrislocalsecret}
+      ATTACHMENTS_S3_REGION: us-east-1
+      ATTACHMENTS_S3_BUCKET: hris-attachments
+      ATTACHMENTS_S3_ENDPOINT: http://rustfs:9000
     healthcheck:
       # Ready means "composer install finished AND the app answers" — first boot
       # installs vendor into a fresh named volume, which takes minutes.
@@ -106,7 +111,55 @@ services:
         fi
         exec su node -s /bin/sh -c 'npm install && npm run dev'
 
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: ${HRIS_DEV_RUSTFS_KEY:-hrislocal}
+      RUSTFS_SECRET_KEY: ${HRIS_DEV_RUSTFS_SECRET:-hrislocalsecret}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_VOLUMES: /data
+    ports:
+      - "${HRIS_DEV_RUSTFS_PORT:-9100}:9000"
+      - "${HRIS_DEV_RUSTFS_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - rustfs_data:/data
+    # No chown-once dance needed here, unlike api/web: the rustfs image bakes /data as
+    # rustfs:rustfs (uid/gid 10001) into the image layer via its own VOLUME declaration,
+    # and Docker seeds a fresh named volume's ownership from that image path on first
+    # mount. Verified by booting against a brand-new volume: /data comes up
+    # rustfs-owned with no permission errors, no `user: root` required.
+    healthcheck:
+      # Not the bucket-root path: an unauthenticated GET / is a valid S3 request that
+      # RustFS answers 403 (auth required), which `curl -f` treats as failure forever —
+      # verified against a live container, and it would wedge rustfs-init below (it
+      # waits on service_healthy). /health is RustFS's unauthenticated liveness path
+      # and returns 200.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  rustfs-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      rustfs: { condition: service_healthy }
+    environment:
+      AWS_ACCESS_KEY_ID: ${HRIS_DEV_RUSTFS_KEY:-hrislocal}
+      AWS_SECRET_ACCESS_KEY: ${HRIS_DEV_RUSTFS_SECRET:-hrislocalsecret}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh","-c"]
+    # Create the bucket if absent, then exit. --endpoint-url points at the in-network S3 API.
+    command:
+      - |
+        aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket hris-attachments 2>/dev/null \
+          || aws --endpoint-url http://rustfs:9000 s3 mb s3://hris-attachments
+    restart: "no"
+
 volumes:
   pgdata:
   api_vendor:
   web_node_modules:
+  rustfs_data:

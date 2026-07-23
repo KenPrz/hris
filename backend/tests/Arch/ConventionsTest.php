@@ -52,6 +52,9 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Attendance\AdjustmentOperation',
+        'App\Domain\Requests\RequestType',
+        'App\Domain\Requests\RequestState',
     ])
     ->toBeFinal()
     ->ignoring([
@@ -59,6 +62,9 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Attendance\AdjustmentOperation',
+        'App\Domain\Requests\RequestType',
+        'App\Domain\Requests\RequestState',
     ]);
 
 arch('controllers are final single-action classes')
@@ -167,6 +173,23 @@ test('every Attendance controller references a scope or self check', function ()
     // present; this greps every controller under Attendance/ for one of the two and fails
     // if neither is found, so a future controller that loads and serializes an
     // AttendanceLog with no scope/self check at all is caught here rather than in review.
+    //
+    // The three Task 7 transition controllers (Adjustments/Approve|Reject|CancelController)
+    // are a third, deliberately different shape: they serve a Request, not an AttendanceLog,
+    // and their authorization boundary is RequestAuthority (approve/reject) or
+    // requester-identity (cancel) — enforced inside the row-locked action, not by an
+    // EmployeeScope query or a `user()->employee` read in the controller itself (an
+    // approver need not even have an Employee record: a bare system-admin account can
+    // approve). Neither grep pattern can see that boundary, so they are exempted by name
+    // here rather than papering over the gap with an incidental string match; the
+    // guarantee they'd otherwise assert is instead proven by the 404-vs-409 matrix in
+    // tests/Feature/Attendance/AdjustmentTransitionsTest.php.
+    $exemptTransitionControllers = [
+        'Adjustments/ApproveController.php',
+        'Adjustments/RejectController.php',
+        'Adjustments/CancelController.php',
+    ];
+
     $offenders = [];
 
     $files = (new Finder)
@@ -180,6 +203,10 @@ test('every Attendance controller references a scope or self check', function ()
     ];
 
     foreach ($files as $file) {
+        if (in_array($file->getRelativePathname(), $exemptTransitionControllers, true)) {
+            continue;
+        }
+
         $contents = $file->getContents();
 
         $guarded = false;
@@ -351,4 +378,68 @@ test('only RecordPunch writes attendance_logs', function (): void {
     }
 
     expect(array_keys($writers))->toBe(['Actions/Attendance/RecordPunch.php']);
+});
+
+test('only RecordAnnulment writes attendance_annulments', function (): void {
+    // Same mechanism as the attendance_logs single-writer guard above, adapted to the
+    // annulment table: gate on "file mentions AttendanceAnnulment or attendance_annulments
+    // at all" first, then flag any of the write forms below. ApplyAttendanceAdjustment (a
+    // later task) will READ attendance_annulments (e.g.
+    // AttendanceAnnulment::query()->where('attendance_log_id', ...)->exists()) — a read,
+    // not a write — so the raw DB::table pattern stays scoped to write verbs only
+    // (insert/insertOrIgnore/insertGetId/update/upsert/delete), and no ->where(/->exists(/
+    // ->find( patterns are added, exactly mirroring the attendance_logs guard's scoping.
+    $writers = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app'))
+        ->name('*.php');
+
+    $patterns = [
+        '/AttendanceAnnulment::query\(\)\s*->\s*create\(/',
+        '/AttendanceAnnulment::create\(/',
+        '/new\s+AttendanceAnnulment\b/',
+        '/->update\(/',
+        '/->delete\(/',
+        '/->save\(/',
+        '/updateOrCreate\(/',
+        '/firstOrCreate\(/',
+        '/->upsert\(/',
+        '/DB::table\(\s*[\'"]attendance_annulments[\'"]\s*\)\s*->\s*(insert|insertOrIgnore|insertGetId|update|upsert|delete)\(/',
+    ];
+
+    foreach ($files as $file) {
+        $relativePath = str_replace('\\', '/', $file->getRelativePathname());
+
+        // The model definition itself always mentions "AttendanceAnnulment" and defines
+        // relations, casts, etc. — none of which are writes. Exempt it explicitly rather
+        // than relying on the write patterns never matching it.
+        if ($relativePath === 'Models/AttendanceAnnulment.php') {
+            continue;
+        }
+
+        // A JsonResource is a read-only presentation layer that structurally cannot call
+        // create()/update()/fill()/save()/upsert() on the model it presents. Exempt the
+        // whole directory, as above.
+        if (str_starts_with($relativePath, 'Http/Resources/')) {
+            continue;
+        }
+
+        $contents = $file->getContents();
+
+        if (! str_contains($contents, 'AttendanceAnnulment') && ! str_contains($contents, 'attendance_annulments')) {
+            continue;
+        }
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $writers[$relativePath] = true;
+
+                break;
+            }
+        }
+    }
+
+    expect(array_keys($writers))->toBe(['Actions/Attendance/RecordAnnulment.php']);
 });
