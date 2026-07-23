@@ -1,0 +1,47 @@
+/*
+ * Carbon tokens, hand-written from DESIGN.md's front-matter. DESIGN.md is the authority;
+ * if a value here disagrees with it, DESIGN.md wins. This is the one place a raw hex or
+ * type step may appear — everything else references a var().
+ */
+:root {
+  /* colour */
+  --blue: #0f62fe;
+  --blue-hover: #0050e6;
+  --blue-60: #0043ce;
+  --blue-80: #002d9c;
+  --on-primary: #ffffff;
+  --ink: #161616;
+  --ink-muted: #525252;
+  --ink-subtle: #8c8c8c;
+  --canvas: #ffffff;
+  --surface-1: #f4f4f4;
+  --surface-2: #e0e0e0;
+  --inverse-canvas: #161616;
+  --inverse-surface-1: #262626;
+  --inverse-ink: #ffffff;
+  --inverse-ink-muted: #c6c6c6;
+  --hairline: #e0e0e0;
+  --hairline-strong: #161616;
+  --success: #24a148;
+  --warning: #f1c21b;
+  --error: #da1e28;
+
+  /* radius — the brand is square */
+  --radius: 0px;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+
+  /* spacing */
+  --sp-xxs: 4px;  --sp-xs: 8px;   --sp-sm: 12px;  --sp-md: 16px;
+  --sp-lg: 24px;  --sp-xl: 32px;  --sp-xxl: 48px; --sp-section: 96px;
+
+  /* type: size / weight / line-height / tracking */
+  --t-display-md: 300 42px/1.20 var(--font-plex);
+  --t-headline:   400 32px/1.25 var(--font-plex);
+  --t-card-title: 400 24px/1.33 var(--font-plex);
+  --t-subhead:    400 20px/1.40 var(--font-plex);
+  --t-body:       400 16px/1.50 var(--font-plex);
+  --t-body-sm:    400 14px/1.29 var(--font-plex);
+  --t-emphasis:   600 14px/1.29 var(--font-plex);
+  --t-caption:    400 12px/1.33 var(--font-plex);
+}
