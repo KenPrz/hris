@@ -53,6 +53,6 @@ it('rejects a direction outside the CHECK constraint', function (): void {
 it('keeps the CHECK value lists in sync with the enum cases', function (): void {
     // If someone adds an enum case without widening the CHECK (or vice versa), this fails.
     expect(array_map(fn ($c) => $c->value, PunchDirection::cases()))->toBe(['in', 'out'])
-        ->and(array_map(fn ($c) => $c->value, PunchSource::cases()))->toBe(['web', 'manual', 'device'])
+        ->and(array_map(fn ($c) => $c->value, PunchSource::cases()))->toBe(['web', 'manual', 'device', 'adjustment'])
         ->and(array_map(fn ($c) => $c->value, PunchVerification::cases()))->toBe(['verified', 'flagged']);
 });

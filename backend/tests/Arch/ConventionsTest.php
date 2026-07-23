@@ -52,6 +52,7 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
     ])
@@ -61,6 +62,7 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
     ]);

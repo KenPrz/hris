@@ -10,4 +10,5 @@ enum PunchSource: string
     case Web = 'web';
     case Manual = 'manual';
     case Device = 'device';
+    case Adjustment = 'adjustment';
 }
