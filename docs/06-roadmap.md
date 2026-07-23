@@ -391,6 +391,7 @@ building turned on and reconciled to, for whoever extends ingestion next:
 | Was | Now |
 | --- | --- |
 | M3 — vertical slice (ingest → compute → calendar) | M3 — Timekeeping ingestion (above) |
+| — | **M3.6 — Attendance adjustments & the request/approval subsystem**: an employee files a request to correct a missed/wrong punch (add/void/amend, required note, optional RustFS attachment via Media Library), a manager or HR approves, and the correction supersedes the append-only ledger. Builds the shared `requests` spine + state machine + approval-authority rule that leave and OT reuse. See `docs/superpowers/specs/2026-07-24-attendance-adjustments-design.md`. Pulled forward from the old "Requests & approvals" milestone; independent of the frontend and the config spine. |
 | — | **M3.5 — Frontend foundation**: the IBM/Carbon design language, tier-1/2 components, `lib/api.ts`/`keys.ts`/`date.ts`, the auth UI, and the punch + attendance screens, built against M3's real API |
 | M4 — Configuration spine | M4 — Configuration spine (unchanged in content) |
 | M5 — Requests & approvals | **M5 — Compute engine**: `ComputeDailySummary` → `daily_attendance_summaries`, consuming M3's punches and M4's config |
