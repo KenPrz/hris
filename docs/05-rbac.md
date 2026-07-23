@@ -52,9 +52,19 @@ them all:
 Four of these six gate features that do not exist yet. They are seeded now anyway because
 the role catalog is the "fully configurable" surface the brief asked for, and naming a
 permission before its endpoint exists is cheaper than a migration per feature — the same
-forward-declaration the schema uses for `offices.geofence_*`. What M2 actually *enforces*
-is `employee.manage` on the admin employee endpoints; the rest are inert until their
-milestone wires an endpoint that names them.
+forward-declaration the schema uses for `offices.geofence_*`. **M2 enforces none of the six
+yet — this is data seeded for M4+ to wire, not a verb any reachable endpoint checks.**
+`employee.manage` is referenced exactly once in the codebase, in `EmployeePolicy::update()`,
+and no controller calls `update` (or `authorize('update', ...)`) in M2 — the only
+`EmployeePolicy` ability any endpoint exercises is `view`. The admin employee endpoints
+(`POST /admin/employees`, the login-provisioning and employment-change routes) are gated by
+`$this->user()?->is_system_admin` in each FormRequest's `authorize()` — a system-admin
+check, not a permission check — which is why a non-admin hitting them gets `403`. An HR
+Admin's actual authority in M2 is entirely scope-based: `EmployeeScope` plus
+`EmployeePolicy::view` let them view and list employees within their `hr_admin_offices`, and
+that authority exists whether or not they hold the `HR Admin` role's verbs at all. The six
+verbs become load-bearing only when M4–M6 wire an employee-edit or leave-approval endpoint
+that names one.
 
 ### Scope — `EmployeeScope`
 
