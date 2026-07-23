@@ -52,6 +52,8 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Requests\RequestType',
+        'App\Domain\Requests\RequestState',
     ])
     ->toBeFinal()
     ->ignoring([
@@ -59,6 +61,8 @@ arch('domain value objects are final')
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
+        'App\Domain\Requests\RequestType',
+        'App\Domain\Requests\RequestState',
     ]);
 
 arch('controllers are final single-action classes')
