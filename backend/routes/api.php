@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
@@ -42,6 +43,10 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/employees', CreateEmployeeController::class);
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
+
+            // Manual entry is deliberately not behind `idempotent` — HR entering a
+            // correction is a considered one-off, not a retryable network event.
+            Route::post('/attendance/punch', ManualPunchController::class);
         });
     });
 });
