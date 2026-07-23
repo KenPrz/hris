@@ -32,7 +32,13 @@ arch('the domain layer is framework-agnostic')
         'Illuminate\Foundation',
         'Illuminate\Support\Facades',
         'Illuminate\Database',
-    ]);
+    ])
+    // EmployeeScope is a Scope/query-constraint builder, not a plain domain value object or
+    // policy — its entire job is to return an Eloquent Builder. The M1 purity rule this arch
+    // test enforces bars config() and facades from the domain layer; it was never meant to bar
+    // the ORM from the one class whose contract is "hand back a constrained query." See
+    // docs/superpowers/specs/2026-07-23-m2-schema-auth-rbac-design.md.
+    ->ignoring('App\Domain\Scope\EmployeeScope');
 
 arch('the domain layer never reads configuration')
     ->expect('App\Domain')
