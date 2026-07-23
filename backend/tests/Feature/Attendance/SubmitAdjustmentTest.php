@@ -49,6 +49,27 @@ it('submits an add adjustment', function (): void {
         ->and($request->attendanceAdjustmentDetail->target_log_id)->toBeNull();
 });
 
+it('stores a submitted offset-bearing punched_at as a true UTC instant', function (): void {
+    adjustmentActingEmployee();
+
+    // 08:00+08:00 is 00:00Z — the detail must record the instant, not the wall clock.
+    $this->postJson('/api/v1/attendance/adjustments', [
+        'operation' => 'add',
+        'note' => 'Backfilling a Manila-time punch.',
+        'direction' => 'in',
+        'punched_at' => '2026-07-20T08:00:00+08:00',
+    ])->assertCreated();
+
+    $request = Request::query()->first();
+
+    $stored = Illuminate\Support\Facades\DB::table('attendance_adjustment_details')
+        ->where('request_id', $request->id)
+        ->value('punched_at');
+
+    expect(Illuminate\Support\Carbon::parse($stored)->utc()->toIso8601String())
+        ->toBe('2026-07-20T00:00:00+00:00');
+});
+
 it('submits a void adjustment against an existing log', function (): void {
     $employee = adjustmentActingEmployee();
     $log = AttendanceLog::factory()->create(['employee_id' => $employee->id]);

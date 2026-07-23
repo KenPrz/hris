@@ -8,6 +8,7 @@ use App\Domain\Requests\RequestState;
 use App\Domain\Requests\RequestType;
 use App\Models\AttendanceAdjustmentDetail;
 use App\Models\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -32,7 +33,13 @@ final class SubmitAttendanceAdjustment
                 'operation' => $in->operation,
                 'target_log_id' => $in->targetLogId,
                 'direction' => $in->direction,
-                'punched_at' => $in->punchedAt,
+                // Normalise to a true UTC instant before the timestamptz write. A client may
+                // submit an offset-bearing time (e.g. 08:00+08:00); Eloquent's datetime cast
+                // formats without the offset, which would silently store the wrong instant —
+                // the same trap RecordPunch guards against with ->utc().
+                'punched_at' => $in->punchedAt !== null
+                    ? Carbon::parse($in->punchedAt)->utc()
+                    : null,
             ]);
 
             if ($in->attachment !== null) {
