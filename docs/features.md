@@ -106,8 +106,15 @@ before any of it was wired to a button.
   (your own attendance goes through clocking in, or a correction request), and HR can only
   do it for employees in the offices they administer.
 
+- **Seeing your attendance.** An employee can pull up a month of their own punches,
+  organized by the day each one falls on in their office's local time — so a night shift
+  that ends after midnight shows its clock-out on the correct calendar day. A manager or HR
+  admin can see the same for the people they oversee. This view shows the raw punches
+  exactly as recorded, including any that were flagged for review; turning punches into paid
+  hours is a later step.
+
 ---
 
-*(More M3 timekeeping features — viewing your month of attendance — will be listed here as
-they ship. Employees correcting their **own** missed punches, through a request their
-manager or HR approves, is a dedicated feature coming in its own milestone.)*
+*(Employees correcting their **own** missed punches, through a request their manager or HR
+approves, is a dedicated feature coming in its own milestone. Turning punches into computed
+pay — the schedules, holidays, and premium-rate engine — follows after that.)*
