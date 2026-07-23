@@ -5,9 +5,8 @@ declare(strict_types=1);
 use App\Domain\Attendance\AdjustmentOperation;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Attendance\PunchSource;
-use App\Domain\Attendance\PunchVerification;
-use App\Models\AttendanceAnnulment;
 use App\Models\AttendanceAdjustmentDetail;
+use App\Models\AttendanceAnnulment;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
 use App\Models\Office;
@@ -87,6 +86,17 @@ it('rejects an operation outside the CHECK via a raw insert', function (): void 
     expect(fn () => DB::table('attendance_adjustment_details')->insert([
         'request_id' => $request->id,
         'operation' => 'delete',   // not in ('add','void','amend')
+    ]))->toThrow(Illuminate\Database\QueryException::class);
+});
+
+it('rejects a direction outside the CHECK via a raw insert', function (): void {
+    $employee = Employee::factory()->create();
+    $request = Request::factory()->create(['employee_id' => $employee->id]);
+
+    expect(fn () => DB::table('attendance_adjustment_details')->insert([
+        'request_id' => $request->id,
+        'operation' => 'amend',
+        'direction' => 'sideways',   // not in ('in','out')
     ]))->toThrow(Illuminate\Database\QueryException::class);
 });
 
@@ -179,6 +189,8 @@ it('keeps the CHECK value lists in sync with the enum cases', function (): void 
 
     expect($sorted($checkValues('attendance_adjustment_details_operation_check')))
         ->toBe($sorted(array_map(fn ($c) => $c->value, AdjustmentOperation::cases())))
+        ->and($sorted($checkValues('attendance_adjustment_details_direction_check')))
+        ->toBe($sorted(array_map(fn ($c) => $c->value, PunchDirection::cases())))
         ->and($sorted($checkValues('attendance_logs_source_check')))
         ->toBe($sorted(array_map(fn ($c) => $c->value, PunchSource::cases())));
 });
