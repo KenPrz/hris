@@ -192,3 +192,134 @@ it('400s a malformed (non-uuid) office rather than 500ing on the uuid cast', fun
         ->assertStatus(400)
         ->assertJsonPath('error.code', 'validation_failed');
 });
+
+// --- Update -----------------------------------------------------------------
+
+it('lets an HR admin update a holiday for an office they administer, and logs it', function (): void {
+    $manila = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    $holiday = Holiday::factory()->for($manila, 'office')->create([
+        'date' => '2026-08-21',
+        'day_type' => DayType::RegularHoliday,
+        'name' => 'Ninoy Aquino Day',
+    ]);
+
+    Sanctum::actingAs($hrUser);
+
+    $response = $this->patchJson("/api/v1/office/holidays/{$holiday->id}", [
+        'day_type' => 'special_non_working',
+        'name' => 'Ninoy Aquino Day (Observed)',
+    ])->assertOk();
+
+    expect($response->json('data'))->toBe([
+        'id' => $holiday->id,
+        'office_id' => $manila->id,
+        'date' => '2026-08-21',
+        'day_type' => 'special_non_working',
+        'name' => 'Ninoy Aquino Day (Observed)',
+    ]);
+
+    $this->assertDatabaseHas('holidays', [
+        'id' => $holiday->id,
+        'day_type' => 'special_non_working',
+        'name' => 'Ninoy Aquino Day (Observed)',
+    ]);
+
+    $activity = Activity::query()
+        ->where('subject_id', $holiday->id)
+        ->where('event', 'updated')
+        ->first();
+
+    expect($activity)->not->toBeNull()
+        ->and($activity->causer_id)->toBe($hrUser->id)
+        ->and($activity->subject_type)->toBe(Holiday::class);
+});
+
+it('404s updating a holiday belonging to an office the admin does not administer, identically to a fabricated holiday', function (): void {
+    $manila = holidayOffice();
+    $cebu = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    $outOfScopeHoliday = Holiday::factory()->for($cebu, 'office')->create();
+
+    Sanctum::actingAs($hrUser);
+
+    $payload = [
+        'day_type' => 'special_non_working',
+        'name' => 'Ninoy Aquino Day (Observed)',
+    ];
+
+    $outOfScope = $this->patchJson("/api/v1/office/holidays/{$outOfScopeHoliday->id}", $payload)
+        ->assertStatus(404);
+
+    $fabricated = $this->patchJson('/api/v1/office/holidays/'.(string) Str::uuid7(), $payload)
+        ->assertStatus(404);
+
+    $outOfScope->assertExactJson($fabricated->json());
+    $outOfScope->assertJsonPath('error.code', 'not_found');
+
+    $this->assertDatabaseHas('holidays', [
+        'id' => $outOfScopeHoliday->id,
+        'day_type' => $outOfScopeHoliday->day_type->value,
+        'name' => $outOfScopeHoliday->name,
+    ]);
+});
+
+it('400s updating a holiday with an invalid day_type', function (): void {
+    $manila = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    $holiday = Holiday::factory()->for($manila, 'office')->create();
+
+    Sanctum::actingAs($hrUser);
+
+    $this->patchJson("/api/v1/office/holidays/{$holiday->id}", [
+        'day_type' => 'ordinary',
+        'name' => 'Ninoy Aquino Day',
+    ])
+        ->assertStatus(400)
+        ->assertJsonPath('error.code', 'validation_failed');
+});
+
+// --- Delete -----------------------------------------------------------------
+
+it('lets an HR admin delete a holiday for an office they administer, and logs it', function (): void {
+    $manila = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    $holiday = Holiday::factory()->for($manila, 'office')->create();
+
+    Sanctum::actingAs($hrUser);
+
+    $this->deleteJson("/api/v1/office/holidays/{$holiday->id}")
+        ->assertStatus(204)
+        ->assertNoContent();
+
+    $this->assertDatabaseMissing('holidays', ['id' => $holiday->id]);
+
+    $activity = Activity::query()
+        ->where('subject_id', $holiday->id)
+        ->where('event', 'deleted')
+        ->first();
+
+    expect($activity)->not->toBeNull()
+        ->and($activity->causer_id)->toBe($hrUser->id)
+        ->and($activity->subject_type)->toBe(Holiday::class);
+});
+
+it('404s deleting a holiday belonging to an office the admin does not administer, identically to a fabricated holiday', function (): void {
+    $manila = holidayOffice();
+    $cebu = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    $outOfScopeHoliday = Holiday::factory()->for($cebu, 'office')->create();
+
+    Sanctum::actingAs($hrUser);
+
+    $outOfScope = $this->deleteJson("/api/v1/office/holidays/{$outOfScopeHoliday->id}")
+        ->assertStatus(404);
+
+    $fabricated = $this->deleteJson('/api/v1/office/holidays/'.(string) Str::uuid7())
+        ->assertStatus(404);
+
+    $outOfScope->assertExactJson($fabricated->json());
+    $outOfScope->assertJsonPath('error.code', 'not_found');
+
+    $this->assertDatabaseHas('holidays', ['id' => $outOfScopeHoliday->id]);
+});
