@@ -52,6 +52,7 @@ final class CreateScheduleAssignment
                 'employee_id' => $in->employeeId,
                 'department_id' => $in->departmentId,
                 'effective_from' => $in->effectiveFrom,
+                'created_by' => $in->actorId,
             ]);
         });
     }

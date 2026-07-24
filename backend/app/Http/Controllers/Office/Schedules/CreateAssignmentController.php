@@ -46,6 +46,7 @@ final class CreateAssignmentController
             employeeId: $employeeId,
             departmentId: $departmentId,
             effectiveFrom: $request->string('effective_from')->toString(),
+            actorId: $request->user()->id,
         ));
 
         return ScheduleAssignmentResource::make($assignment)

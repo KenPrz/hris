@@ -11,5 +11,6 @@ final readonly class CreateScheduleAssignmentInput
         public ?string $employeeId,
         public ?string $departmentId,
         public string $effectiveFrom,
+        public ?string $actorId,
     ) {}
 }

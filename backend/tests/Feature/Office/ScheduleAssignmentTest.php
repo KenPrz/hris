@@ -68,6 +68,9 @@ it('creates an assignment for an employee target', function (): void {
         'shift_template_id' => $template->id,
         'employee_id' => $employee->id,
         'department_id' => null,
+        // The acting HR admin is recorded as the creator — the audit trail the
+        // created_by column exists for.
+        'created_by' => $hr->id,
     ]);
 });
 
