@@ -209,6 +209,24 @@ it('404s for an employee not in an office administered by the caller, identicall
     $oos->assertJsonPath('error.code', 'not_found');
 });
 
+it('404s for an employee with no office (not a 500 from a null uuid), identically to a fabricated employee', function (): void {
+    $office = resolvedOffice();
+    $hr = hrAdminOfResolved($office);
+    Sanctum::actingAs($hr);
+
+    // A real employee with no current_office_id: administrable by nobody. The controller
+    // must 404 (not hand a null-derived '' to the uuid parser and 500).
+    $unassigned = Employee::factory()->create(['current_office_id' => null]);
+
+    $query = fn (string $employeeId) => http_build_query(['employee' => $employeeId, 'month' => '2026-08']);
+
+    $noOffice = $this->getJson('/api/v1/office/schedule/resolved?'.$query($unassigned->id))->assertStatus(404);
+    $fake = $this->getJson('/api/v1/office/schedule/resolved?'.$query((string) Str::uuid7()))->assertStatus(404);
+
+    $noOffice->assertExactJson($fake->json());
+    $noOffice->assertJsonPath('error.code', 'not_found');
+});
+
 it('rejects a malformed month', function (): void {
     $office = resolvedOffice();
     $hr = hrAdminOfResolved($office);

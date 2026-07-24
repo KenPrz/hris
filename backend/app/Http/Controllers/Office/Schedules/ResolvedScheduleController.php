@@ -25,10 +25,14 @@ final class ResolvedScheduleController
         $employeeId = $request->string('employee')->toString();
 
         // 404, not 403: an employee outside any office the caller administers must be
-        // indistinguishable from a fabricated id. A null current_office_id can never
-        // satisfy OfficeScope::administers, so an unassigned employee 404s the same way.
+        // indistinguishable from a fabricated id. The null current_office_id check comes
+        // FIRST — an employee with no office administers to nobody, and passing the
+        // null-derived '' to OfficeScope would hit Postgres's uuid parser and 500 rather
+        // than 404 (matches CreateOverrideController / DeleteAssignmentController).
         $employee = Employee::query()->find($employeeId);
-        if ($employee === null || ! OfficeScope::administers($request->user(), (string) $employee->current_office_id)) {
+        if ($employee === null
+            || $employee->current_office_id === null
+            || ! OfficeScope::administers($request->user(), $employee->current_office_id)) {
             throw new NotFoundHttpException;
         }
 
