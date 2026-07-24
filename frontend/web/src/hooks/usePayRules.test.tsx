@@ -21,6 +21,8 @@ function payRule(overrides: Partial<PayRule> = {}): PayRule {
     night_diff_bp: 11000,
     note: null,
     day_rates: [
+      // Includes an `ordinary` row — a pay rule prices every day type, unlike a holiday.
+      { day_type: 'ordinary', worked_bp: 10000, worked_rest_bp: 13000, unworked_bp: 0 },
       { day_type: 'regular_holiday', worked_bp: 20000, worked_rest_bp: 26000, unworked_bp: 10000 },
     ],
     ...overrides,

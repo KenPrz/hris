@@ -188,8 +188,19 @@ export type HolidayCloneInput = { office_id: string; from_year: number; to_year:
 // Wire types — verified against app/Http/Resources/PayRuleResource.php.
 // ---------------------------------------------------------------------------
 
+// The full backend App\Domain\Pay\DayType set — all FIVE values, including `ordinary`.
+// This is deliberately wider than DayTypeTag's `DayType` (which is the holiday subset:
+// a holiday is never `ordinary`). A pay rule must price every kind of day an employee
+// can work, so `CreatePayRuleRequest` mandates exactly these five day_rates.
+export type PayRuleDayType =
+  | 'ordinary'
+  | 'special_working'
+  | 'special_non_working'
+  | 'regular_holiday'
+  | 'double_regular_holiday'
+
 export type PayRuleDayRate = {
-  day_type: DayType
+  day_type: PayRuleDayType
   worked_bp: number
   worked_rest_bp: number
   unworked_bp: number
