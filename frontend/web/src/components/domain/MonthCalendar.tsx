@@ -13,6 +13,16 @@ export interface MonthCalendarProps {
 // Monday-first, matching `weekdayIndex`'s 0=Monday convention.
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+/** One height for every day cell in the grid — the value that makes the month uniform. */
+const CELL_HEIGHT = '7.5rem'
+
+const ROW_STYLE: React.CSSProperties = {
+  display: 'grid',
+  // minmax(0, 1fr) — equal columns that can shrink; without the 0 floor a long span bar
+  // would force its column wider than its siblings and the week would go ragged.
+  gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+}
+
 function chunkIntoWeeks(cells: readonly (string | null)[]): (string | null)[][] {
   const weeks: (string | null)[][] = []
   for (let i = 0; i < cells.length; i += 7) {
@@ -22,11 +32,12 @@ function chunkIntoWeeks(cells: readonly (string | null)[]): (string | null)[][] 
 }
 
 /**
- * A Monday-first month grid of `DayCell`s, built as a real `<table>` — `<th scope="col">`
- * weekday headers so a screen reader can navigate it by column, not just a styled div
- * grid. Leading and trailing blank cells pad the first and last week to 7 columns so the
- * 1st lands in its true weekday column; a day absent from `days` renders with no punches,
- * never a fabricated one.
+ * A Monday-first month grid. Built on CSS grid with an explicit, identical height on every
+ * day cell, so the grid is uniform by construction — a table left row height to equalize
+ * from content, which drifted the moment one day had punches and its neighbours didn't.
+ * ARIA grid roles keep it navigable: a screen reader still reads columns and cells.
+ * Leading and trailing blanks pad the first and last week so the 1st lands in its true
+ * weekday column; a day absent from `days` renders with no punches, never a fabricated one.
  */
 export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
   const dates = daysInMonth(month)
@@ -41,52 +52,68 @@ export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
   const today = todayInZone(timeZone)
 
   return (
-    // Seven columns don't fit a phone. Rather than crush the punch times into unreadable
-    // slivers, the grid keeps a legible minimum width and scrolls horizontally within its
-    // own container — the page itself never scrolls sideways.
+    // Seven columns don't fit a phone; the grid keeps a legible minimum width and scrolls
+    // horizontally within its own container so the page never scrolls sideways.
     <div style={{ overflowX: 'auto' }}>
-      <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: '48rem' }}>
-        <caption className="sr-only">{month}</caption>
-      <thead>
-        <tr>
+      <div
+        role="grid"
+        aria-label={`Attendance for ${month}`}
+        style={{
+          minWidth: '48rem',
+          borderTop: '1px solid var(--hairline)',
+          borderLeft: '1px solid var(--hairline)',
+        }}
+      >
+        <div role="row" style={ROW_STYLE}>
           {WEEKDAY_LABELS.map((label) => (
-            <th
+            <div
               key={label}
-              scope="col"
+              role="columnheader"
               style={{
                 font: 'var(--t-caption)',
                 letterSpacing: 'var(--ls-caption)',
                 color: 'var(--ink-muted)',
-                textAlign: 'left',
                 padding: 'var(--sp-xs)',
+                borderRight: '1px solid var(--hairline)',
                 borderBottom: '1px solid var(--hairline)',
               }}
             >
               {label}
-            </th>
+            </div>
           ))}
-        </tr>
-      </thead>
-      <tbody>
+        </div>
+
         {weeks.map((week) => (
-          <tr key={week.find((date) => date !== null) ?? 'blank-week'}>
+          <div role="row" style={ROW_STYLE} key={week.find((date) => date !== null) ?? 'blank-week'}>
             {week.map((date, columnIndex) =>
               date === null ? (
-                <td
+                <div
                   key={`blank-${columnIndex}`}
                   aria-hidden="true"
-                  style={{ border: '1px solid var(--hairline)', padding: 0 }}
+                  style={{
+                    height: CELL_HEIGHT,
+                    borderRight: '1px solid var(--hairline)',
+                    borderBottom: '1px solid var(--hairline)',
+                  }}
                 />
               ) : (
-                <td key={date} style={{ border: '1px solid var(--hairline)', verticalAlign: 'top', padding: 0 }}>
+                <div
+                  key={date}
+                  role="gridcell"
+                  style={{
+                    height: CELL_HEIGHT,
+                    overflow: 'hidden',
+                    borderRight: '1px solid var(--hairline)',
+                    borderBottom: '1px solid var(--hairline)',
+                  }}
+                >
                   <DayCell date={date} punches={days[date] ?? []} timeZone={timeZone} isToday={date === today} />
-                </td>
+                </div>
               ),
             )}
-          </tr>
+          </div>
         ))}
-        </tbody>
-      </table>
+      </div>
     </div>
   )
 }

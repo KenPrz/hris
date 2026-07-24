@@ -81,7 +81,11 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
       style={{
         gap: 'var(--sp-xxs)',
         padding: 'var(--sp-xs)',
-        height: '7.5rem',
+        // Fills its grid cell, which owns the uniform height (see MonthCalendar). The
+        // cell clips overflow, so a busy day can never push its own cell taller than its
+        // neighbours — the asymmetry the table layout used to produce.
+        height: '100%',
+        boxSizing: 'border-box',
         overflow: 'hidden',
         background: isToday ? 'var(--surface-1)' : 'transparent',
         opacity: inMonth ? 1 : 0.4,
