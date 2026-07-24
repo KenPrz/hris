@@ -28,12 +28,16 @@ use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayContro
 use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
 use App\Http\Controllers\Office\Holidays\UpdateController as UpdateHolidayController;
 use App\Http\Controllers\Office\Schedules\CreateAssignmentController;
+use App\Http\Controllers\Office\Schedules\CreateOverrideController;
 use App\Http\Controllers\Office\Schedules\CreateTemplateController;
 use App\Http\Controllers\Office\Schedules\DeleteAssignmentController;
+use App\Http\Controllers\Office\Schedules\DeleteOverrideController;
 use App\Http\Controllers\Office\Schedules\DeleteTemplateController;
 use App\Http\Controllers\Office\Schedules\ListAssignmentsController;
+use App\Http\Controllers\Office\Schedules\ListOverridesController;
 use App\Http\Controllers\Office\Schedules\ListTemplatesController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
+use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
@@ -116,6 +120,10 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/schedule-assignments', ListAssignmentsController::class);
             Route::post('/schedule-assignments', CreateAssignmentController::class);
             Route::delete('/schedule-assignments/{assignment}', DeleteAssignmentController::class);
+            Route::get('/schedule-overrides', ListOverridesController::class);
+            Route::post('/schedule-overrides', CreateOverrideController::class);
+            Route::patch('/schedule-overrides/{override}', UpdateOverrideController::class);
+            Route::delete('/schedule-overrides/{override}', DeleteOverrideController::class);
         });
     });
 });
