@@ -39,10 +39,6 @@ export function AppShell({ children }: AppShellProps) {
     }
   }
 
-  // No office-name lookup exists yet (Session only carries `current_office_id`, an id, not
-  // a name) — showing the raw id is honest about what M3.5 actually has, rather than
-  // fabricating a display name.
-
   return (
     <div className="flex min-h-screen flex-col">
       <header
@@ -50,7 +46,7 @@ export function AppShell({ children }: AppShellProps) {
         style={{
           background: 'var(--inverse-canvas)',
           color: 'var(--inverse-ink)',
-          height: '44px',
+          height: 'var(--sp-xxl)',
           padding: '0 var(--sp-md)',
           flexShrink: 0,
         }}

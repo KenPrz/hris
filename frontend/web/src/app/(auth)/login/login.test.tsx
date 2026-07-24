@@ -113,6 +113,26 @@ describe('/login — rejected credentials', () => {
   })
 })
 
+describe('/login — rate limited', () => {
+  it('shows a distinct "too many attempts" message for a 429, never the credentials copy', async () => {
+    // FINDING 5: `POST /login` is throttled 5/min per email+IP and returns 429
+    // `too_many_requests`. The limiter keys on the submitted email regardless of
+    // whether the account exists, so surfacing this distinctly leaks nothing about who
+    // has an account — it only stops a rate limit from being misread as a wrong
+    // password, which would just drive more attempts and extend the lockout.
+    stubFetch(429, {
+      error: { code: 'too_many_requests', message: 'Too many requests.', details: {} },
+    })
+
+    render(<LoginPage />)
+    fillAndSubmit('a@b.com', 'wrong-password')
+
+    expect(await screen.findByText('Too many attempts. Wait a minute and try again.')).toBeInTheDocument()
+    expect(screen.queryByText("That email and password don't match.")).not.toBeInTheDocument()
+    expect(getToken()).toBeNull()
+  })
+})
+
 describe('/login — in-flight state', () => {
   it('disables the submit button while the request is pending, preventing a double submit', async () => {
     let resolveFetch: (value: unknown) => void = () => {}

@@ -23,6 +23,12 @@ import { setToken } from '@/lib/session'
 // error `code` to say which one it was: one message, always.
 const INVALID_CREDENTIALS_MESSAGE = "That email and password don't match."
 const NETWORK_ERROR_MESSAGE = 'Cannot reach the server. Check your connection and try again.'
+// `POST /login` is throttled per email+IP (5/min) and returns 429 `too_many_requests`.
+// The limiter keys on the submitted email regardless of whether that account exists, so
+// surfacing this distinctly leaks nothing about who has an account — it only stops a
+// rate limit from being misread as "your password is wrong," which just drives more
+// attempts and extends the lockout.
+const TOO_MANY_ATTEMPTS_MESSAGE = 'Too many attempts. Wait a minute and try again.'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -45,7 +51,18 @@ export default function LoginPage() {
       router.replace('/me/attendance')
     } catch (err) {
       const isNetworkFailure = err instanceof ApiError && err.code === 'network_unreachable'
-      setError(isNetworkFailure ? NETWORK_ERROR_MESSAGE : INVALID_CREDENTIALS_MESSAGE)
+      const isRateLimited = err instanceof ApiError && err.status === 429
+
+      if (isNetworkFailure) {
+        setError(NETWORK_ERROR_MESSAGE)
+      } else if (isRateLimited) {
+        setError(TOO_MANY_ATTEMPTS_MESSAGE)
+      } else {
+        // Every other auth failure — wrong password, unknown email, anything else the
+        // server calls it — gets this one fixed message. Never branch on `code` here.
+        setError(INVALID_CREDENTIALS_MESSAGE)
+      }
+
       setIsSubmitting(false)
     }
   }

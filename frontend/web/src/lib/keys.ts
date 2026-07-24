@@ -11,6 +11,7 @@
 export const keys = {
   session: () => ['session'] as const,
   attendance: {
+    all: () => ['attendance'] as const,
     month: (month: string) => ['attendance', 'month', month] as const,
   },
 }

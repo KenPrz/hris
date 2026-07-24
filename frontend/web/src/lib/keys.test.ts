@@ -24,6 +24,13 @@ describe('keys', () => {
     expect(otherMonthKey.slice(0, prefix.length)).toEqual(prefix)
   })
 
+  it('exposes the ["attendance"] prefix itself as keys.attendance.all(), matching every month key', () => {
+    const allKey: readonly unknown[] = keys.attendance.all()
+
+    expect(allKey).toEqual(['attendance'])
+    expect(keys.attendance.month('2026-07').slice(0, allKey.length)).toEqual(allKey)
+  })
+
   it('produces distinct keys for distinct months', () => {
     expect(keys.attendance.month('2026-07')).not.toEqual(keys.attendance.month('2026-08'))
   })

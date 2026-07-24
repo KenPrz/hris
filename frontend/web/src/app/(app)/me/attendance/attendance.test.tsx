@@ -140,6 +140,27 @@ describe('/me/attendance — punch hero', () => {
     expect(screen.getByText('Clocked in since 08:02')).toBeInTheDocument()
   })
 
+  it('renders "Clock in" (never "Clock out") when today has a single, odd-count `out` punch — a night-shift close-out from yesterday', async () => {
+    // FINDING 1: an odd punch count must NOT imply "next is out." Today's only punch is
+    // an `out` (e.g. clocking out at 00:12 for a shift that started yesterday) — the
+    // *last* punch is `out`, so the next action is `in`, even though the count (1) is
+    // odd. A parity-based rule gets this backwards and would let the button write a
+    // second consecutive `out` into the append-only ledger.
+    stubApi({
+      attendanceByMonth: {
+        [THIS_MONTH]: { [TODAY]: [punch({ direction: 'out', punched_at: `${TODAY}T00:12:00+08:00` })] },
+      },
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: 'Clock in' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clock out' })).not.toBeInTheDocument()
+    // The status line must agree with the button — both derive from the same last punch.
+    expect(screen.getByText('Clocked out since 00:12')).toBeInTheDocument()
+    expect(screen.queryByText(/Clocked in/)).not.toBeInTheDocument()
+  })
+
   it('refetches the month after a successful punch', async () => {
     const fetchMock = stubApi({
       attendanceByMonth: { [THIS_MONTH]: { [TODAY]: [] } },
@@ -162,6 +183,75 @@ describe('/me/attendance — punch hero', () => {
       ).length
       expect(attendanceCallsAfter).toBeGreaterThan(attendanceCallsBefore)
     })
+  })
+})
+
+describe('/me/attendance — live "Today" total', () => {
+  it('adds elapsed time since an open clock-in — the total climbs while still clocked in, never stuck at 0m', async () => {
+    // FINDING 3: `completedMinutesSoFar` only counted CLOSED pairs, so the tile read
+    // "0m" from the moment of clock-in until clock-out — no live total, contradicting
+    // the spec and features.md. Clocked in 1h05m ago with no clock-out yet: the total
+    // must include that open, still-running segment.
+    const openedAt = new Date(Date.now() - 65 * 60_000).toISOString()
+    stubApi({
+      attendanceByMonth: {
+        [THIS_MONTH]: { [TODAY]: [punch({ direction: 'in', punched_at: openedAt })] },
+      },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('1h 5m')).toBeInTheDocument()
+    expect(screen.queryByText('0m')).not.toBeInTheDocument()
+  })
+})
+
+describe('/me/attendance — no linked employee record', () => {
+  it('renders an explanatory empty state — never the "check your connection" copy — when the session has no employee', async () => {
+    // FINDING 4: a bare System Admin account (session.employee === null) has no other
+    // route to go to; the screen must explain the situation, not misreport it as a
+    // connectivity problem.
+    const fn = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/v1/me') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              user: { id: 'u1', email: 'admin@x.com', name: 'Admin' },
+              employee: null,
+              is_system_admin: true,
+              has_reports: false,
+              hr_offices: [],
+              permissions: [],
+            },
+          }),
+        }
+      }
+
+      if (url.startsWith('/api/v1/me/attendance')) {
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({
+            error: { code: 'not_an_employee', message: 'Only an employee can do that.', details: {} },
+          }),
+        }
+      }
+
+      throw new Error(`Unhandled fetch in test: ${url}`)
+    })
+    vi.stubGlobal('fetch', fn)
+
+    setToken('sekrit')
+    render(
+      <Providers>
+        <AttendancePage />
+      </Providers>,
+    )
+
+    expect(await screen.findByText(/isn't linked to an employee record/i)).toBeInTheDocument()
+    expect(screen.queryByText(/check your connection/i)).not.toBeInTheDocument()
   })
 })
 
