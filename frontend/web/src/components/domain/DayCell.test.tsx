@@ -1,0 +1,91 @@
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+
+import type { AttendanceLog } from '@/lib/api'
+import { DayCell } from './DayCell'
+
+function punch(overrides: Partial<AttendanceLog> = {}): AttendanceLog {
+  return {
+    id: 'p1',
+    employee_id: 'e1',
+    office_id: 'o1',
+    punched_at: '2026-07-20T08:02:00+08:00',
+    direction: 'in',
+    source: 'web',
+    verification: 'verified',
+    flag_reason: null,
+    ...overrides,
+  }
+}
+
+describe('DayCell', () => {
+  it('renders the day number', () => {
+    render(<DayCell date="2026-07-20" punches={[]} timeZone="Asia/Manila" />)
+
+    expect(screen.getByText('20')).toBeInTheDocument()
+  })
+
+  it('lists both punch times in office-local time — the ledger, not just a summary', () => {
+    const punches = [
+      punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:02:00+08:00' }),
+      punch({ id: 'out', direction: 'out', punched_at: '2026-07-20T17:05:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    expect(screen.getByText(/in.*08:02/i)).toBeInTheDocument()
+    expect(screen.getByText(/out.*17:05/i)).toBeInTheDocument()
+  })
+
+  it('shows the total for a day that pairs cleanly', () => {
+    const punches = [
+      punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
+      punch({ id: 'out', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    expect(screen.getByText('9h')).toBeInTheDocument()
+  })
+
+  it('renders the punches but omits the total for an odd, unpairable punch count', () => {
+    const punches = [
+      punch({ id: 'in1', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
+      punch({ id: 'out1', direction: 'out', punched_at: '2026-07-20T12:00:00+08:00' }),
+      punch({ id: 'in2', direction: 'in', punched_at: '2026-07-20T13:00:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    // The punches themselves are still shown honestly.
+    expect(screen.getByText(/in.*08:00/i)).toBeInTheDocument()
+    expect(screen.getByText(/out.*12:00/i)).toBeInTheDocument()
+    expect(screen.getByText(/in.*13:00/i)).toBeInTheDocument()
+
+    // But there is no invented total — a missing clock-out must not be papered over.
+    expect(screen.queryByText('4h')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).not.toBeInTheDocument()
+    expect(screen.getByText(/unpaired/i)).toBeInTheDocument()
+  })
+
+  it('surfaces the flag reason for a flagged punch as a warning tag', () => {
+    const punches = [
+      punch({
+        id: 'flagged',
+        direction: 'in',
+        verification: 'flagged',
+        flag_reason: 'Outside geofence',
+      }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    expect(screen.getByText('Outside geofence')).toBeInTheDocument()
+  })
+
+  it('renders nothing punch-wise for a day with no punches', () => {
+    render(<DayCell date="2026-07-20" punches={[]} timeZone="Asia/Manila" />)
+
+    expect(screen.queryByText(/unpaired/i)).not.toBeInTheDocument()
+  })
+})
