@@ -164,7 +164,7 @@ export default function AttendancePage() {
   return (
     <AppShell>
       <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
-        <SectionHeader eyebrow="Me" title="Attendance" />
+        <SectionHeader eyebrow="Me" title="Attendance" level={1} />
 
         <section
           style={{

@@ -6,11 +6,19 @@ export interface SectionHeaderProps {
   eyebrow?: string
   title: string
   actions?: ReactNode
+  /** Heading level. `1` for the page's single title, `2` (default) for the sections
+   * under it — so a screen reader's heading outline reads as one page with sections,
+   * not several competing page titles. The level also sizes the type: the page title in
+   * `{headline}`, a section in the smaller `{card-title}`. */
+  level?: 1 | 2
 }
 
-/** `{typography.headline}` (0 tracking, so no `--ls-*` companion needed) over a hairline
- * rule — Carbon separates sections with a thin gray row, not a large vertical gap. */
-export function SectionHeader({ eyebrow, title, actions }: SectionHeaderProps) {
+/** A title (0-tracking Carbon type step, so no `--ls-*` companion) over a hairline rule —
+ * Carbon separates sections with a thin gray row, not a large vertical gap. */
+export function SectionHeader({ eyebrow, title, actions, level = 2 }: SectionHeaderProps) {
+  const Heading = level === 1 ? 'h1' : 'h2'
+  const titleFont = level === 1 ? 'var(--t-headline)' : 'var(--t-card-title)'
+
   return (
     <div
       className="flex items-end justify-between"
@@ -26,7 +34,7 @@ export function SectionHeader({ eyebrow, title, actions }: SectionHeaderProps) {
             {eyebrow}
           </span>
         ) : null}
-        <h1 style={{ font: 'var(--t-headline)', color: 'var(--ink)' }}>{title}</h1>
+        <Heading style={{ font: titleFont, color: 'var(--ink)' }}>{title}</Heading>
       </div>
       {actions ? (
         <div className="flex items-center" style={{ gap: 'var(--sp-sm)' }}>
