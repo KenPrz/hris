@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Models\PayRule;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Activitylog\Models\Activity;
 
@@ -171,4 +172,69 @@ it('lists versions ordered effective_from desc', function (): void {
 
     expect($response->json('data.*.effective_from'))->toBe(['2026-06-01', '2026-03-01', '2026-01-01']);
     expect($response->json('data.0.day_rates'))->toHaveCount(5);
+});
+
+// --- Show -----------------------------------------------------------------
+
+it('shows a version with its 5 day-rates for a sysadmin', function (): void {
+    Sanctum::actingAs(sysAdmin());
+
+    $created = $this->postJson('/api/v1/admin/pay-rules', validPayRulePayload('2026-01-01'))->assertCreated();
+    $payRuleId = $created->json('data.id');
+
+    $response = $this->getJson('/api/v1/admin/pay-rules/'.$payRuleId)->assertOk();
+
+    expect($response->json('data.id'))->toBe($payRuleId)
+        ->and($response->json('data.effective_from'))->toBe('2026-01-01')
+        ->and($response->json('data.day_rates'))->toHaveCount(5);
+});
+
+it('404s an unknown id on show, for a sysadmin', function (): void {
+    Sanctum::actingAs(sysAdmin());
+
+    $this->getJson('/api/v1/admin/pay-rules/'.Str::uuid7()->toString())
+        ->assertStatus(404);
+});
+
+it('forbids show and delete for a non-system-admin (403, not 404)', function (): void {
+    Sanctum::actingAs(sysAdmin());
+    $created = $this->postJson('/api/v1/admin/pay-rules', validPayRulePayload('2026-02-01'))->assertCreated();
+    $payRuleId = $created->json('data.id');
+
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => false]));
+
+    $this->getJson('/api/v1/admin/pay-rules/'.$payRuleId)
+        ->assertStatus(403)
+        ->assertJsonPath('error.code', 'forbidden');
+
+    $this->deleteJson('/api/v1/admin/pay-rules/'.$payRuleId)
+        ->assertStatus(403)
+        ->assertJsonPath('error.code', 'forbidden');
+
+    $this->assertDatabaseHas('pay_rules', ['id' => $payRuleId]);
+});
+
+// --- Delete -----------------------------------------------------------------
+
+it('deletes a version and cascades its day-rates, 204', function (): void {
+    Sanctum::actingAs(sysAdmin());
+
+    $created = $this->postJson('/api/v1/admin/pay-rules', validPayRulePayload('2026-01-01'))->assertCreated();
+    $payRuleId = $created->json('data.id');
+
+    $this->deleteJson('/api/v1/admin/pay-rules/'.$payRuleId)->assertNoContent();
+
+    $this->assertDatabaseMissing('pay_rules', ['id' => $payRuleId]);
+    $this->assertDatabaseMissing('pay_rule_day_rates', ['pay_rule_id' => $payRuleId]);
+});
+
+// --- Immutability -------------------------------------------------------------
+
+it('has no PATCH route — versions are immutable', function (): void {
+    Sanctum::actingAs(sysAdmin());
+
+    $created = $this->postJson('/api/v1/admin/pay-rules', validPayRulePayload('2026-03-01'))->assertCreated();
+    $payRuleId = $created->json('data.id');
+
+    $this->patchJson('/api/v1/admin/pay-rules/'.$payRuleId, [])->assertStatus(405);
 });
