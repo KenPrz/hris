@@ -455,7 +455,7 @@ concurrent approvals resolve to one winner; and `attendance_annulments` has one 
 writer. `scripts/e2e-adjustments.sh` walks the add-with-attachment and void paths against the
 live stack (real RustFS).
 
-**Status: complete.** **266 backend tests** (M0–M3's 201 + 65 for this milestone — schema,
+**Status: complete.** **267 backend tests** (M0–M3's 201 + 66 for this milestone — schema,
 submit, the three effects, transitions/authority, the two-process concurrency proof, reads,
 and Media Library), **17 arch tests** (16 carried over + *"only RecordAnnulment writes
 attendance_annulments"*), frontend unchanged at **16** (M3.6 is backend-only; M3.5 hasn't
@@ -577,8 +577,8 @@ in and sees the hero reflect it, clocks out, sees the punch on today's cell with
 in/out times, navigates to the previous month, and signs out — the whole surface rendered
 from `carbon.css`, with no component reading a raw token or a literal query key.
 
-**Status: complete, with one verification gap recorded below.** **165 frontend tests** (up
-from 16 at the end of M3.6), backend **unchanged at 267 + 17 arch** — this milestone touches
+**Status: complete, with one verification gap recorded below.** **189 frontend tests** (up
+from 16 at the end of M3.6, incl. the post-merge polish pass), backend **unchanged at 267 + 17 arch** — this milestone touches
 no PHP. `lint`, `test`, `typecheck`, and `build` are all green, native and inside the
 `make test` containers alike.
 
