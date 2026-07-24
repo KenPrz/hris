@@ -22,6 +22,7 @@ use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
+use App\Http\Controllers\Office\Holidays\CloneController as CloneHolidaysController;
 use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayController;
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
 use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
@@ -96,6 +97,7 @@ Route::prefix('v1')->group(function (): void {
         Route::prefix('office')->group(function (): void {
             Route::get('/holidays', ListHolidaysController::class);
             Route::post('/holidays', CreateHolidayController::class);
+            Route::post('/holidays/clone', CloneHolidaysController::class);
             Route::patch('/holidays/{holiday}', UpdateHolidayController::class);
             Route::delete('/holidays/{holiday}', DeleteHolidayController::class);
         });
