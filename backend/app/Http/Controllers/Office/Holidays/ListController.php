@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Office\Holidays;
 
 use App\Domain\Scope\OfficeScope;
+use App\Http\Requests\ListHolidaysRequest;
 use App\Http\Resources\HolidayResource;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 final class ListController
 {
-    public function __invoke(Request $request): AnonymousResourceCollection
+    public function __invoke(ListHolidaysRequest $request): AnonymousResourceCollection
     {
         // 404, not 403: an out-of-scope office and a nonexistent one must be
         // indistinguishable to the caller (the 404-not-403 discipline).

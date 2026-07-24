@@ -177,3 +177,18 @@ it('404s listing an out-of-scope office, identically to a fabricated office', fu
     $outOfScope->assertExactJson($fabricated->json());
     $outOfScope->assertJsonPath('error.code', 'not_found');
 });
+
+it('400s a malformed (non-uuid) office rather than 500ing on the uuid cast', function (): void {
+    $manila = holidayOffice();
+    Sanctum::actingAs(hrAdminOf($manila));
+
+    // A typo'd URL shouldn't reach Postgres and blow up; ListHolidaysRequest catches the
+    // shape. This is not an oracle — it's about format, not existence.
+    $this->getJson('/api/v1/office/holidays?office=not-a-uuid&year=2026')
+        ->assertStatus(400)
+        ->assertJsonPath('error.code', 'validation_failed');
+
+    $this->getJson("/api/v1/office/holidays?office={$manila->id}&year=nope")
+        ->assertStatus(400)
+        ->assertJsonPath('error.code', 'validation_failed');
+});
