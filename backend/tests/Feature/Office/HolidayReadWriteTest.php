@@ -79,6 +79,33 @@ it('lets an HR admin create a holiday for an office they administer, and logs it
         ->and($activity->subject_type)->toBe(Holiday::class);
 });
 
+it('422s a second holiday on the same office-date, not a 500 from the unique constraint', function (): void {
+    $manila = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+
+    Sanctum::actingAs($hrUser);
+
+    $payload = [
+        'office_id' => $manila->id,
+        'date' => '2026-08-21',
+        'day_type' => 'regular_holiday',
+        'name' => 'Ninoy Aquino Day',
+    ];
+
+    $this->postJson('/api/v1/office/holidays', $payload)->assertCreated();
+
+    // A second create on the occupied office-date is a clean domain refusal, never the
+    // raw QueryException/500 the unique(office_id, date) constraint would otherwise throw.
+    $this->postJson('/api/v1/office/holidays', $payload)
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'holiday_exists')
+        ->assertJsonPath('error.details.office_id', $manila->id)
+        ->assertJsonPath('error.details.date', '2026-08-21');
+
+    // The refusal wrote nothing — still exactly the one original row.
+    $this->assertDatabaseCount('holidays', 1);
+});
+
 it('404s creating a holiday for an office the admin does not administer, identically to a fabricated office', function (): void {
     $manila = holidayOffice();
     $cebu = holidayOffice();

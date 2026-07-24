@@ -427,7 +427,16 @@ POST /api/v1/office/holidays          # auth:sanctum — HR Admin/System Admin, 
   → 201 { data: { id, office_id, date, day_type, name } }
   → 400 validation_failed     # bad shape, or day_type outside the four non-Ordinary cases
   → 404 not_found             # office_id is out of the caller's scope, or doesn't exist
+  → 422 holiday_exists        # that office already has a holiday on that date; details: { office_id, date }
 ```
+
+`holiday_exists` is a clean domain refusal, not the raw `500` the `unique(office_id, date)`
+constraint would otherwise surface — `CreateHoliday` locks the office row, re-checks under
+that lock, and throws `HolidayExists` (mirroring `RecordEmploymentChange`'s
+`employment_record_exists`), so two admins racing the same office-date get a `422`, never a
+constraint violation. The scope `404` always runs first, so this is only ever reachable for
+an office the caller administers — it leaks nothing about others. Moving a holiday to a
+different date is a delete-and-recreate, so there is no such collision on update.
 
 ```
 GET /api/v1/office/holidays?office=<uuid>&year=<int>   # auth:sanctum, scoped
