@@ -22,6 +22,7 @@
   --inverse-ink-muted: #c6c6c6;
   --hairline: #e0e0e0;
   --hairline-strong: #161616;
+  --field-border: #8d8d8d; /* Carbon's filled-input bottom rule — not in DESIGN.md's colors block */
   --success: #24a148;
   --warning: #f1c21b;
   --error: #da1e28;
