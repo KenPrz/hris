@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import type { ShiftTemplate } from '@/lib/api'
+import type { Employee, ScheduleAssignment, ShiftTemplate } from '@/lib/api'
 import { clearToken, setToken } from '@/lib/session'
 import { Providers } from '@/components/Providers'
 
@@ -52,6 +52,29 @@ function template(overrides: Partial<ShiftTemplate> = {}): ShiftTemplate {
   }
 }
 
+function employee(overrides: Partial<Employee> = {}): Employee {
+  return {
+    id: 'e1',
+    employee_no: 'E-001',
+    current_office_id: 'o1',
+    current_department_id: null,
+    current_reports_to_id: null,
+    hired_at: '2024-01-01',
+    ...overrides,
+  }
+}
+
+function assignment(overrides: Partial<ScheduleAssignment> = {}): ScheduleAssignment {
+  return {
+    id: 'a1',
+    shift_template_id: 't1',
+    employee_id: 'e1',
+    department_id: null,
+    effective_from: '2026-01-01',
+    ...overrides,
+  }
+}
+
 function sessionBody(hrOffices: string[]) {
   return {
     data: {
@@ -79,8 +102,14 @@ function stubApi(options: {
   onUpdate?: (id: string, body: unknown) => ShiftTemplate
   onDelete?: (id: string) => { status: number; body: unknown }
   onSetDefault?: (body: unknown) => { id: string; default_shift_template_id: string }
+  employees?: Employee[]
+  assignmentsByOffice?: Record<string, ScheduleAssignment[]>
+  onCreateAssignment?: (body: unknown) => { status: number; body: unknown }
+  onDeleteAssignment?: (id: string) => { status: number; body: unknown }
 }): ReturnType<typeof vi.fn> {
   const templatesByOffice = options.templatesByOffice ?? {}
+  const employees = options.employees ?? []
+  const assignmentsByOffice = options.assignmentsByOffice ?? {}
 
   const fn = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
@@ -119,6 +148,37 @@ function stubApi(options: {
       const body: unknown = JSON.parse(String(init?.body ?? '{}'))
       const result = options.onSetDefault?.(body) ?? { id: 'o1', default_shift_template_id: 't1' }
       return { ok: true, status: 200, json: async () => ({ data: result }) }
+    }
+
+    if (url === '/api/v1/employees' && method === 'GET') {
+      return { ok: true, status: 200, json: async () => ({ data: employees }) }
+    }
+
+    if (url.startsWith('/api/v1/office/schedule-assignments?') && method === 'GET') {
+      const parsed = new URL(url, 'http://x')
+      const office = parsed.searchParams.get('office') ?? ''
+      const data = assignmentsByOffice[office] ?? []
+      return { ok: true, status: 200, json: async () => ({ data }) }
+    }
+
+    if (url === '/api/v1/office/schedule-assignments' && method === 'POST') {
+      const body: unknown = JSON.parse(String(init?.body ?? '{}'))
+      const outcome = options.onCreateAssignment?.(body) ?? { status: 200, body: { data: assignment() } }
+      return {
+        ok: outcome.status >= 200 && outcome.status < 300,
+        status: outcome.status,
+        json: async () => outcome.body,
+      }
+    }
+
+    if (url.startsWith('/api/v1/office/schedule-assignments/') && method === 'DELETE') {
+      const id = url.split('/').at(-1) ?? ''
+      const outcome = options.onDeleteAssignment?.(id) ?? { status: 204, body: null }
+      return {
+        ok: outcome.status >= 200 && outcome.status < 300,
+        status: outcome.status,
+        json: async () => outcome.body,
+      }
     }
 
     throw new Error(`Unhandled fetch in test: ${method} ${url}`)
@@ -347,5 +407,160 @@ describe('/office/schedules — office default template', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Office default template')).toHaveTextContent('Night Shift')
     })
+  })
+})
+
+describe('/office/schedules — assignments list', () => {
+  it('renders an assignment with its employee, template name, and effective date', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      assignmentsByOffice: { o1: [assignment()] },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('E-001')).toBeInTheDocument()
+    expect(screen.getByText('Day Shift from 2026-01-01')).toBeInTheDocument()
+  })
+
+  it('shows an empty state with no assignments', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('No assignments yet')).toBeInTheDocument()
+  })
+
+  it('deletes an assignment and refetches the list', async () => {
+    const fetchMock = stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      assignmentsByOffice: { o1: [assignment()] },
+    })
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete assignment for E-001' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          (call) =>
+            call[0] === '/api/v1/office/schedule-assignments/a1' && (call[1] as RequestInit)?.method === 'DELETE',
+        ),
+      ).toBe(true)
+    })
+  })
+})
+
+describe('/office/schedules — assign a template', () => {
+  it('"Assign template" opens a Dialog with an employee Select (from /employees, filtered to the office), a template Select, and a date input', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee(), employee({ id: 'e2', employee_no: 'E-002', current_office_id: 'o2' })],
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign template' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Assign template' })).toBeInTheDocument()
+
+    const employeeSelect = screen.getByLabelText('Employee')
+    expect(employeeSelect).toHaveTextContent('E-001')
+    // E-002 belongs to office o2 — filtered out of this office's picker.
+    fireEvent.click(employeeSelect)
+    expect(screen.queryByRole('option', { name: 'E-002' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: 'E-001' }))
+
+    expect(screen.getByLabelText('Shift template')).toHaveTextContent('Day Shift')
+    expect(screen.getByLabelText('Effective from')).toBeInTheDocument()
+  })
+
+  it('submitting calls api.scheduleAssignments.create with exactly employee_id (no department_id) and invalidates', async () => {
+    const fetchMock = stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      onCreateAssignment: () => ({ status: 200, body: { data: assignment() } }),
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign template' }))
+    await screen.findByRole('dialog', { name: 'Assign template' })
+
+    fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-02-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create assignment' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          (call) => call[0] === '/api/v1/office/schedule-assignments' && (call[1] as RequestInit)?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+
+    const createCall = fetchMock.mock.calls.find(
+      (call) => call[0] === '/api/v1/office/schedule-assignments' && (call[1] as RequestInit)?.method === 'POST',
+    )!
+    const body = JSON.parse(String((createCall[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body).toEqual({
+      shift_template_id: 't1',
+      employee_id: 'e1',
+      effective_from: '2026-02-01',
+    })
+    expect(body).not.toHaveProperty('department_id')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('surfaces a 422 schedule_assignment_exists error via InlineNotification instead of crashing', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      onCreateAssignment: () => ({
+        status: 422,
+        body: {
+          error: {
+            code: 'schedule_assignment_exists',
+            message: 'This employee already has an assignment for this template starting on this date.',
+            details: {},
+          },
+        },
+      }),
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign template' }))
+    await screen.findByRole('dialog', { name: 'Assign template' })
+
+    fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-02-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create assignment' }))
+
+    expect(
+      await screen.findByText(
+        'This employee already has an assignment for this template starting on this date.',
+      ),
+    ).toBeInTheDocument()
+    // The dialog stays open — the failed create never closed it.
+    expect(screen.getByRole('dialog', { name: 'Assign template' })).toBeInTheDocument()
   })
 })

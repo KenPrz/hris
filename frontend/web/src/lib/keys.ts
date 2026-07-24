@@ -10,6 +10,9 @@
 
 export const keys = {
   session: () => ['session'] as const,
+  employees: {
+    all: () => ['employees'] as const,
+  },
   attendance: {
     all: () => ['attendance'] as const,
     month: (month: string) => ['attendance', 'month', month] as const,

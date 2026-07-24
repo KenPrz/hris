@@ -136,6 +136,19 @@ export type AttendanceLog = {
 /** Keyed by office-local YYYY-MM-DD — the grouping AttendanceMonth::group produces. */
 export type AttendanceMonth = Record<string, AttendanceLog[]>
 
+// ---------------------------------------------------------------------------
+// Wire type — verified against app/Http/Resources/EmployeeResource.php.
+// ---------------------------------------------------------------------------
+
+export type Employee = {
+  id: string
+  employee_no: string
+  current_office_id: string | null
+  current_department_id: string | null
+  current_reports_to_id: string | null
+  hired_at: string | null // YYYY-MM-DD
+}
+
 export type Session = {
   user: { id: string; email: string; name: string }
   employee: {
@@ -262,6 +275,12 @@ export const api = {
     }),
   logout: () => request<null>('/logout', { method: 'POST' }),
   me: () => request<Session>('/me'),
+  // No query params — the endpoint scopes to the actor via EmployeeScope::visibleTo and
+  // returns every employee that scope covers (which may span more than one office).
+  // Callers that need "this office's employees" filter client-side on current_office_id.
+  employees: {
+    list: () => request<Employee[]>('/employees'),
+  },
   myAttendance: (month: string) => request<AttendanceMonth>(`/me/attendance?month=${month}`),
   punch: (direction: PunchDirection, idempotencyKey: string) =>
     request<AttendanceLog>('/attendance/punch', {

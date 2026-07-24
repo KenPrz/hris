@@ -7,9 +7,16 @@
  * loading/error/empty via Skeleton/InlineNotification/EmptyState, and a Dialog-driven
  * create/edit flow built on the same mutation + invalidation shape.
  *
- * Deliberately out of scope here (later tasks): per-employee/department assignments and
- * the resolved-calendar view. This slice is templates + which one is the office's
- * fallback default.
+ * Extended in M4b's assignment task with an ASSIGNMENTS region: which employee runs which
+ * template from which date (`useScheduleAssignments` + its mutations, Task 10). The target
+ * picker is EMPLOYEE ONLY for now — `GET /employees` (`EmployeeScope::visibleTo`) exists
+ * and is filtered here to the viewed office, but there is no `GET /office/departments`
+ * list endpoint yet, so a department-target toggle has nowhere to source options from.
+ * The backend fully supports department-target assignments (`department_id` on
+ * `ScheduleAssignmentCreateInput`); the UI seam for a target-type toggle is left as a
+ * comment on `AssignmentForm` below, to add once that endpoint exists.
+ *
+ * Deliberately out of scope here (later tasks): the resolved-calendar view.
  *
  * The office-default Select has one real gap worth naming: the API has no GET for an
  * office's current `default_shift_template_id` (`PATCH /office/default-template` is
@@ -32,10 +39,16 @@ import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Select } from '@/components/ui/Select'
+import type { SelectOption } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { TextInput } from '@/components/ui/TextInput'
-import type { ShiftDay, ShiftTemplate, Weekday } from '@/lib/api'
+import type { ScheduleAssignment, ShiftDay, ShiftTemplate, Weekday } from '@/lib/api'
 import { ApiError } from '@/lib/api'
+import {
+  useCreateScheduleAssignment,
+  useDeleteScheduleAssignment,
+  useScheduleAssignments,
+} from '@/hooks/useScheduleAssignments'
 import {
   useCreateShiftTemplate,
   useDeleteShiftTemplate,
@@ -43,6 +56,7 @@ import {
   useShiftTemplates,
   useUpdateShiftTemplate,
 } from '@/hooks/useShiftTemplates'
+import { useEmployees } from '@/hooks/useEmployees'
 import { useSession } from '@/hooks/useSession'
 
 // Mon..Fri working 08:00-18:00 with an hour's break, Sat/Sun rest — a plain, unsurprising
@@ -123,6 +137,118 @@ function TemplateForm({
         </Button>
       </div>
     </form>
+  )
+}
+
+interface AssignmentFormProps {
+  employeeOptions: SelectOption[]
+  templateOptions: SelectOption[]
+  submitting: boolean
+  submitError: string | null
+  onCancel: () => void
+  onSubmit: (input: { employeeId: string; templateId: string; effectiveFrom: string }) => void
+}
+
+/** Employee-target only for M4b — see the file-level comment. A department-target toggle
+ * (radio/segmented control switching between an employee Select and a department Select)
+ * would go here, right above the employee Select, once `GET /office/departments` exists
+ * to source its options from; today there is nothing to populate it with. */
+function AssignmentForm({
+  employeeOptions,
+  templateOptions,
+  submitting,
+  submitError,
+  onCancel,
+  onSubmit,
+}: AssignmentFormProps) {
+  const [employeeId, setEmployeeId] = useState(employeeOptions[0]?.value ?? '')
+  const [templateId, setTemplateId] = useState(templateOptions[0]?.value ?? '')
+  const [effectiveFrom, setEffectiveFrom] = useState('')
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    onSubmit({ employeeId, templateId, effectiveFrom })
+  }
+
+  const canSubmit = employeeId.length > 0 && templateId.length > 0 && effectiveFrom.length > 0
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: 'var(--sp-md)' }}>
+      <Select
+        id="assignment-employee"
+        label="Employee"
+        value={employeeId}
+        onChange={setEmployeeId}
+        options={employeeOptions}
+      />
+
+      <Select
+        id="assignment-template"
+        label="Shift template"
+        value={templateId}
+        onChange={setTemplateId}
+        options={templateOptions}
+      />
+
+      <TextInput
+        id="assignment-effective-from"
+        label="Effective from"
+        type="date"
+        value={effectiveFrom}
+        onChange={setEffectiveFrom}
+        required
+      />
+
+      {submitError !== null ? (
+        <InlineNotification kind="error" title="That didn't save.">
+          {submitError}
+        </InlineNotification>
+      ) : null}
+
+      <div className="flex" style={{ gap: 'var(--sp-sm)' }}>
+        <Button type="submit" loading={submitting} disabled={submitting || !canSubmit}>
+          Create assignment
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+interface AssignmentRowProps {
+  assignment: ScheduleAssignment
+  employeeLabel: string
+  templateName: string
+  onDelete: () => void
+  deleting: boolean
+}
+
+function AssignmentRow({ assignment, employeeLabel, templateName, onDelete, deleting }: AssignmentRowProps) {
+  return (
+    <div
+      className="flex items-center justify-between"
+      style={{
+        gap: 'var(--sp-md)',
+        padding: 'var(--sp-sm) var(--sp-md)',
+        background: 'var(--surface-1)',
+        borderRadius: 'var(--radius)',
+      }}
+    >
+      <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
+        <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
+          {employeeLabel}
+        </span>
+        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+          {templateName} from {assignment.effective_from}
+        </span>
+      </div>
+
+      <Button variant="danger" onClick={onDelete} loading={deleting} disabled={deleting}>
+        {`Delete assignment for ${employeeLabel}`}
+      </Button>
+    </div>
   )
 }
 
@@ -216,6 +342,14 @@ export default function SchedulesPage() {
   const deleteMutation = useDeleteShiftTemplate(officeId)
   const setDefaultMutation = useSetOfficeDefaultTemplate(officeId)
 
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false)
+  const [deletingAssignmentId, setDeletingAssignmentId] = useState<string | null>(null)
+
+  const employeesQuery = useEmployees()
+  const assignmentsQuery = useScheduleAssignments(officeId)
+  const createAssignmentMutation = useCreateScheduleAssignment(officeId)
+  const deleteAssignmentMutation = useDeleteScheduleAssignment(officeId)
+
   function closeDialog() {
     setDialogState({ mode: 'closed' })
   }
@@ -250,11 +384,47 @@ export default function SchedulesPage() {
     )
   }
 
+  function handleAssignSubmit(input: { employeeId: string; templateId: string; effectiveFrom: string }) {
+    // Exactly one target key — employee_id only, never department_id (not even `null`);
+    // the backend 400s on both-or-neither. See the file-level comment for why department
+    // targeting has no UI yet.
+    createAssignmentMutation.mutate(
+      {
+        shift_template_id: input.templateId,
+        employee_id: input.employeeId,
+        effective_from: input.effectiveFrom,
+      },
+      { onSuccess: () => setAssignDialogOpen(false) },
+    )
+  }
+
+  function handleDeleteAssignment(assignment: ScheduleAssignment) {
+    setDeletingAssignmentId(assignment.id)
+    deleteAssignmentMutation.mutate(assignment.id, { onSettled: () => setDeletingAssignmentId(null) })
+  }
+
   const templates = templatesQuery.data ?? []
 
   const deleteErrorMessage =
     deleteMutation.error instanceof ApiError
       ? deleteMutation.error.message
+      : 'Check your connection and try again.'
+
+  const employees = employeesQuery.data ?? []
+  const officeEmployees = employees.filter((employee) => employee.current_office_id === officeId)
+  const employeeLabelById = new Map(officeEmployees.map((employee) => [employee.id, employee.employee_no]))
+
+  const assignments = assignmentsQuery.data ?? []
+  const templateNameById = new Map(templates.map((template) => [template.id, template.name]))
+
+  const assignErrorMessage =
+    createAssignmentMutation.error instanceof ApiError
+      ? createAssignmentMutation.error.message
+      : 'Check your connection and try again.'
+
+  const deleteAssignmentErrorMessage =
+    deleteAssignmentMutation.error instanceof ApiError
+      ? deleteAssignmentMutation.error.message
       : 'Check your connection and try again.'
 
   return (
@@ -338,6 +508,48 @@ export default function SchedulesPage() {
                 ) : null}
               </div>
             ) : null}
+
+            <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+              <SectionHeader
+                title="Assignments"
+                actions={<Button onClick={() => setAssignDialogOpen(true)}>Assign template</Button>}
+              />
+
+              {assignmentsQuery.isLoading ? (
+                <Skeleton height="8rem" />
+              ) : assignmentsQuery.isError ? (
+                <InlineNotification kind="error" title="Couldn't load this office's assignments.">
+                  Check your connection and try again.
+                </InlineNotification>
+              ) : assignments.length === 0 ? (
+                <EmptyState title="No assignments yet">
+                  Assign a shift template to an employee to override the office default for them.
+                </EmptyState>
+              ) : (
+                <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+                  {assignments.map((assignment) => (
+                    <AssignmentRow
+                      key={assignment.id}
+                      assignment={assignment}
+                      employeeLabel={
+                        assignment.employee_id !== null
+                          ? (employeeLabelById.get(assignment.employee_id) ?? assignment.employee_id)
+                          : `Department ${assignment.department_id ?? 'unknown'}`
+                      }
+                      templateName={templateNameById.get(assignment.shift_template_id) ?? assignment.shift_template_id}
+                      onDelete={() => handleDeleteAssignment(assignment)}
+                      deleting={deletingAssignmentId === assignment.id && deleteAssignmentMutation.isPending}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {deleteAssignmentMutation.isError ? (
+                <InlineNotification kind="error" title="That assignment couldn't be deleted.">
+                  {deleteAssignmentErrorMessage}
+                </InlineNotification>
+              ) : null}
+            </div>
           </>
         )}
 
@@ -358,6 +570,23 @@ export default function SchedulesPage() {
               onSubmit={handleSubmit}
             />
           )}
+        </Dialog>
+
+        <Dialog
+          open={assignDialogOpen}
+          onClose={() => setAssignDialogOpen(false)}
+          title="Assign template"
+        >
+          {assignDialogOpen ? (
+            <AssignmentForm
+              employeeOptions={officeEmployees.map((employee) => ({ value: employee.id, label: employee.employee_no }))}
+              templateOptions={templates.map((template) => ({ value: template.id, label: template.name }))}
+              submitting={createAssignmentMutation.isPending}
+              submitError={createAssignmentMutation.isError ? assignErrorMessage : null}
+              onCancel={() => setAssignDialogOpen(false)}
+              onSubmit={handleAssignSubmit}
+            />
+          ) : null}
         </Dialog>
       </div>
     </AppShell>
