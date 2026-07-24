@@ -17,8 +17,10 @@ final class DeleteOverrideController
     {
         // 404, not 403: same office-scope discipline as UpdateOverrideController — an
         // override whose employee's office the caller doesn't administer 404s exactly
-        // like a nonexistent {override}.
-        if (! OfficeScope::administers($request->user(), $override->employee->current_office_id)) {
+        // like a nonexistent {override}. Null-office check first so a null current_office_id
+        // 404s rather than TypeError-ing into a 500 (administers() is string-typed).
+        if ($override->employee->current_office_id === null
+            || ! OfficeScope::administers($request->user(), $override->employee->current_office_id)) {
             throw new NotFoundHttpException;
         }
 

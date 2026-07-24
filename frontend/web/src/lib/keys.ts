@@ -26,5 +26,9 @@ export const keys = {
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,
     overrides: (employeeId: string, month: string) => ['schedules', 'overrides', employeeId, month] as const,
     resolved: (employeeId: string, month: string) => ['schedules', 'resolved', employeeId, month] as const,
+    // The prefix over every resolved query, for any employee/month. A template, assignment,
+    // or office-default change alters what `ScheduleResolver` produces for potentially any
+    // employee, so those mutations invalidate this whole prefix — not one employee's key.
+    resolvedAll: () => ['schedules', 'resolved'] as const,
   },
 }

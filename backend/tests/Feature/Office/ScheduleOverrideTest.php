@@ -312,6 +312,32 @@ it('404s deleting an override in an office not administered, identically to a fa
     $this->assertDatabaseHas('schedule_overrides', ['id' => $theirOverride->id]);
 });
 
+it('404s (not 500) updating or deleting an override whose employee has since lost their office', function (): void {
+    $office = overrideOffice();
+    $hr = hrAdminOfOverride($office);
+    Sanctum::actingAs($hr);
+
+    // An override created while the employee had an office; the office is then cleared.
+    // The scope check must 404 on the null office, never hand a null to the string-typed
+    // OfficeScope::administers and 500 on the uuid parser.
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+    $override = ScheduleOverride::create([
+        'employee_id' => $employee->id,
+        'date' => '2026-08-15',
+        'is_rest' => true,
+    ]);
+    $employee->update(['current_office_id' => null]);
+
+    $this->patchJson("/api/v1/office/schedule-overrides/{$override->id}", [
+        'is_rest' => true,
+    ])->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+
+    $this->deleteJson("/api/v1/office/schedule-overrides/{$override->id}")
+        ->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+
+    $this->assertDatabaseHas('schedule_overrides', ['id' => $override->id]);
+});
+
 // --- List -----------------------------------------------------------------
 
 it("lists an employee's overrides filtered by month", function (): void {

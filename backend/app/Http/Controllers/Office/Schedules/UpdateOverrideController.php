@@ -18,8 +18,11 @@ final class UpdateOverrideController
     public function __invoke(UpdateScheduleOverrideRequest $request, ScheduleOverride $override, UpdateScheduleOverride $action): JsonResponse
     {
         // 404, not 403: an override whose employee's office the caller doesn't administer
-        // 404s exactly like a nonexistent {override}.
-        if (! OfficeScope::administers($request->user(), $override->employee->current_office_id)) {
+        // 404s exactly like a nonexistent {override}. The null-office check comes first —
+        // administers() is string-typed, so a null current_office_id would TypeError into a
+        // 500 rather than 404 (matches ResolvedScheduleController / CreateOverrideController).
+        if ($override->employee->current_office_id === null
+            || ! OfficeScope::administers($request->user(), $override->employee->current_office_id)) {
             throw new NotFoundHttpException;
         }
 

@@ -24,12 +24,17 @@ export function useScheduleAssignments(officeId: string | null) {
   })
 }
 
-/** Every mutation below invalidates the SAME office the caller is viewing — not a
- * global key — so a create/delete anywhere else in the app can never blow away an
- * assignment list this screen isn't looking at. */
+/** Every mutation below invalidates the SAME office's assignment list the caller is
+ * viewing — not a global key — so a create/delete anywhere else can never blow away an
+ * assignment list this screen isn't looking at. It ALSO invalidates every resolved query
+ * (`resolvedAll`): assigning or unassigning a template changes what `ScheduleResolver`
+ * produces for that employee, so a resolved calendar on screen must refetch. */
 function useInvalidateScheduleAssignments(officeId: string | null) {
   const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: keys.schedules.assignments(officeId ?? '') })
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: keys.schedules.assignments(officeId ?? '') })
+    void queryClient.invalidateQueries({ queryKey: keys.schedules.resolvedAll() })
+  }
 }
 
 export function useCreateScheduleAssignment(officeId: string | null) {

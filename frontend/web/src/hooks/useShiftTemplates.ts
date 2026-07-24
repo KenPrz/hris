@@ -23,12 +23,18 @@ export function useShiftTemplates(officeId: string | null) {
   })
 }
 
-/** Every mutation below invalidates the SAME office the caller is viewing — not a
- * global key — so a create/update/delete anywhere else in the app can never blow away a
- * template list this screen isn't looking at. */
+/** Every mutation below invalidates the SAME office's template list the caller is viewing
+ * — not a global key — so a create/update/delete anywhere else can never blow away a
+ * template list this screen isn't looking at. It ALSO invalidates every resolved query
+ * (`resolvedAll`): a template edit or a change to the office default alters what
+ * `ScheduleResolver` produces, so a resolved calendar on screen must refetch rather than
+ * show a stale week. */
 function useInvalidateShiftTemplates(officeId: string | null) {
   const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: keys.schedules.templates(officeId ?? '') })
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: keys.schedules.templates(officeId ?? '') })
+    void queryClient.invalidateQueries({ queryKey: keys.schedules.resolvedAll() })
+  }
 }
 
 export function useCreateShiftTemplate(officeId: string | null) {

@@ -99,6 +99,9 @@ describe('useShiftTemplates — mutations invalidate keys.schedules.templates(of
       expect.objectContaining({ method: 'POST' }),
     )
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: keys.schedules.templates('o1') })
+    // A template change alters what the resolver produces, so every resolved calendar must
+    // refetch too — not just the templates list.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: keys.schedules.resolvedAll() })
   })
 
   it('useUpdateShiftTemplate sends { name, days } (no office_id) and invalidates', async () => {
