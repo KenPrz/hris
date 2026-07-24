@@ -27,8 +27,11 @@ use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayContro
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
 use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
 use App\Http\Controllers\Office\Holidays\UpdateController as UpdateHolidayController;
+use App\Http\Controllers\Office\Schedules\CreateAssignmentController;
 use App\Http\Controllers\Office\Schedules\CreateTemplateController;
+use App\Http\Controllers\Office\Schedules\DeleteAssignmentController;
 use App\Http\Controllers\Office\Schedules\DeleteTemplateController;
+use App\Http\Controllers\Office\Schedules\ListAssignmentsController;
 use App\Http\Controllers\Office\Schedules\ListTemplatesController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
@@ -110,6 +113,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/shift-templates/{template}', ShowTemplateController::class);
             Route::patch('/shift-templates/{template}', UpdateTemplateController::class);
             Route::delete('/shift-templates/{template}', DeleteTemplateController::class);
+            Route::get('/schedule-assignments', ListAssignmentsController::class);
+            Route::post('/schedule-assignments', CreateAssignmentController::class);
+            Route::delete('/schedule-assignments/{assignment}', DeleteAssignmentController::class);
         });
     });
 });
