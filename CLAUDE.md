@@ -10,19 +10,40 @@ this file only covers how to run things.
 
 Laravel 13.21 (PHP 8.5) · PostgreSQL 18 · React 19 + TypeScript on Next.js 16 · Docker Compose · FrankenPHP
 
-`@tanstack/react-query` is installed but not yet used — the data layer lands in M3. The
-health page fetches directly through `src/lib/api.ts`.
+`@tanstack/react-query` backs every authenticated screen as of M3.5 — `useSession`,
+`useMyAttendance`, and `usePunch` all go through it, keyed by `src/lib/keys.ts`'s factory.
+The one exception is the public health page (`src/app/page.tsx`), which still fetches
+directly through `src/lib/api.ts` since it predates the query layer and has no session to
+cache.
 
 ## Layout
 
 ```
-backend/          Laravel API. Action-class architecture — see docs/04-backend-conventions.md
-frontend/web/     Next.js app. One frontend, not two — every admin is also an employee
-                  who files their own leave, so a second build would duplicate the
-                  entire self-service portal. See docs/00-overview.md.
-Makefile          Runner surface for the containerized stack — `make help` lists everything.
-compose.dev.yml   Full dev stack: db + api + web, hot reload. `make dev`.
-docs/             The design. Start at docs/README.md
+backend/            Laravel API. Action-class architecture — see docs/04-backend-conventions.md
+frontend/web/       Next.js app. One frontend, not two — every admin is also an employee
+                    who files their own leave, so a second build would duplicate the
+                    entire self-service portal. See docs/00-overview.md.
+  src/app/            Routes. (auth)/login is public; (app)/* is guarded by useSession and
+                      holds me/attendance today — team/office/admin route groups don't
+                      exist until their milestones ship.
+  src/components/     ui/ (tier-1 Carbon primitives: Button, TextInput, InlineNotification,
+                      Skeleton), domain/ (Duration, DayCell, MonthCalendar), and tier-2
+                      generics (AppShell, SideNav, SectionHeader, StatTile, Tag, EmptyState)
+                      at the top level.
+  src/hooks/          useSession, useMyAttendance, usePunch — one React Query hook per
+                      concern, keyed through lib/keys.ts.
+  src/lib/            api.ts (the envelope-aware client), session.ts (the only module
+                      touching storage), keys.ts (query-key factory), date.ts (string
+                      calendar dates), timezone.ts (the one OFFICE_TIME_ZONE constant),
+                      money.ts / duration.ts (browser mirrors of the backend's Money/Minutes).
+  src/styles/         carbon.css — the only place a DESIGN.md token enters code.
+  src/fonts/          Self-hosted IBM Plex Sans (next/font/local), complete build so ₱ renders.
+Makefile             Runner surface for the containerized stack — `make help` lists everything.
+compose.dev.yml      Full dev stack: db + api + web, hot reload. `make dev`.
+docs/                The design. Start at docs/README.md
+DESIGN.md            The token authority for the frontend — colors, type scale, spacing,
+                    radius. carbon.css is hand-written from its front-matter; nothing else
+                    in the frontend should reference a raw hex or literal type step.
 ```
 
 Production compose lands in M8; there is no `compose.prod.yml` yet.
@@ -99,7 +120,7 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-23 backend tests (15 feature/unit + 8 arch) and 3 frontend tests today.
+267 backend tests + 17 arch tests, and 165 frontend tests today.
 
 The test database is created once:
 
@@ -198,6 +219,18 @@ Found while building M0. Each one cost real time.
 - **`docker compose exec` defaults to root.** Against a bind mount that leaves root-owned
   files the host user cannot write. Every Makefile `exec` passes `--user`; a hand-run one
   needs to as well.
+- **Vitest does not read `tsconfig.json`'s `paths`.** The `@/*` → `./src/*` alias has to be
+  declared a second time, in `vitest.config.ts`'s own `resolve.alias`, or every component
+  test fails on an unresolved import before it runs at all; `setupFiles` (which registers
+  `@testing-library/jest-dom`'s matchers) is equally load-bearing. Both are easy to delete
+  as "duplicate config" without realizing they're the only thing making the test runner
+  agree with the TypeScript compiler about where `@/` points.
+- **`DESIGN.md` is the token authority; `frontend/web/src/styles/carbon.css` is the only
+  place a token enters code.** Every color, spacing value, and radius in a component reads
+  a `var(--*)` from `carbon.css`; a raw hex or literal pixel value in a component is a bug,
+  not a shortcut. The CSS `font` shorthand `carbon.css` uses for its `--t-*` type tokens
+  cannot express `letter-spacing`, so DESIGN.md's tracking rides alongside as separate
+  `--ls-*` companion tokens — set both together or the shorthand silently drops tracking.
 
 ## Where things are
 
@@ -211,13 +244,22 @@ Found while building M0. Each one cost real time.
 
 ## Status
 
-**M0 complete** — skeleton boots end to end. `GET /api/v1/health` is built as a real
-action (controller → action → resource) so the first endpoint sets the shape every later
-one copies; the error envelope covers our exceptions and the framework's; `tests/Arch/`
-enforces the conventions from day one; `make dev` brings up db + api + web and
-<http://127.0.0.1:5176> says **System healthy** with the Postgres version.
+**M0 through M3.5 complete.** The skeleton boots; the DOLE premium matrix is a
+table-driven unit test; schema/auth/office-scoped RBAC are proven by a four-actor scope
+matrix; timekeeping ingestion turns a punch into an append-only `attendance_logs` row; an
+employee can correct their own attendance through a request a manager or HR approves; and
+as of M3.5 all of it has a real screen — Carbon-styled sign-in, a clock-in/out button that
+always knows what happens next, and a month calendar of actual punch times (never an
+invented total). **267 backend tests + 17 arch tests, 165 frontend tests.** See
+`docs/06-roadmap.md` for the full status of each milestone and `docs/features.md` for
+what a user can actually do today.
 
-Next: **M1 — time and pay primitives.** `Minutes`, `Money`, `BasisPoints`, `DayType`,
-`PayMultiplier`, `NightDiffSplitter`, `PunchPairer`, `OvertimeThreshold`, and the whole
-DOLE premium matrix as a table-driven unit test with zero database. See
-`docs/06-roadmap.md`.
+One caveat worth knowing before you trust the UI: M3.5's flow is proven by component tests
+and a live API walkthrough, but **the rendered screens have never been confirmed in a real
+browser** — hydration would not complete in the build sandbox (it fails the same way on M0's
+health page, so it is environmental). There is no frontend e2e harness yet. Load it yourself
+before assuming it looks right; see the M3.5 status block in `docs/06-roadmap.md`.
+
+Next: **M4 — configuration spine.** Holiday calendars, shift templates, and `pay_rules`,
+all admin-editable per office — everything M3.5's frontend and M5's compute engine will
+read. See `docs/06-roadmap.md`.

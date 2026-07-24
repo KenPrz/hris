@@ -138,6 +138,30 @@ before any of it was wired to a button.
   queue of everyone else's pending requests you're allowed to decide — never your own, and
   never anyone outside who you already oversee.
 
+## Using it from a browser *(M3.5)*
+
+Everything above through M3.6 existed as an API only. This milestone gives it a real
+screen — the sign-in page and the attendance screen — built in IBM's Carbon design
+language. There is still no screen for correcting attendance, no roster, and no
+office/admin screens; those arrive with the milestones that own their data.
+
+- **Signing in, for real.** A work email and password on a single sign-in page; a wrong
+  password and an unknown email look identical, so the page itself can't be used to guess
+  who has an account. Signing out ends the session immediately, even if the network is
+  down at that exact moment.
+- **One clock-in/clock-out button that always knows what happens next.** The attendance
+  screen leads with a single action: it reads "Clock in" or "Clock out" depending on
+  whether you're already clocked in, and the moment you tap it, the screen tells you which
+  state you're now in and how long you've been at it today. A shaky connection that
+  retries the tap in the background never records a second punch for the one action you
+  took.
+- **Your month, laid out as a calendar.** Below the clock button, every day you've
+  punched shows its actual clock-in and clock-out times — not a rolled-up number. A day
+  that pairs up cleanly also shows its total for that day; a day with a missing punch or
+  an odd number of punches shows exactly what was recorded and no total, rather than
+  guess at one. You can step back a month at a time to see your history, independent of
+  today's clock button.
+
 ---
 
 *(Turning punches into computed pay — the schedules, holidays, and premium-rate engine —
