@@ -1,10 +1,21 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { todayInZone } from '@/lib/date'
 import { MonthCalendar } from './MonthCalendar'
 
 describe('MonthCalendar', () => {
+  // Pin the clock inside the tested month. Without this the isToday assertion reads the real
+  // wall clock — it passes today but silently degrades to "always false" once the date leaves
+  // July 2026, so an isToday regression would stop being caught.
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-24T09:00:00+08:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('uses grid semantics with Monday-first column headers a screen reader can navigate', () => {
     render(<MonthCalendar month="2026-07" timeZone="Asia/Manila" renderDay={() => null} />)
 
