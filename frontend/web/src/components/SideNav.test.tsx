@@ -100,7 +100,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(groups.map((g) => g.key)).toEqual(['me'])
   })
 
-  it('Team/Office/Admin resolve to zero items in M3.5 — only Me has a shipped route', () => {
+  it('Team/Admin resolve to zero items — only Me and (as of M4a) Office have a shipped route', () => {
     const groups = navEntriesFor(
       buildSession({ is_system_admin: true, has_reports: true, hr_offices: ['office-1'] }),
     )
@@ -108,7 +108,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     const byKey = Object.fromEntries(groups.map((g) => [g.key, g]))
     expect(byKey.me?.items.length).toBeGreaterThan(0)
     expect(byKey.team?.items).toEqual([])
-    expect(byKey.office?.items).toEqual([])
+    expect(byKey.office?.items).toEqual([{ href: '/office/holidays', label: 'Holidays' }])
     expect(byKey.admin?.items).toEqual([])
   })
 })
@@ -147,9 +147,44 @@ describe('SideNav — rendered', () => {
     expect(screen.queryByText('Team')).not.toBeInTheDocument()
   })
 
-  it('an HR admin sees NO empty "Office" heading, and a system admin sees NO empty "Admin" heading', async () => {
+  it('a system admin sees NO empty "Admin" heading', async () => {
     setToken('sekrit')
-    stubFetch(200, sessionBody({ hr_offices: ['office-1'], is_system_admin: true }))
+    stubFetch(200, sessionBody({ is_system_admin: true }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+  })
+
+  it('an HR admin sees an Office group with a Holidays link (the first Office-scope route)', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ hr_offices: ['office-1'] }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    // `findBy` polls, unlike the plain `Attendance` waitFor elsewhere in this file — Me
+    // renders even before the session fetch resolves (navEntriesFor(null) already yields
+    // Me), so only waiting on the thing that depends on the loaded session is a real wait.
+    const holidaysLink = await screen.findByRole('link', { name: 'Holidays' })
+    expect(holidaysLink).toHaveAttribute('href', '/office/holidays')
+    expect(screen.getByText('Office')).toBeInTheDocument()
+  })
+
+  it('a plain employee (no reports, no hr_offices, not sysadmin) sees only Me — no Office group', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody())
 
     render(
       <Providers>
@@ -162,7 +197,7 @@ describe('SideNav — rendered', () => {
     })
 
     expect(screen.queryByText('Office')).not.toBeInTheDocument()
-    expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Holidays' })).not.toBeInTheDocument()
   })
 
   it('marks the active route with aria-current="page" and a 3px --blue left border', async () => {
