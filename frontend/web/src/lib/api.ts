@@ -171,6 +171,87 @@ export type HolidayUpdateInput = { day_type: DayType; name: string }
 
 export type HolidayCloneInput = { office_id: string; from_year: number; to_year: number }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/ShiftTemplateResource.php,
+// ScheduleAssignmentResource.php, ScheduleOverrideResource.php, and
+// ResolvedScheduleController::toWireShape (app/Http/Controllers/Office/Schedules/).
+// ---------------------------------------------------------------------------
+
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
+export type ScheduleSource = 'override' | 'employee' | 'department' | 'office_default'
+
+export type ShiftDay = {
+  weekday: Weekday
+  is_rest: boolean
+  start_minute: number | null
+  end_minute: number | null
+  break_minutes: number | null
+}
+
+export type ShiftTemplate = { id: string; office_id: string; name: string; days: ShiftDay[] }
+
+export type ShiftTemplateCreateInput = { office_id: string; name: string; days: ShiftDay[] }
+
+// No `office_id` — the office is fixed by the route-bound template, not the body.
+export type ShiftTemplateUpdateInput = { name: string; days: ShiftDay[] }
+
+export type ScheduleAssignment = {
+  id: string
+  shift_template_id: string
+  employee_id: string | null
+  department_id: string | null
+  effective_from: string // YYYY-MM-DD
+}
+
+export type ScheduleAssignmentCreateInput = {
+  shift_template_id: string
+  employee_id?: string
+  department_id?: string
+  effective_from: string
+}
+
+export type ScheduleOverride = {
+  id: string
+  employee_id: string
+  date: string // YYYY-MM-DD
+  is_rest: boolean
+  start_minute: number | null
+  end_minute: number | null
+  break_minutes: number | null
+  note: string | null
+}
+
+export type ScheduleOverrideCreateInput = {
+  employee_id: string
+  date: string
+  is_rest: boolean
+  start_minute?: number | null
+  end_minute?: number | null
+  break_minutes?: number | null
+  note?: string | null
+}
+
+// No `employee_id`/`date` — both are fixed by the route-bound override, not the body.
+export type ScheduleOverrideUpdateInput = {
+  is_rest: boolean
+  start_minute?: number | null
+  end_minute?: number | null
+  break_minutes?: number | null
+  note?: string | null
+}
+
+export type ResolvedDay = {
+  is_rest: boolean
+  start_minute: number | null
+  end_minute: number | null
+  break_minutes: number | null
+  scheduled_minutes: number
+  source: ScheduleSource
+}
+
+/** Keyed by YYYY-MM-DD, one entry per day of the requested month. */
+export type ResolvedMonth = Record<string, ResolvedDay>
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -210,5 +291,68 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),
+  },
+  shiftTemplates: {
+    list: (office: string) => request<ShiftTemplate[]>(`/office/shift-templates?office=${office}`),
+    create: (body: ShiftTemplateCreateInput) =>
+      request<ShiftTemplate>('/office/shift-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    get: (id: string) => request<ShiftTemplate>(`/office/shift-templates/${id}`),
+    update: (id: string, body: ShiftTemplateUpdateInput) =>
+      request<ShiftTemplate>(`/office/shift-templates/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) => request<undefined>(`/office/shift-templates/${id}`, { method: 'DELETE' }),
+  },
+  scheduleAssignments: {
+    list: (params: { office: string; employee?: string; department?: string }) => {
+      const query = new URLSearchParams({ office: params.office })
+      if (params.employee !== undefined) query.set('employee', params.employee)
+      if (params.department !== undefined) query.set('department', params.department)
+      return request<ScheduleAssignment[]>(`/office/schedule-assignments?${query.toString()}`)
+    },
+    create: (body: ScheduleAssignmentCreateInput) =>
+      request<ScheduleAssignment>('/office/schedule-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) => request<undefined>(`/office/schedule-assignments/${id}`, { method: 'DELETE' }),
+  },
+  scheduleOverrides: {
+    list: (params: { office: string; employee: string; month: string }) =>
+      request<ScheduleOverride[]>(
+        `/office/schedule-overrides?office=${params.office}&employee=${params.employee}&month=${params.month}`,
+      ),
+    create: (body: ScheduleOverrideCreateInput) =>
+      request<ScheduleOverride>('/office/schedule-overrides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: ScheduleOverrideUpdateInput) =>
+      request<ScheduleOverride>(`/office/schedule-overrides/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) => request<undefined>(`/office/schedule-overrides/${id}`, { method: 'DELETE' }),
+  },
+  officeDefaultTemplate: {
+    set: (body: { office_id: string; template_id: string }) =>
+      request<{ id: string; default_shift_template_id: string }>('/office/default-template', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+  },
+  resolvedSchedule: {
+    get: (employee: string, month: string) =>
+      request<ResolvedMonth>(`/office/schedule/resolved?employee=${employee}&month=${month}`),
   },
 }
