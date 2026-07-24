@@ -41,8 +41,12 @@ export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
   const today = todayInZone(timeZone)
 
   return (
-    <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-      <caption className="sr-only">{month}</caption>
+    // Seven columns don't fit a phone. Rather than crush the punch times into unreadable
+    // slivers, the grid keeps a legible minimum width and scrolls horizontally within its
+    // own container — the page itself never scrolls sideways.
+    <div style={{ overflowX: 'auto' }}>
+      <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: '48rem' }}>
+        <caption className="sr-only">{month}</caption>
       <thead>
         <tr>
           {WEEKDAY_LABELS.map((label) => (
@@ -81,7 +85,8 @@ export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
             )}
           </tr>
         ))}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
   )
 }

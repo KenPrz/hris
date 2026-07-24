@@ -7,7 +7,7 @@
  * fires in `finally`, regardless of how `api.logout()` resolves.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -25,6 +25,35 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter()
   const { session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  // Standard menu-button dismissal: Escape and a click outside both close it, and Escape
+  // returns focus to the trigger so a keyboard user isn't dropped at the top of the page.
+  useEffect(() => {
+    if (!menuOpen) return
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+        triggerRef.current?.focus()
+      }
+    }
+
+    function onPointerDown(event: PointerEvent) {
+      if (menuRef.current !== null && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('pointerdown', onPointerDown)
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [menuOpen])
 
   async function handleSignOut() {
     try {
@@ -61,11 +90,13 @@ export function AppShell({ children }: AppShellProps) {
           */}
         </div>
 
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
+            ref={triggerRef}
             type="button"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
+            aria-controls="account-menu"
             aria-label="Account menu"
             onClick={() => setMenuOpen((open) => !open)}
             className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
@@ -83,6 +114,7 @@ export function AppShell({ children }: AppShellProps) {
           </button>
           {menuOpen ? (
             <div
+              id="account-menu"
               role="menu"
               style={{
                 position: 'absolute',

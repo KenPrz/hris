@@ -67,3 +67,34 @@ export function pairPunches(sortedPunches: AttendanceLog[]): PunchPairing {
 
   return { kind: 'open', completedMinutes, openSince: trailing.punched_at }
 }
+
+/** One row in a compact ledger: an `in`→`out` span, an open `in` (`out === null`), or a
+ * stray punch that didn't pair (`start` carries its own direction). */
+export type PunchSpan = { start: AttendanceLog; out: AttendanceLog | null }
+
+/**
+ * Shapes a day's punches into the spans a month cell draws — `08:00–17:00` on one row
+ * instead of an `in` line and an `out` line. Greedy: a consecutive `in`,`out` becomes one
+ * span; anything that doesn't pair (a lone trailing `in`, a stray `out`, `in` then `in`)
+ * is emitted on its own so every raw time still shows. This only decides what's *drawn* —
+ * it never produces a total. `pairPunches` remains the one place a number comes from, and
+ * the two agree because they walk the same chronological order.
+ */
+export function groupIntoSpans(sortedPunches: AttendanceLog[]): PunchSpan[] {
+  const spans: PunchSpan[] = []
+
+  for (let i = 0; i < sortedPunches.length; ) {
+    const start = sortedPunches[i]
+    const next = sortedPunches[i + 1]
+
+    if (start.direction === 'in' && next?.direction === 'out') {
+      spans.push({ start, out: next })
+      i += 2
+    } else {
+      spans.push({ start, out: null })
+      i += 1
+    }
+  }
+
+  return spans
+}

@@ -271,6 +271,23 @@ describe('/me/attendance — month in the URL', () => {
     expect(screen.getByText(monthLabel('2026-05'))).toBeInTheDocument()
   })
 
+  it('falls back to the current month when ?month= names an impossible month', async () => {
+    // `2026-99` passes a shape-only check but is not a real month — it must not render
+    // "undefined 2026" over an empty grid.
+    searchParams = new URLSearchParams('month=2026-99')
+    const fetchMock = stubApi({ attendanceByMonth: { [THIS_MONTH]: { [TODAY]: [] } } })
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).startsWith(`/api/v1/me/attendance?month=${THIS_MONTH}`)),
+      ).toBe(true)
+    })
+
+    expect(screen.getByText(monthLabel(THIS_MONTH))).toBeInTheDocument()
+  })
+
   it('defaults to the current month when ?month= is absent', async () => {
     const fetchMock = stubApi({ attendanceByMonth: { [THIS_MONTH]: { [TODAY]: [] } } })
 
