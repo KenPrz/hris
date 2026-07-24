@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AttendanceLog } from './api'
-import { pairPunches, sortByPunchedAt } from './punches'
+import { groupIntoSpans, pairPunches, sortByPunchedAt } from './punches'
 
 function punch(overrides: Partial<AttendanceLog> = {}): AttendanceLog {
   return {
@@ -117,5 +117,37 @@ describe('pairPunches', () => {
     ]
 
     expect(pairPunches(punches)).toEqual({ kind: 'unpaired' })
+  })
+})
+
+describe('groupIntoSpans', () => {
+  it('joins a consecutive in and out into one span', () => {
+    const inP = punch({ id: 'in', direction: 'in' })
+    const outP = punch({ id: 'out', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' })
+
+    expect(groupIntoSpans([inP, outP])).toEqual([{ start: inP, out: outP }])
+  })
+
+  it('leaves a trailing lone in open (out === null)', () => {
+    const a = punch({ id: 'a', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' })
+    const b = punch({ id: 'b', direction: 'out', punched_at: '2026-07-20T12:00:00+08:00' })
+    const c = punch({ id: 'c', direction: 'in', punched_at: '2026-07-20T13:00:00+08:00' })
+
+    expect(groupIntoSpans([a, b, c])).toEqual([
+      { start: a, out: b },
+      { start: c, out: null },
+    ])
+  })
+
+  it('does not cross-pair — a stray out and a leading double in each stand alone', () => {
+    const a = punch({ id: 'a', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' })
+    const b = punch({ id: 'b', direction: 'in', punched_at: '2026-07-20T09:00:00+08:00' })
+    const c = punch({ id: 'c', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' })
+
+    // a can't pair with b (both in), so a stands alone; b then pairs with c.
+    expect(groupIntoSpans([a, b, c])).toEqual([
+      { start: a, out: null },
+      { start: b, out: c },
+    ])
   })
 })

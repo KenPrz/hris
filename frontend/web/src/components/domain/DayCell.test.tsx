@@ -25,7 +25,7 @@ describe('DayCell', () => {
     expect(screen.getByText('20')).toBeInTheDocument()
   })
 
-  it('lists both punch times in office-local time — the ledger, not just a summary', () => {
+  it('renders a shift as one compact span of both real times, in the office zone', () => {
     const punches = [
       punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:02:00+08:00' }),
       punch({ id: 'out', direction: 'out', punched_at: '2026-07-20T17:05:00+08:00' }),
@@ -33,15 +33,54 @@ describe('DayCell', () => {
 
     render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
 
-    // Reads as copy ("In 08:02"), not the wire enum ("in") — case-sensitive on purpose.
-    expect(screen.getByText('In 08:02')).toBeInTheDocument()
-    expect(screen.getByText('Out 17:05')).toBeInTheDocument()
+    // "08:02–17:05" — both times, joined, rendered in Asia/Manila (not the wire enum,
+    // not the viewer's zone). The dash char is incidental, so match around it.
+    expect(screen.getByText(/08:02.*17:05/)).toBeInTheDocument()
+  })
+
+  it('renders a punch instant in the office zone even when it crosses a UTC day boundary', () => {
+    // 2026-07-19T16:30Z is 2026-07-20 00:30 in Manila — the day-shift bug the whole date
+    // layer prevents. The cell shows 00:30, on the 20th.
+    const punches = [punch({ id: 'in', direction: 'in', punched_at: '2026-07-19T16:30:00Z' })]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" isToday />)
+
+    expect(screen.getByText(/00:30/)).toBeInTheDocument()
+  })
+
+  it('shows the summed total for a day that pairs cleanly', () => {
+    const punches = [
+      punch({ id: 'in1', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
+      punch({ id: 'out1', direction: 'out', punched_at: '2026-07-20T12:00:00+08:00' }),
+      punch({ id: 'in2', direction: 'in', punched_at: '2026-07-20T13:00:00+08:00' }),
+      punch({ id: 'out2', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    // Two spans, 4h + 4h = 8h total.
+    expect(screen.getByText(/08:00.*12:00/)).toBeInTheDocument()
+    expect(screen.getByText(/13:00.*17:00/)).toBeInTheDocument()
+    expect(screen.getByText('8h')).toBeInTheDocument()
+  })
+
+  it('collapses a very busy day into the first spans plus a "+N more"', () => {
+    // Five clean spans; only three draw, the rest collapse — so the cell stays the same
+    // height as every other cell in the grid.
+    const punches = Array.from({ length: 10 }, (_, i) =>
+      punch({
+        id: `p${i}`,
+        direction: i % 2 === 0 ? 'in' : 'out',
+        punched_at: `2026-07-20T${String(6 + i).padStart(2, '0')}:00:00+08:00`,
+      }),
+    )
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    expect(screen.getByText('+2 more')).toBeInTheDocument()
   })
 
   it('treats an even but mis-ordered day (in, in, out, out) as unpaired rather than cross-matching', () => {
-    // The count is even, so an ordering-blind pairer would happily invent a total.
-    // Two people's shifts, a device replay, a missed clock-out followed by a fresh
-    // clock-in — all land here, and none of them mean "one span". Show the punches.
     const punches = [
       punch({ id: 'a', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
       punch({ id: 'b', direction: 'in', punched_at: '2026-07-20T09:00:00+08:00' }),
@@ -51,26 +90,13 @@ describe('DayCell', () => {
 
     render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
 
-    // Every punch still visible — the ledger is never occluded.
-    expect(screen.getByText(/in.*08:00/i)).toBeInTheDocument()
-    expect(screen.getByText(/out.*18:00/i)).toBeInTheDocument()
-    // But no total was guessed (a cross-matching pairer would have produced 9h/18h).
+    // No total is guessed (a cross-matching pairer would have produced one), and the day
+    // is flagged for attention.
     expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).toBeNull()
     expect(screen.getByText(/unpaired/i)).toBeInTheDocument()
   })
 
-  it('shows the total for a day that pairs cleanly', () => {
-    const punches = [
-      punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
-      punch({ id: 'out', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' }),
-    ]
-
-    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
-
-    expect(screen.getByText('9h')).toBeInTheDocument()
-  })
-
-  it('renders the punches but omits the total for an odd, unpairable punch count', () => {
+  it('omits the total for an odd, unpaired past day (a forgotten clock-out)', () => {
     const punches = [
       punch({ id: 'in1', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
       punch({ id: 'out1', direction: 'out', punched_at: '2026-07-20T12:00:00+08:00' }),
@@ -79,15 +105,11 @@ describe('DayCell', () => {
 
     render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
 
-    // The punches themselves are still shown honestly.
-    expect(screen.getByText(/in.*08:00/i)).toBeInTheDocument()
-    expect(screen.getByText(/out.*12:00/i)).toBeInTheDocument()
-    expect(screen.getByText(/in.*13:00/i)).toBeInTheDocument()
-
-    // But there is no invented total — a missing clock-out must not be papered over.
-    expect(screen.queryByText('4h')).not.toBeInTheDocument()
-    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).not.toBeInTheDocument()
-    // On a past day (no isToday), a trailing open `in` is a forgotten clock-out — warn.
+    // The completed session still shows; the open one shows with no close.
+    expect(screen.getByText(/08:00.*12:00/)).toBeInTheDocument()
+    // On a past day (no isToday), a trailing open `in` is a forgotten clock-out — warn,
+    // and never a guessed total.
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).toBeNull()
     expect(screen.getByText(/unpaired/i)).toBeInTheDocument()
   })
 
@@ -105,28 +127,34 @@ describe('DayCell', () => {
 
     expect(screen.getByText(/in progress/i)).toBeInTheDocument()
     expect(screen.queryByText(/unpaired/i)).not.toBeInTheDocument()
-    // Still no invented total on the cell — the running total lives in the hero.
-    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).toBeNull()
   })
 
-  it('surfaces the flag reason for a flagged punch as a warning tag', () => {
+  it('marks a day with a flagged punch, keeping the reason on hover', () => {
     const punches = [
+      punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
       punch({
-        id: 'flagged',
-        direction: 'in',
+        id: 'out',
+        direction: 'out',
+        punched_at: '2026-07-20T17:00:00+08:00',
         verification: 'flagged',
-        flag_reason: 'Outside geofence',
+        flag_reason: 'ip_not_allowlisted',
       }),
     ]
 
     render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
 
-    expect(screen.getByText('Outside geofence')).toBeInTheDocument()
+    expect(screen.getByText('Flagged')).toBeInTheDocument()
+    // The specific reason isn't spent on the dense grid, but it's not lost — it's the
+    // hover title, so a curious HR admin can still see why.
+    expect(screen.getByTitle('ip_not_allowlisted')).toBeInTheDocument()
   })
 
   it('renders nothing punch-wise for a day with no punches', () => {
     render(<DayCell date="2026-07-20" punches={[]} timeZone="Asia/Manila" />)
 
-    expect(screen.queryByText(/unpaired/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/–/)).toBeNull()
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).toBeNull()
+    expect(screen.queryByText(/unpaired/i)).toBeNull()
   })
 })
