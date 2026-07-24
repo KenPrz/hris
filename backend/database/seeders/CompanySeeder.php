@@ -13,9 +13,11 @@ use App\Actions\Employees\ProvisionUserInput;
 use App\Actions\Employees\RecordEmploymentChangeInput;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Attendance\PunchSource;
+use App\Domain\Pay\DayType;
 use App\Models\AttendanceLog;
 use App\Models\Department;
 use App\Models\Employee;
+use App\Models\Holiday;
 use App\Models\Office;
 use App\Models\Organization;
 use App\Models\User;
@@ -78,6 +80,25 @@ final class CompanySeeder extends Seeder
             'name' => 'Cebu Branch',
             'code' => 'CEB',
             'timezone' => 'Asia/Manila',
+        ]);
+
+        // A couple of real 2026 PH holidays for Manila (M4a), so `/office/holidays` isn't
+        // empty on a fresh `make dev` — Cebu deliberately gets none, so the office-scoped
+        // list has something real to prove it's scoped, not just empty everywhere. Written
+        // directly through the model, the same way `department()` below calls
+        // `Department::create` directly — holidays have no cache to keep in sync, so there
+        // is no single-writer rule here to honour the way `RecordEmploymentChange` has one.
+        Holiday::create([
+            'office_id' => $manila->id,
+            'date' => '2026-08-21',
+            'day_type' => DayType::SpecialNonWorking,
+            'name' => 'Ninoy Aquino Day',
+        ]);
+        Holiday::create([
+            'office_id' => $manila->id,
+            'date' => '2026-12-30',
+            'day_type' => DayType::RegularHoliday,
+            'name' => 'Rizal Day',
         ]);
 
         $manilaOps = $this->department($manila, 'Operations', 'OPS');

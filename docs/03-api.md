@@ -402,6 +402,80 @@ stranger, or exists but has no file. The attachment is a **private, app-mediated
 (`Media::toResponse()`), never a public or presigned RustFS URL — RustFS itself is only
 reachable from inside the container network (`02-data-model.md`).
 
+## Office — holidays *(M4a)*
+
+An office's holiday calendar: which calendar dates carry which `DayType`
+(`02-data-model.md`) — `Ordinary` is the absence of a row. Every endpoint here is gated by
+`App\Domain\Scope\OfficeScope` (`05-rbac.md`), not a permission check: a System Admin
+administers every office, an HR Admin exactly the offices in their `hr_admin_offices`
+pivot, anyone else none at all.
+
+**The central design point: out-of-scope is `404`, not `403`, and it is byte-identical to a
+nonexistent office or holiday.** Every `FormRequest` here validates `office_id`/`office` as
+shape only (`uuid`) — **never** `exists:offices,id`. Adding that rule would let a fabricated
+office id fail validation (`400`) while an out-of-scope *real* office failed the controller's
+scope check (`404`) — two different codes that would hand a prober an oracle for "does this
+office exist." Because both paths are refused the exact same way, from the exact same
+`throw new NotFoundHttpException` with no per-request detail, a Manila HR admin and a
+Cebu-only HR admin touching a Manila holiday get responses that are not just the same status
+but the same bytes.
+
+```
+POST /api/v1/office/holidays          # auth:sanctum — HR Admin/System Admin, scoped
+  { "office_id": "0199…", "date": "2026-08-21", "day_type": "special_non_working",
+    "name": "Ninoy Aquino Day" }
+  → 201 { data: { id, office_id, date, day_type, name } }
+  → 400 validation_failed     # bad shape, or day_type outside the four non-Ordinary cases
+  → 404 not_found             # office_id is out of the caller's scope, or doesn't exist
+```
+
+```
+GET /api/v1/office/holidays?office=<uuid>&year=<int>   # auth:sanctum, scoped
+  → { data: [ { id, office_id, date, day_type, name }, … ] }   # date-ordered
+  → 400 validation_failed     # office not a uuid, or year outside 2000–2100
+  → 404 not_found             # office is out of the caller's scope, or doesn't exist
+```
+
+```
+POST /api/v1/office/holidays/clone     # auth:sanctum, scoped
+  { "office_id": "0199…", "from_year": 2025, "to_year": 2026 }
+  → 201 { data: [ { id, office_id, date, day_type, name }, … ] }   # only the rows actually created
+  → 400 validation_failed
+  → 404 not_found
+```
+
+Copies `from_year`'s holidays onto the same month/day of `to_year` — never a `+365`-day
+shift, which would land on the wrong day across a leap year. Any target date **already
+occupied is skipped**, not overwritten, so `data` in the response holds only the rows the
+call actually created; cloning an identical range twice creates nothing the second time.
+A Feb 29 source with no Feb 29 in the target year is skipped outright, never slid to Mar 1.
+
+```
+PATCH /api/v1/office/holidays/{holiday}   # auth:sanctum, scoped
+  { "day_type": "special_non_working", "name": "Ninoy Aquino Day" }
+  → 200 { data: { id, office_id, date, day_type, name } }
+  → 400 validation_failed
+  → 404 not_found     # {holiday}'s office is out of the caller's scope, or {holiday} doesn't exist
+```
+
+**There is no `date` in the update body.** A holiday's date is fixed at creation; moving it
+to a different day is a delete-and-recreate, not an edit, so the request shape has nothing
+to validate against `unique(office_id, date)` mid-update.
+
+```
+DELETE /api/v1/office/holidays/{holiday}   # auth:sanctum, scoped
+  → 204 No Content
+  → 404 not_found     # same scope rule as PATCH
+```
+
+Every write here — create, clone, update, delete — is logged by `Holiday`'s
+`Spatie\Activitylog\Traits\LogsActivity` (log name `holiday`), causer resolved automatically
+from the authenticated guard. Create/update/delete log the `Holiday` itself as the subject
+(the uuid morph, `02-data-model.md`); clone logs a summary (`from_year`, `to_year`, `created`
+count) against the `Office` as subject, since a clone spans many rows rather than one.
+`scripts/e2e-holidays.sh` proves the whole surface — including the byte-identical 404 pair —
+against the live stack.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -442,8 +516,10 @@ you). See `05-rbac.md`.
 
 ## What is not here yet
 
-Schedules, holidays, leave, cutoffs, and payroll export are their own milestones
-(`06-roadmap.md`); their endpoints land with them. Leave and overtime requests reuse the
+Schedules, leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`);
+their endpoints land with them. Holidays shipped in M4a (above); nothing yet *reads* the
+holiday calendar to compute pay — that's M5's compute engine, which consumes M4a's table
+alongside M4b's schedules and M4c's `pay_rules`. Leave and overtime requests reuse the
 `requests` spine M3.6 built above, but their own detail tables and endpoints are not built
 yet.
 

@@ -635,6 +635,28 @@ What the building turned on, for whoever extends the frontend next:
 
 Everything M3.5 and M5 will read becomes admin-editable, per office.
 
+**Sliced into three milestones, the same move M3 got (vertical slice → M3/M3.6/M3.5) once
+the actual build made the scope concrete:**
+
+| Slice | Covers | Status |
+| --- | --- | --- |
+| **M4a — Holiday Calendars** | Per-office holiday CRUD + clone-from-previous-year | **Complete** — below |
+| **M4b — Shift Templates** | Template CRUD, assignment, per-date override, resolution order | Not started |
+| **M4c — Pay Rules** | `pay_rules` editor, statutory-floor validation | Not started |
+
+**`RecomputeRange` moves to M5, alongside the compute engine it exists to drive.** There is
+nothing to recompute before something computes — M4's original "Done when" line below (a
+100% → 130% pay flip) needs an engine that turns a `DayType` into a multiplier, and that
+engine doesn't exist until M5. Building `RecomputeRange` against M4a/M4b/M4c's config tables
+with no engine to invoke would mean building it twice: once now against nothing, and once
+properly once M5's `PayMultiplier`/`ComputeDailySummary` exist to be its payload. Each of
+M4a/M4b/M4c ships **configuration only** — real, admin-editable, fully tested data that
+M5 is the first thing to actually read.
+
+The plan below is **pre-slicing** — original scope, kept for the historical record. Read the
+table above for what actually shipped and when; read M4a's own section for what M4a
+specifically proves.
+
 - Holiday calendar CRUD per office per year, with clone-from-previous-year. PH holidays
   are set by **annual presidential proclamation** — the dates move, Eid'l Fitr and Eid'l
   Adha move a lot, and a hardcoded list is wrong by January. This is data, permanently.
@@ -645,13 +667,105 @@ Everything M3.5 and M5 will read becomes admin-editable, per office.
   in code — configuring 100% on a regular holiday is refused, not warned about.
 - `RecomputeRange` action: explicit, queued, scoped to exactly the affected
   `(employee, date)` pairs. Config changes never silently mutate computed history; they
-  enqueue a recompute that is itself audited.
+  enqueue a recompute that is itself audited. **Deferred to M5** — see above.
 - UI: `/office/holidays`, `/office/schedules`, `/admin/pay-rules`, using `<MonthCalendar>`
   for the third time — the reason it exists.
 
-**Done when:** HR adds August 21 (Ninoy Aquino Day) as a special non-working day for the
-Manila office only, recompute runs, affected Manila days flip 100% → 130%, Cebu is
-untouched, and the activity log names who did it and when.
+**Done when** (the original, pre-slicing line — the recompute half is M5's, not M4a's):
+HR adds August 21 (Ninoy Aquino Day) as a special non-working day for the Manila office
+only, recompute runs, affected Manila days flip 100% → 130%, Cebu is untouched, and the
+activity log names who did it and when. **M4a proves everything up to and including "the
+holiday exists as configured data, scoped to Manila, logged" — nothing yet reads it to
+flip a rate; that recompute is explicitly M5's job, not M4a's, per the slicing above.**
+
+## M4a — Holiday Calendars
+
+Per-office holiday CRUD, with clone-from-previous-year — the first slice of the
+configuration spine, and the first M4-era milestone to actually ship.
+
+- `holidays` — `(office_id, date)` unique, `day_type` a `CHECK`-constrained non-`Ordinary`
+  `DayType` (`Ordinary` is the absence of a row). See `02-data-model.md`.
+- `App\Domain\Scope\OfficeScope` — the M4 config boundary, `EmployeeScope`'s sibling:
+  which offices an actor administers, as a query constraint, not a boolean (`05-rbac.md`).
+  A System Admin administers every office; an HR Admin exactly the offices in their
+  `hr_admin_offices` pivot; anyone else, none.
+- `POST/GET /office/holidays`, `POST /office/holidays/clone`, `PATCH`/`DELETE
+  /office/holidays/{holiday}` — every one scoped by `OfficeScope`, and every refusal is
+  `404`, never `403`: the `FormRequest`s validate `office_id`/`office` as shape-only
+  `uuid`, deliberately never `exists:offices,id`, so a fabricated office/holiday id and an
+  out-of-scope real one are byte-identical (`03-api.md`).
+- `App\Actions\Holidays\CloneHolidays` — copies the source's month/day onto the target
+  year directly (never a `+365`-day shift, which breaks across a leap year), skips a
+  target date already occupied rather than overwriting it, and skips a Feb 29 source with
+  no Feb 29 in the target year rather than sliding it to Mar 1. Re-running an identical
+  clone is a true no-op.
+- The frontend `/office/holidays` screen — the second consumer of `MonthCalendar` after
+  `/me/attendance` (the reason it was generalized to a `renderDay` prop in M3.5's
+  follow-up): click a day with no holiday to add one, click one that has a holiday to edit
+  it, "Clone from {year − 1}" seeds the whole year at once. Scoped to the offices
+  `session.hr_offices` names, not `current_office_id` (the office you work at, not the
+  offices you administer).
+- The activity log's first real feature use: `Holiday`'s `LogsActivity` logs every
+  create/update/delete with the `Holiday` itself as the uuid-morph subject; `CloneHolidays`
+  logs a from/to/created-count summary against the `Office` (a clone spans many rows, not
+  one). Causer resolves automatically from the authenticated guard — no action passes it
+  explicitly except clone, which needs the causer for its own summary log.
+
+**Done when:** a Manila HR admin adds Ninoy Aquino Day (Aug 21) as a special-non-working
+holiday for Manila; it shows on Manila's `/office/holidays` and not on Cebu's; a Cebu-only
+HR admin gets `404` — never `403` — touching it, byte-identical to a fabricated id;
+"Clone from 2025" copies last year's Manila set into 2026, skipping any date already
+present; and the activity log names who added it and when, with the holiday itself landing
+in the uuid morph. **No pay is computed** — `holidays` is the input M5's compute engine
+will read, once that engine exists.
+
+**Status: complete.** **302 backend tests** (909 assertions — `holidays`' schema,
+`OfficeScope`'s own three-actor matrix, and the four holiday endpoints'
+create/list/update/delete/clone coverage, including the byte-identical-404 proof exercised
+directly rather than asserted by status code alone; M3.6/M3.5's own docs recorded 267, but
+`main` had already grown past that by the time this branch forked, so 302 is this run's
+real total, not a precise "+35 for M4a" delta), **19 arch tests** (`OfficeScope` gets the
+same Domain-layer carve-out `EmployeeScope` has, so it introduces no new arch-guarded
+invariant of its own — M3.6/M3.5 recorded 17; the difference predates this branch too),
+frontend at
+**222 tests** (M3.5 recorded 189; the `/office/holidays` screen, `useHolidays`, and the
+new `Dialog`/`Select` primitives it needed). `lint`, `typecheck`, and `build` are green
+native and inside the `make test` containers alike. `scripts/e2e-holidays.sh` walks the
+whole surface — create, scoped list, the byte-identical 404 on GET/PATCH/DELETE, clone
+(both the skip and the genuine copy), and the activity-log row — against the live stack.
+What the building turned on, for whoever picks up M4b next:
+
+- **`OfficeScope` is `EmployeeScope`'s sibling, built the same way for the same reason.**
+  A query constraint, not a boolean, so the same class answers "may render" and "may
+  filter" without the two ever disagreeing; the same Domain-layer arch carve-out
+  (`->ignoring()`) that lets `EmployeeScope` touch Eloquent now names `OfficeScope`
+  too — the rule was always about config purity, not about barring the ORM from a class
+  whose whole contract is "return a `Builder`."
+- **The 404-not-403 discipline transfers to a second resource with zero new machinery.**
+  Every holiday `FormRequest` validates an office id as shape-only `uuid`; every controller
+  resolves scope via `OfficeScope::administered()`/`administers()` and throws
+  `NotFoundHttpException` on a miss. No new envelope code, no new error code — `not_found`
+  and `validation_failed` already existed from M2/M3.6 and needed nothing added.
+  `HolidayReadWriteTest`/`CloneHolidaysTest` assert this with `assertExactJson` between the
+  out-of-scope-real and fabricated-id responses, not just matching HTTP status.
+- **The verb axis is seeded, not wired.** `holiday.manage` has existed in the permission
+  catalog since M2's `RbacSeeder`, but no holiday endpoint checks it — authority is entirely
+  `OfficeScope`-based today, the same position `employee.manage` was in through M2. Whoever
+  wires a real verb check onto holiday edits later is adding it, not fixing an oversight.
+- **Clone proves same-month/day, not `+365` days, across a genuine leap boundary.** A
+  2023-03-15 source cloned into 2024 (a leap year) must land on 2024-03-15, not 2024-03-14
+  — the one test pair where a naive day-count shift and the correct month/day rule actually
+  disagree, so it's the case that pins the property rather than merely exercising it.
+  Skip-on-occupied and skip-on-missing-Feb-29 are separately pinned so cloning is provably
+  re-runnable and never invents a Mar 1 that was never proclaimed.
+- **A container `node_modules` volume desync, the `ext-exif` gotcha's sibling.** The api
+  container's `vendor/` volume needed `ext-exif` added to its Dockerfile back in M3.6; here
+  it was the web container's `node_modules` volume, stale from before `@radix-ui/react-dialog`
+  and `@radix-ui/react-select` (the `Dialog`/`Select` primitives the holiday screen needed)
+  landed in `package.json` — `make test`'s containerized `npm test` failed on an unresolved
+  import until `npm install` ran inside the container to catch the volume up. Native
+  `npm test` (host `node_modules`, installed fresh) never saw this, the same asymmetry that
+  hid the `ext-exif` gap from native `./vendor/bin/pest` in M3.6.
 
 ## M5 — Requests and approvals
 
