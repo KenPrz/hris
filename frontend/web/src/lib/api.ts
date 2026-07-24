@@ -3,6 +3,8 @@
  * component ever unwraps `data` or branches on an HTTP status by hand.
  */
 
+import { clearToken, emitLogout, getToken } from './session'
+
 /** Success is always `{ data: ... }`; errors are always `{ error: ... }`. Never both. */
 export type ApiSuccess<T> = { data: T }
 
@@ -37,9 +39,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(init?.headers as Record<string, string> | undefined),
+    ...(token !== null ? { Authorization: `Bearer ${token}` } : {}),
   }
 
   let response: Response
@@ -57,6 +62,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body: unknown = response.status === 204 ? null : await response.json().catch(() => null)
 
   if (!response.ok) {
+    if (response.status === 401) {
+      // The session is dead — server-side or by an expired/revoked token. Clear it and
+      // tell the app before the caller ever sees the rejection, so a redirect to /login
+      // can happen unconditionally on this code, not on every call site.
+      clearToken()
+      emitLogout()
+    }
+
     if (isErrorBody(body)) {
       throw new ApiError(body.error.code, body.error.message, response.status, body.error.details)
     }
@@ -97,6 +110,61 @@ export type Health = {
   database: { ok: boolean; version: string | null; reason: string | null }
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/SessionResource.php,
+// app/Actions/Auth/BuildSession.php + SessionData.php, and
+// app/Http/Resources/AttendanceLogResource.php.
+// ---------------------------------------------------------------------------
+
+export type PunchDirection = 'in' | 'out'
+export type PunchSource = 'web' | 'manual' | 'device' | 'adjustment'
+export type PunchVerification = 'verified' | 'flagged'
+
+export type AttendanceLog = {
+  id: string
+  employee_id: string
+  office_id: string
+  punched_at: string // ISO8601 WITH offset
+  direction: PunchDirection
+  source: PunchSource
+  verification: PunchVerification
+  flag_reason: string | null
+}
+
+/** Keyed by office-local YYYY-MM-DD — the grouping AttendanceMonth::group produces. */
+export type AttendanceMonth = Record<string, AttendanceLog[]>
+
+export type Session = {
+  user: { id: string; email: string; name: string }
+  employee: {
+    id: string
+    employee_no: string
+    current_office_id: string | null
+    current_department_id: string | null
+  } | null
+  is_system_admin: boolean
+  has_reports: boolean
+  // Verified against BuildSession::execute: `hrOffices: $user->hrAdminOffices()
+  // ->pluck('offices.id')->all()` — a list of office UUIDs, not objects.
+  hr_offices: string[]
+  permissions: string[]
+}
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
+  login: (email: string, password: string) =>
+    request<{ token: string; user: Session['user'] }>('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }),
+  logout: () => request<null>('/logout', { method: 'POST' }),
+  me: () => request<Session>('/me'),
+  myAttendance: (month: string) => request<AttendanceMonth>(`/me/attendance?month=${month}`),
+  punch: (direction: PunchDirection, idempotencyKey: string) =>
+    request<AttendanceLog>('/attendance/punch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ direction }),
+    }),
 }
