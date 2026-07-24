@@ -42,6 +42,18 @@ final class Office extends Model
         return $this->hasMany(Holiday::class);
     }
 
+    /** @return HasMany<ShiftTemplate, $this> */
+    public function shiftTemplates(): HasMany
+    {
+        return $this->hasMany(ShiftTemplate::class);
+    }
+
+    /** @return BelongsTo<ShiftTemplate, $this> */
+    public function defaultShiftTemplate(): BelongsTo
+    {
+        return $this->belongsTo(ShiftTemplate::class, 'default_shift_template_id');
+    }
+
     public function newUniqueId(): string
     {
         // uuidv7 everywhere, model-path included — time-ordered keys keep the btree happy.
