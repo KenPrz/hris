@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/Button'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
+import { DayCell } from '@/components/domain/DayCell'
 
 // Month 01–12 only. A shape-only `\d{2}` would accept `2026-99`, which then renders
 // "undefined 2026" and an empty grid instead of falling back to the current month.
@@ -236,7 +237,19 @@ export default function AttendancePage() {
             Nothing recorded for {monthLabel(viewedMonth)} yet.
           </EmptyState>
         ) : (
-          <MonthCalendar month={viewedMonth} days={viewedQuery.data ?? {}} timeZone={OFFICE_TIME_ZONE} />
+          <MonthCalendar
+            month={viewedMonth}
+            timeZone={OFFICE_TIME_ZONE}
+            renderDay={({ date, isToday, inMonth }) => (
+              <DayCell
+                date={date}
+                punches={(viewedQuery.data ?? {})[date] ?? []}
+                timeZone={OFFICE_TIME_ZONE}
+                isToday={isToday}
+                inMonth={inMonth}
+              />
+            )}
+          />
         )}
       </div>
     </AppShell>

@@ -1,13 +1,19 @@
 'use client'
 
-import type { AttendanceMonth } from '@/lib/api'
+import type { ReactNode } from 'react'
 import { daysInMonth, todayInZone, weekdayIndex } from '@/lib/date'
-import { DayCell } from './DayCell'
+
+/** What a real (non-blank) day cell needs to render its own content. */
+export interface RenderDayContext {
+  date: string
+  isToday: boolean
+  inMonth: boolean
+}
 
 export interface MonthCalendarProps {
   month: string
-  days: AttendanceMonth
   timeZone: string
+  renderDay: (ctx: RenderDayContext) => ReactNode
 }
 
 // Monday-first, matching `weekdayIndex`'s 0=Monday convention.
@@ -34,12 +40,16 @@ function chunkIntoWeeks(cells: readonly (string | null)[]): (string | null)[][] 
 /**
  * A Monday-first month grid. Built on CSS grid with an explicit, identical height on every
  * day cell, so the grid is uniform by construction — a table left row height to equalize
- * from content, which drifted the moment one day had punches and its neighbours didn't.
+ * from content, which drifted the moment one day had more content than its neighbours.
  * ARIA grid roles keep it navigable: a screen reader still reads columns and cells.
  * Leading and trailing blanks pad the first and last week so the 1st lands in its true
- * weekday column; a day absent from `days` renders with no punches, never a fabricated one.
+ * weekday column.
+ *
+ * Content-agnostic by design: the grid owns the shell (columns, rows, uniform cells, ARIA);
+ * `renderDay` owns what each real day's cell holds. Attendance, holidays, and schedules
+ * share this shell and each supply their own renderer — the reason this component exists.
  */
-export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
+export function MonthCalendar({ month, timeZone, renderDay }: MonthCalendarProps) {
   const dates = daysInMonth(month)
   const leadingBlanks = weekdayIndex(dates[0])
 
@@ -57,7 +67,7 @@ export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
     <div style={{ overflowX: 'auto' }}>
       <div
         role="grid"
-        aria-label={`Attendance for ${month}`}
+        aria-label={`Calendar for ${month}`}
         style={{
           minWidth: '48rem',
           borderTop: '1px solid var(--hairline)',
@@ -107,7 +117,7 @@ export function MonthCalendar({ month, days, timeZone }: MonthCalendarProps) {
                     borderBottom: '1px solid var(--hairline)',
                   }}
                 >
-                  <DayCell date={date} punches={days[date] ?? []} timeZone={timeZone} isToday={date === today} />
+                  {renderDay({ date, isToday: date === today, inMonth: true })}
                 </div>
               ),
             )}
