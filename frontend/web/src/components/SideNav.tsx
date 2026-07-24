@@ -35,7 +35,10 @@ export type NavGroup = {
 const ROUTES: Record<NavGroupKey, NavItem[]> = {
   me: [{ href: '/me/attendance', label: 'Attendance' }],
   team: [],
-  office: [{ href: '/office/holidays', label: 'Holidays' }],
+  office: [
+    { href: '/office/holidays', label: 'Holidays' },
+    { href: '/office/schedules', label: 'Schedules' },
+  ],
   admin: [],
 }
 

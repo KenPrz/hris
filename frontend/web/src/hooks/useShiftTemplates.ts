@@ -63,3 +63,18 @@ export function useDeleteShiftTemplate(officeId: string | null) {
     },
   })
 }
+
+/** Sets which template `ScheduleResolver` falls back to once no employee or department
+ * assignment covers a date. Invalidates the same templates key as the others above —
+ * there is no separate "office defaults" query to keep in sync, since the screen tracks
+ * the current default locally (the API has no GET for it; see the schedules page). */
+export function useSetOfficeDefaultTemplate(officeId: string | null) {
+  const invalidate = useInvalidateShiftTemplates(officeId)
+
+  return useMutation<{ id: string; default_shift_template_id: string }, unknown, { office_id: string; template_id: string }>({
+    mutationFn: (body) => api.officeDefaultTemplate.set(body),
+    onSuccess: () => {
+      void invalidate()
+    },
+  })
+}
