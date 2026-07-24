@@ -1,0 +1,29 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+final class ListHolidaysRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;   // the office-scope check is in the controller (404-not-403)
+    }
+
+    /**
+     * Shape only — no `exists:offices,id` (that would 400 a fabricated office while an
+     * out-of-scope one 404s, an enumeration oracle). `office` is validated as a uuid so a
+     * malformed value is a clean 400, not a Postgres uuid-cast 500. The controller does the
+     * scope resolution and 404s uniformly.
+     */
+    public function rules(): array
+    {
+        return [
+            'office' => ['required', 'uuid'],
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
+        ];
+    }
+}

@@ -613,6 +613,70 @@ a live RustFS round-trip.
 
 ---
 
+## Holidays: the per-office calendar *(M4a)*
+
+```sql
+create table holidays (
+  id          uuid primary key default uuidv7(),
+  office_id   uuid not null references offices(id) on delete cascade,
+  date        date not null,                      -- a calendar date, no timezone
+  day_type    text not null,
+  name        text not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+
+  check (day_type in ('special_working','special_non_working','regular_holiday',
+                       'double_regular_holiday')),
+  unique (office_id, date)
+);
+```
+
+**A holiday maps a calendar date to a non-`Ordinary` `DayType` (`01-architecture.md`,
+`App\Domain\Pay\DayType`) — `Ordinary` is the absence of a row, never a stored value.**
+`day_type` follows the same string-column-plus-`CHECK` pattern as `attendance_logs`'
+`direction`/`source`/`verification`: plain `text` in Postgres, cast to the backed enum in
+the model, with a `CHECK` mirroring the enum's non-`Ordinary` cases so the database still
+rejects garbage. `HolidaySchemaTest` pins the `CHECK` list against `DayType::cases()` (minus
+`Ordinary`) so the two cannot drift.
+
+**`unique(office_id, date)` is the whole "one holiday per office per day" rule** — a second
+`POST` for the same office and date is a Postgres unique-violation, not a silent duplicate or
+an application-level pre-check that could race it.
+
+Philippine holidays are set by annual presidential proclamation and the movable ones (Eid'l
+Fitr, Eid'l Adha) genuinely move — this table is data precisely because a hardcoded calendar
+would be wrong by January. `office_id` cascades on delete, the same as `departments` — a
+holiday belonging to a deleted office is meaningless, not archival.
+
+**Clone-from-previous-year copies month/day, never `+365` days.** `App\Actions\Holidays\CloneHolidays`
+builds each target date from the source's month and day directly (`sprintf('%04d-%02d-%02d',
+$toYear, $month, $day)`), so a `2023-03-15` source lands on `2024-03-15` even though 2024 is a
+leap year — a naive `addDays(365)` would land on `2024-03-14` instead. A source date of Feb 29
+with no Feb 29 in the target year is skipped outright (`checkdate()`), never slid to Mar 1. Any
+target date already occupied is skipped, not overwritten, so cloning the same range twice
+creates nothing the second time — re-runnable by design, not by accident.
+
+### `OfficeScope`: the M4 config boundary
+
+`App\Domain\Scope\OfficeScope` (`app/Domain/Scope/`) is `EmployeeScope`'s sibling for
+per-office configuration — "which offices may this user administer," as a query constraint,
+not a boolean:
+
+- **System Admin** — every office (`Office::query()`, unconstrained).
+- **HR Admin** — exactly the offices in their `hr_admin_offices` pivot
+  (`administeredBy()` joins `hrAdminOffices()->pluck('offices.id')`).
+- **Anyone else** — zero offices, forced empty (`whereRaw('1 = 0')`), never unconstrained.
+
+Two pure, HTTP-agnostic helpers built on `administeredBy()`, used by every holiday endpoint:
+`administered(User, ?officeId): ?Office` (the list/create/clone endpoints, which take an
+office id in the request) and `administers(User, officeId): bool` (the update/delete
+endpoints, which already have the record via route-model binding). Both hand the 404 decision
+to the controller — `OfficeScope` itself only ever returns `null`/`false`/a constrained
+query, never throws. See `05-rbac.md` for the full authority model and `03-api.md` for the
+byte-identical-404 proof this scope makes possible.
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -638,3 +702,6 @@ Stated plainly, since these are the reasons for the constraints above:
 - A pending request cannot be decided twice, by two approvers racing each other or by one
   approver double-clicking. (`SELECT ... FOR UPDATE` on the request row, re-checked as
   pending after the lock is acquired.)
+- An office cannot have two holidays on the same date, and a holiday's `day_type` cannot be
+  anything but one of the four non-`Ordinary` cases. (`unique(office_id, date)` +
+  `CHECK (day_type IN (...))`, above.)

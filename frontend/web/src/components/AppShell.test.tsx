@@ -144,6 +144,75 @@ describe('AppShell — sign out', () => {
   })
 })
 
+describe('AppShell — mobile nav collapse', () => {
+  it('the hamburger toggles aria-expanded false -> true -> false and reveals the nav landmark', async () => {
+    setToken('sekrit')
+    stubFetch({ '/me': { status: 200, body: sessionBody } })
+
+    render(
+      <Providers>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </Providers>,
+    )
+
+    const hamburger = await screen.findByRole('button', { name: /navigation/i })
+    expect(hamburger).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(hamburger)
+    expect(hamburger).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
+
+    fireEvent.click(hamburger)
+    expect(hamburger).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('renders exactly one Primary nav landmark whether the hamburger is open or closed', async () => {
+    setToken('sekrit')
+    stubFetch({ '/me': { status: 200, body: sessionBody } })
+
+    render(
+      <Providers>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </Providers>,
+    )
+
+    const hamburger = await screen.findByRole('button', { name: /navigation/i })
+    await screen.findByRole('navigation', { name: 'Primary' })
+    expect(screen.getAllByRole('navigation', { name: 'Primary' })).toHaveLength(1)
+
+    fireEvent.click(hamburger)
+    expect(screen.getAllByRole('navigation', { name: 'Primary' })).toHaveLength(1)
+  })
+
+  it('closes on Escape and returns focus to the hamburger', async () => {
+    setToken('sekrit')
+    stubFetch({ '/me': { status: 200, body: sessionBody } })
+
+    render(
+      <Providers>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </Providers>,
+    )
+
+    const hamburger = await screen.findByRole('button', { name: /navigation/i })
+    fireEvent.click(hamburger)
+    expect(hamburger).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(hamburger).toHaveAttribute('aria-expanded', 'false')
+    })
+    expect(hamburger).toHaveFocus()
+  })
+})
+
 describe('AppShell — account menu dismissal', () => {
   async function openMenu() {
     setToken('sekrit')

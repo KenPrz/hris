@@ -3,6 +3,8 @@
  * component ever unwraps `data` or branches on an HTTP status by hand.
  */
 
+import type { DayType } from '@/components/domain/DayTypeTag'
+
 import { clearToken, emitLogout, getToken } from './session'
 
 /** Success is always `{ data: ... }`; errors are always `{ error: ... }`. Never both. */
@@ -150,6 +152,25 @@ export type Session = {
   permissions: string[]
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/HolidayResource.php.
+// ---------------------------------------------------------------------------
+
+export type Holiday = {
+  id: string
+  office_id: string
+  date: string // YYYY-MM-DD
+  day_type: DayType
+  name: string
+}
+
+export type HolidayCreateInput = { office_id: string; date: string; day_type: DayType; name: string }
+
+// No `date` — a holiday's date is fixed once created; the backend rejects it on update.
+export type HolidayUpdateInput = { day_type: DayType; name: string }
+
+export type HolidayCloneInput = { office_id: string; from_year: number; to_year: number }
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -167,4 +188,27 @@ export const api = {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ direction }),
     }),
+  holidays: {
+    list: (office: string, year: number) =>
+      request<Holiday[]>(`/office/holidays?office=${office}&year=${year}`),
+    create: (body: HolidayCreateInput) =>
+      request<Holiday>('/office/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    update: (id: string, body: HolidayUpdateInput) =>
+      request<Holiday>(`/office/holidays/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) => request<undefined>(`/office/holidays/${id}`, { method: 'DELETE' }),
+    clone: (body: HolidayCloneInput) =>
+      request<Holiday[]>('/office/holidays/clone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+  },
 }

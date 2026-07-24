@@ -1,26 +1,23 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AttendanceLog, AttendanceMonth } from '@/lib/api'
+import { todayInZone } from '@/lib/date'
 import { MonthCalendar } from './MonthCalendar'
 
-function punch(overrides: Partial<AttendanceLog> = {}): AttendanceLog {
-  return {
-    id: 'p1',
-    employee_id: 'e1',
-    office_id: 'o1',
-    punched_at: '2026-07-20T08:02:00+08:00',
-    direction: 'in',
-    source: 'web',
-    verification: 'verified',
-    flag_reason: null,
-    ...overrides,
-  }
-}
-
 describe('MonthCalendar', () => {
+  // Pin the clock inside the tested month. Without this the isToday assertion reads the real
+  // wall clock — it passes today but silently degrades to "always false" once the date leaves
+  // July 2026, so an isToday regression would stop being caught.
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-24T09:00:00+08:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('uses grid semantics with Monday-first column headers a screen reader can navigate', () => {
-    render(<MonthCalendar month="2026-07" days={{}} timeZone="Asia/Manila" />)
+    render(<MonthCalendar month="2026-07" timeZone="Asia/Manila" renderDay={() => null} />)
 
     expect(screen.getByRole('grid')).toBeInTheDocument()
     const headers = screen.getAllByRole('columnheader')
@@ -29,18 +26,33 @@ describe('MonthCalendar', () => {
     ])
   })
 
-  it('renders all 31 day cells for 2026-07', () => {
-    render(<MonthCalendar month="2026-07" days={{}} timeZone="Asia/Manila" />)
+  it('calls renderDay once per day of the month, with isToday true only for the office-local today', () => {
+    const renderDay = vi.fn(({ date }: { date: string; isToday: boolean; inMonth: boolean }) => date)
+    const today = todayInZone('Asia/Manila')
 
-    for (let day = 1; day <= 31; day++) {
-      expect(screen.getByText(String(day))).toBeInTheDocument()
-    }
+    render(<MonthCalendar month="2026-07" timeZone="Asia/Manila" renderDay={renderDay} />)
+
+    expect(renderDay).toHaveBeenCalledTimes(31)
+
+    const calledWith = renderDay.mock.calls.map((call) => call[0])
+    const expected = Array.from({ length: 31 }, (_, i) => {
+      const date = `2026-07-${String(i + 1).padStart(2, '0')}`
+      return { date, isToday: date === today, inMonth: true }
+    })
+
+    expect(calledWith).toEqual(expected)
   })
 
   it("places the 1st of the month in its correct weekday column (2026-07-01 is a Wednesday)", () => {
-    render(<MonthCalendar month="2026-07" days={{}} timeZone="Asia/Manila" />)
+    render(
+      <MonthCalendar
+        month="2026-07"
+        timeZone="Asia/Manila"
+        renderDay={({ date }) => date.slice(8, 10)}
+      />,
+    )
 
-    const firstCell = screen.getByText('1')
+    const firstCell = screen.getByText('01')
     const row = firstCell.closest('[role="row"]')
     expect(row).not.toBeNull()
 
@@ -50,32 +62,18 @@ describe('MonthCalendar', () => {
     expect(cellIndex).toBe(2)
   })
 
-  it('renders a punch under its correct office-local date key', () => {
-    const days: AttendanceMonth = {
-      '2026-07-20': [punch({ punched_at: '2026-07-20T08:02:00+08:00' })],
-    }
+  it("renders renderDay's returned node inside the correct day's gridcell", () => {
+    render(
+      <MonthCalendar
+        month="2026-07"
+        timeZone="Asia/Manila"
+        renderDay={({ date }) => (date === '2026-07-20' ? <span>marker-20</span> : null)}
+      />,
+    )
 
-    render(<MonthCalendar month="2026-07" days={days} timeZone="Asia/Manila" />)
-
-    expect(screen.getByText(/08:02/)).toBeInTheDocument()
-  })
-
-  it('renders a cross-zone punch on the Manila date/time, not the UTC one — the day-shift bug the date layer prevents', () => {
-    // This instant is 2026-07-19 16:30 UTC — late evening the 19th in UTC — but
-    // 2026-07-20 00:30 in Manila (UTC+8). The backend groups by office-local date, so
-    // the AttendanceMonth key is already 2026-07-20; the calendar must render the
-    // punch's wall-clock time as 00:30, in that Manila cell, never a UTC-shifted time.
-    const days: AttendanceMonth = {
-      '2026-07-20': [punch({ punched_at: '2026-07-19T16:30:00Z' })],
-    }
-
-    render(<MonthCalendar month="2026-07" days={days} timeZone="Asia/Manila" />)
-
-    const punchTime = screen.getByText(/00:30/)
-    expect(punchTime).toBeInTheDocument()
-
-    // It must land under day 20, not day 19.
-    const day20 = screen.getByText('20').closest('[role="gridcell"]')
-    expect(day20).toContainElement(punchTime)
+    const marker = screen.getByText('marker-20')
+    const day20Cell = screen.getByText('marker-20').closest('[role="gridcell"]')
+    expect(day20Cell).not.toBeNull()
+    expect(day20Cell).toContainElement(marker)
   })
 })

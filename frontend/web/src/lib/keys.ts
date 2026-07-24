@@ -14,4 +14,8 @@ export const keys = {
     all: () => ['attendance'] as const,
     month: (month: string) => ['attendance', 'month', month] as const,
   },
+  holidays: {
+    all: () => ['holidays'] as const,
+    forOfficeYear: (officeId: string, year: number) => ['holidays', officeId, year] as const,
+  },
 }

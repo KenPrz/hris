@@ -219,6 +219,50 @@ read the fresh set.
 (its scope) — because a policy needs both, and neither alone makes an HR Admin. See the
 seeder for the full cast.
 
+## `OfficeScope` — the M4 config boundary
+
+`EmployeeScope` answers "which employees may this user see"; `App\Domain\Scope\OfficeScope`
+(`app/Domain/Scope/`) is its sibling for per-office **configuration** — holiday calendars
+today (M4a), schedules and `pay_rules` as M4b/M4c land. Same shape, same reasoning: a query
+constraint, not a boolean, so it composes into any office query and there is exactly one
+place "who may administer this office" is defined.
+
+| Actor | Constraint |
+| --- | --- |
+| System Admin | unconstrained — every office |
+| HR Admin | `id IN (their hr_admin_offices)` |
+| Anyone else (plain employee, manager with no HR grant) | none — forced empty, never unconstrained |
+
+Three entry points, all pure and HTTP-agnostic (`administeredBy()`/`administered()`/
+`administers()` never throw; every 404 decision is the controller's):
+
+- **`administeredBy(User): Builder`** — the raw constraint, mirroring
+  `EmployeeScope::visibleTo()`.
+- **`administered(User, ?officeId): ?Office`** — used by the endpoints that take an office
+  id *in the request body or query* (holiday list/create/clone): `null` means "not
+  administered, or doesn't exist," and the controller turns that into `404`.
+- **`administers(User, officeId): bool`** — used by the endpoints that already have the
+  record via route-model binding (holiday update/delete): `false` means the same thing,
+  turned into `404` the same way.
+
+**Who may edit a holiday calendar.** Whether an actor may create, clone, update, or delete a
+holiday for a given office is decided **entirely by `OfficeScope`** — there is no separate
+verb check in M4a. The `holiday.manage` permission is seeded in the catalog (above) but is
+not yet read by any holiday endpoint, the same situation `employee.manage` was in through
+M2 (a permission named ahead of the feature that will check it, not a permission any
+reachable code path enforces today). Concretely: a System Admin administers every office's
+holidays; an HR Admin administers exactly the offices in their `hr_admin_offices` pivot,
+regardless of which spatie role they hold; anyone with no HR grant — a plain employee, a
+manager with no HR offices — administers zero offices, `whereRaw('1 = 0')`, same as
+`EmployeeScope`'s empty-scope floor.
+
+**The same 404-not-403 discipline, applied to a second resource.** A holiday whose office
+the caller doesn't administer is `404`, indistinguishable from a nonexistent office or a
+nonexistent holiday id — the `FormRequest`s validate `office_id`/`office` as shape-only
+`uuid`, deliberately never `exists:offices,id`, so a fabricated id and an out-of-scope real
+one take the identical code path to the identical `NotFoundHttpException`. See `03-api.md`
+for the endpoint-level detail and `02-data-model.md` for the `holidays` table.
+
 ## Testing
 
 The milestone's proof is the **four-actor scope matrix**, as feature tests
@@ -236,3 +280,11 @@ Plus: `RbacSeeder`'s role-and-bypass behavior (`HrRoleTest`); the `Gate::before`
 returns `null` not `false` for non-admins; and the single-writer cache guard
 (`02-data-model.md`) in the arch suite. Two offices deliberately far apart (Manila, Cebu)
 so a scope leak shows up as a failing assertion rather than a subtle production bug.
+
+**`OfficeScope` gets its own three-actor matrix** (`tests/Feature/Scope/OfficeScopeTest.php`):
+a System Admin administers every office; an HR Admin administers only the office(s) in their
+`hr_admin_offices`; a plain user with none administers zero, never all. The holiday endpoints'
+own feature tests (`tests/Feature/Office/HolidayReadWriteTest.php`,
+`CloneHolidaysTest.php`) then assert the byte-identical-404 proof end to end — an out-of-scope
+office/holiday and a fabricated one produce `assertExactJson`-equal bodies, not just matching
+status codes.

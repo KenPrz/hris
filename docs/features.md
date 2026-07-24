@@ -162,7 +162,33 @@ office/admin screens; those arrive with the milestones that own their data.
   guess at one. You can step back a month at a time to see your history, independent of
   today's clock button.
 
+## Holiday calendars *(M4a)*
+
+- **Each office has its own holiday calendar, editable by HR.** An HR admin for an office
+  can mark a calendar date as a special working day, a special non-working day, a regular
+  holiday, or a double regular holiday (two regular holidays coinciding — rare, but the
+  Labor Code recognizes it) — each with a name, like "Ninoy Aquino Day." Any day with no
+  entry is an ordinary working day; nothing has to be marked "ordinary."
+- **One office's calendar never leaks into another's.** Manila's holidays show up only on
+  Manila's calendar; Cebu's HR admin can't see, edit, or even confirm the existence of a
+  Manila holiday — trying returns "not found," identical to trying a holiday that was never
+  created, so the attempt itself reveals nothing.
+- **Cloning last year's calendar.** Since most Philippine holidays fall on the same
+  month/day every year (a few movable ones, like Eid, don't), an HR admin can clone a whole
+  year's holidays into the next with one action. Cloning skips any date the new year already
+  has an entry for — running it twice, or after already adding a few dates by hand, never
+  duplicates or overwrites anything.
+- **On the calendar screen.** `/office/holidays` shows the same month-grid the attendance
+  screen uses: click an empty day to add a holiday, click a marked day to edit it, and a
+  "Clone from last year" button seeds the whole year at once.
+- **Every change is logged.** Adding, editing, or removing a holiday records who did it and
+  when, with the holiday itself as the logged subject — the same audit trail the system will
+  one day show HR in full.
+- **Not yet in this milestone:** nothing reads the calendar to change anyone's pay. A
+  holiday marked here is configuration only until the compute engine (a later milestone)
+  exists to turn a special-non-working day into a 130% payout.
+
 ---
 
-*(Turning punches into computed pay — the schedules, holidays, and premium-rate engine —
-follows in a later milestone, once the configuration spine exists for it to read.)*
+*(Turning punches into computed pay — the schedules and premium-rate engine — follows in a
+later milestone, once the rest of the configuration spine exists for it to read.)*
