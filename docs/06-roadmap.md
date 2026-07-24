@@ -502,6 +502,120 @@ landed yet). What the building turned on, for whoever extends the requests spine
   became `uuidMorphs('model')` — the same edit `personal_access_tokens` needed in M2, applied
   to a third table for the same reason.
 
+## M3.5 — Frontend foundation
+
+The IBM/Carbon design language, tier-1/2 components, `lib/api.ts`/`keys.ts`/`date.ts`, the
+auth UI, and the punch and attendance screens — built against M3's and M3.6's real API, not
+a mock. Ships **login and the attendance screen only**; there is no adjustments UI, no
+roster, and no team/office/admin screens yet — those land with the milestones that own
+their data.
+
+- `DESIGN.md` at the repo root as the token authority (colors, type scale, spacing,
+  radius, per DESIGN.md's own front-matter) and `frontend/web/src/styles/carbon.css` as the
+  **one place those tokens enter code**, hand-written from it — every component reads a
+  `var(--*)`, never a raw hex or literal type step. IBM Plex Sans is self-hosted via
+  `next/font/local` (vendored `woff2`, one `--font-plex` CSS variable at three weights);
+  `src/lib/brand.ts` names the product once (`PRODUCT_NAME`).
+- Tier-1 primitives: `Button` (Carbon's label-left/icon-right layout), `TextInput`
+  (filled, bottom rule, `aria-invalid`/`aria-describedby` wiring), `InlineNotification`,
+  `Skeleton`. Tier-2: `AppShell`, `SideNav`, `SectionHeader`, `StatTile`, `Tag`,
+  `EmptyState`. Domain: `Duration`, `DayCell`, `MonthCalendar`.
+- `SideNav` splits scope rules from rendering on purpose: a pure, directly-tested
+  `navEntriesFor(session)` decides which groups a session may see; the component then
+  hides any group whose route list is still empty — an **earn-your-place** rule so a
+  manager never sees a "Team" heading that dead-ends at nothing, because Team/Office/Admin
+  screens don't exist yet.
+- `src/lib/session.ts` — the one module that touches `localStorage`, SSR-safe (every
+  function no-ops when `window` doesn't exist) — and `api.ts` extended: attaches
+  `Authorization: Bearer`, and on a `401` clears the token and broadcasts logout *before*
+  the caller ever sees the rejection, so a redirect to `/login` is one code path, not one
+  per call site.
+- `src/lib/keys.ts` — the query-key factory; no hook ever writes a literal array. `date.ts`
+  keeps calendar dates as `YYYY-MM-DD`/`YYYY-MM` strings end to end (Monday-zero
+  `weekdayIndex`, `timeInZone` for rendering a punch's instant in a given zone) — never a
+  `Date` round-trip through the browser's own timezone, for the same reason the backend
+  never lets one happen.
+- `Providers` + `SessionProvider` + `useSession`: **one `GET /me` backs every scope
+  decision** on the page — nav visibility, the `(app)` route guard, the header's account
+  menu. The `(app)` layout redirects to `/login` when the session resolves to
+  unauthenticated; it does not gate on the token's mere presence.
+- The Carbon shell: a charcoal 44px header over `SideNav` and a main content region.
+  Sign-out clears the token and navigates to `/login` in a `finally`, regardless of how
+  `api.logout()` resolves — a dead network or an already-expired token can never strand a
+  user signed in locally.
+- The split-canvas `(auth)/login`: charcoal brand panel beside a white form. A wrong
+  password and an unknown email produce the identical fixed message
+  ("That email and password don't match.") — the copy never branches on the error `code`,
+  matching M2's constant-time backend guarantee that the two are indistinguishable.
+- `useMyAttendance` (thin `useQuery` wrapper, no abstraction over it) and `usePunch`: the
+  idempotency key is minted once per **attempt** (one `mutate()` call) and reused across
+  every automatic retry of that attempt — the key ref clears only in `onSettled`, which
+  fires once the whole attempt (retries included) is done, so a flaky-connection retry
+  replays the same key instead of minting a second punch.
+- `(app)/me/attendance`: the punch hero (now/status/today's running total, derived from
+  today's punches — never invented from a separate summary endpoint) sits above the month
+  ledger; the viewed month lives in the URL as `?month=YYYY-MM`, independent of the hero,
+  which always reflects *today* regardless of which month is being browsed.
+- `MonthCalendar`/`DayCell` — **the signature: a day cell is a ledger, not a summary.** It
+  renders each punch's real clock time; a total appears only when the day's punches pair
+  cleanly (even count, alternating in/out, chronological); anything else — a missing
+  clock-out, two `in`s in a row — renders the punches with **no invented total**, tagged
+  "Unpaired — no total," because guessing at the shape of an irregular day is M5's
+  authoritative-computation job, not this presentational layer's.
+- **Known M3.5 limitation, stated plainly, not smoothed over:** the session carries only
+  `current_office_id` (a uuid, no name, no timezone) — there is no office model yet to look
+  either up from. `src/lib/timezone.ts` is a single documented constant,
+  `OFFICE_TIME_ZONE = 'Asia/Manila'`, standing in for a real per-office lookup (correct
+  today because every seeded office is Philippine); every caller that needs "the office's
+  timezone" imports it from there rather than reaching for the viewer's own zone or
+  re-declaring the literal. For the same reason, the header shows no office name — a raw
+  uuid in the product header reads as broken chrome, so it shows nothing rather than
+  fabricate a display name.
+
+**Done when:** a seeded employee signs in at `/login`, lands on `/me/attendance`, clocks
+in and sees the hero reflect it, clocks out, sees the punch on today's cell with its real
+in/out times, navigates to the previous month, and signs out — the whole surface rendered
+from `carbon.css`, with no component reading a raw token or a literal query key.
+
+**Status: complete.** **165 frontend tests** (up from 16 at the end of M3.6), backend
+**unchanged at 267 + 17 arch** — this milestone touches no PHP. `lint`, `test`, `typecheck`,
+and `build` are all green, native and inside the `make test` containers alike. What the
+building turned on, for whoever extends the frontend next:
+
+- **Vitest does not read `tsconfig.json`'s `paths`.** The `@/*` → `./src/*` alias has to be
+  declared a second time, in `vitest.config.ts`'s own `resolve.alias`, or every component
+  test fails on an unresolved import before it ever runs; `setupFiles: ['./vitest.setup.ts']`
+  (which registers `@testing-library/jest-dom`'s matchers) is equally load-bearing — drop
+  either and the whole suite goes red for a reason that has nothing to do with the code
+  under test.
+- **The CSS `font` shorthand cannot carry `letter-spacing`.** `carbon.css`'s `--t-*` tokens
+  use the shorthand for size/weight/line-height; DESIGN.md's tracking (0.16px on
+  body/button/eyebrow, 0.32px on caption, negative tracking on the display sizes) would be
+  silently dropped everywhere it applies if left to the shorthand alone. Companion `--ls-*`
+  tokens carry it instead, and every component that sets `font: var(--t-*)` sets the
+  matching `letter-spacing: var(--ls-*)` alongside it — a review in Task 1 caught the first
+  version missing this entirely.
+- **The vendored IBM Plex Sans files were the Latin-1-only subset**, missing U+20B1 (₱) —
+  `money.ts` already emits the peso sign, but the font couldn't render it, so it silently
+  fell back to the system font for every currency string. Replaced with `@ibm/plex-sans`'s
+  complete build (verified via `file(1)` and an `fc-scan` cmap inspection to contain U+20B1
+  while retaining Latin-1 and Euro coverage) at three weights (300/400/600), the only ones
+  `carbon.css` uses.
+- **A bare `<a>` inside the `(app)` route tree would have re-fetched the session on every
+  nav click.** A plain anchor triggers a full document navigation, which remounts
+  `Providers`, builds a fresh `QueryClient`, and re-runs `GET /me` — defeating the
+  single-session-fetch guarantee `useSession` exists to provide. `SideNav` navigates with
+  `next/link` for exactly this reason, documented at the call site so it isn't "simplified"
+  back to an anchor later.
+- **The raw office uuid was deliberately dropped from the header**, not forgotten. An
+  earlier pass rendered `session.employee.current_office_id` next to the product name;
+  review flagged that a bare uuid in product chrome reads as broken, not honest — it comes
+  back once a real office name is a lookup away, not before.
+- **Idempotency-key lifetime is scoped to the mutation ref, not the component.** Reusing a
+  `useState` for the key would have re-minted a new one on every re-render triggered by the
+  mutation's own pending state; a `useRef` cleared only in `onSettled` is what makes "one
+  key per attempt, including retries" actually true rather than aspirational.
+
 ## M4 — Configuration spine
 
 Everything M3.5 and M5 will read becomes admin-editable, per office.

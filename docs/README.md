@@ -17,8 +17,10 @@ Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; M3 e
 endpoints), and `06` (M3's status). M3.6 extended `02` (the `requests` spine,
 `attendance_adjustment_details`, `attendance_annulments`, the effective-ledger definition,
 and the Media Library `media` table), `03` (the adjustment submit/decide/read endpoints),
-`06` (M3.6's status), and `features.md` (filing and approving a correction). All seven docs
-exist today.
+`06` (M3.6's status), and `features.md` (filing and approving a correction). M3.5 built
+the frontend itself against that API — no schema or endpoint changes, so `02` and `03`
+are untouched — and extended `06` (M3.5's status) and `features.md` (signing in from a
+browser, the clock-in/out screen, the month ledger). All seven docs exist today.
 
 ## Design records
 
@@ -53,18 +55,21 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0 through M3.6 are complete — the skeleton boots, the DOLE premium matrix is a green
+M0 through M3.5 are complete — the skeleton boots, the DOLE premium matrix is a green
 table-driven unit test, the schema/auth/office-scoped RBAC are proven by the four-actor
 scope matrix, timekeeping **ingestion** turns a punch into an append-only, forensically
-intact `attendance_logs` row, and an employee can now **correct their own attendance**
-through a request a manager or HR approves — `add`/`void`/`amend`, a required note, an
-optional RustFS-backed attachment via Media Library, the correction superseding the ledger
-via an append-only annulment record rather than ever editing a punch
-(`02-data-model.md`, `03-api.md`). `migrate:fresh --seed` produces a Manila/Cebu company you
-can log into as each of the four scopes (with a seeded punch pair ready to void or amend),
-`scripts/e2e-timekeeping.sh` walks the punch path end to end, and
-`scripts/e2e-adjustments.sh` walks a correction from submission through approval to the
-ledger. **266 backend tests, 17 arch tests, 16 frontend tests.** Next is **M3.5** in
-[06-roadmap.md](06-roadmap.md): the frontend foundation — the IBM/Carbon design language,
-the auth UI, and the punch and attendance screens, built against the real API M3 and M3.6
-now expose.
+intact `attendance_logs` row, an employee can **correct their own attendance** through a
+request a manager or HR approves — `add`/`void`/`amend`, a required note, an optional
+RustFS-backed attachment via Media Library, the correction superseding the ledger via an
+append-only annulment record rather than ever editing a punch (`02-data-model.md`,
+`03-api.md`) — and all of it now has a real screen: an employee signs in, clocks in and
+out from one button that always knows what happens next, and sees their month as a
+calendar of actual punch times, not an invented total (`06-roadmap.md`, M3.5). There is
+still no adjustments UI, no roster, and no office/admin screens. `migrate:fresh --seed`
+produces a Manila/Cebu company you can log into as each of the four scopes (with a seeded
+punch pair ready to void or amend), `scripts/e2e-timekeeping.sh` walks the punch path end
+to end, and `scripts/e2e-adjustments.sh` walks a correction from submission through
+approval to the ledger. **165 frontend tests, 267 backend tests, 17 arch tests.** Next is
+**M4 — Configuration spine** in [06-roadmap.md](06-roadmap.md): holiday calendars, shift
+templates, and `pay_rules`, all admin-editable per office, which M3.5's frontend and M5's
+compute engine will both read.
