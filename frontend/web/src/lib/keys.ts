@@ -21,6 +21,9 @@ export const keys = {
     all: () => ['holidays'] as const,
     forOfficeYear: (officeId: string, year: number) => ['holidays', officeId, year] as const,
   },
+  payRules: {
+    all: () => ['pay-rules'] as const,
+  },
   schedules: {
     templates: (officeId: string) => ['schedules', 'templates', officeId] as const,
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,
