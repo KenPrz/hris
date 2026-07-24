@@ -92,8 +92,10 @@ final class CompanySeeder extends Seeder
             'name' => 'Sofia Reyes',
             'email' => 'sysadmin@hris.test',
             'password' => Hash::make(self::PASSWORD),
-            'is_system_admin' => true,
         ]);
+        // is_system_admin is guarded against mass assignment (see User), so it is set
+        // explicitly here — the one deliberate grant of the most powerful flag in the system.
+        $sysAdmin->forceFill(['is_system_admin' => true])->save();
         $actor = $sysAdmin->id;
 
         // --- Manila ---

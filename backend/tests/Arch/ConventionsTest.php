@@ -89,6 +89,30 @@ arch('strict types everywhere')
     ->expect('App')
     ->toUseStrictTypes();
 
+// `->expect('App')->toUseStrictTypes()` scans only the App\ PSR-4 root. Pest-arch's
+// namespace resolution filters out anything under tests/, and database/migrations isn't
+// PSR-4-mapped at all — so migrations get no arch coverage and tests get none of the
+// strict-types rule, contrary to what CLAUDE.md advertises ("every PHP file in app/ and
+// tests/"). Tests\ IS autoloaded (autoload-dev), so it can go through the same rule; the
+// migrations need a direct grep, since a rule can't see files it can't resolve.
+arch('strict types in tests too')
+    ->expect('Tests')
+    ->toUseStrictTypes();
+
+test('every migration declares strict_types', function (): void {
+    $offenders = [];
+
+    foreach ((new Finder)->files()->in(base_path('database'))->name('*.php') as $file) {
+        // Match the opening tag then the declare on the first non-blank lines — the same
+        // shape `declare(strict_types=1);` takes at the top of every file in the repo.
+        if (! preg_match('/\A<\?php\s+declare\(strict_types=1\);/', $file->getContents())) {
+            $offenders[] = $file->getRelativePathname();
+        }
+    }
+
+    expect($offenders)->toBe([], 'File(s) under database/ missing a top-of-file declare(strict_types=1): '.implode(', ', $offenders));
+});
+
 // The show controller authorizes through EmployeePolicy::view() rather than calling
 // EmployeeScope directly (it defers to the policy, which is the single definition of
 // "in scope" shared with the index — see EmployeePolicy). Asserting the bare
@@ -273,6 +297,7 @@ test('only RecordEmploymentChange writes the employment cache columns', function
             $patterns = [
                 '/->'.$quoted.'\b\s*=(?!=|>)/',                    // property assignment: ->col = (not ==, ===, =>)
                 '/setAttribute\(\s*[\'"]'.$quoted.'[\'"]/',        // setAttribute('col', ...)
+                '/\bSET\b[^;\'"]*\b'.$quoted.'\b\s*=/i',           // raw SQL: UPDATE ... SET col = ... (DB::statement/update)
             ];
 
             if (! $isResource) {
@@ -338,6 +363,15 @@ test('only RecordPunch writes attendance_logs', function (): void {
         '/updateOrCreate\(/',
         '/firstOrCreate\(/',
         '/->upsert\(/',
+        // A bare builder insert (AttendanceLog::query()->insert([...])), the quiet-save and
+        // force-delete forms, the increment helpers, and raw SQL (DB::statement/insert/
+        // update/delete/…) all write without the verbs above — closed here so the guarantee
+        // is as broad as the docblock claims, not just the Eloquent-create shapes.
+        '/->insert(GetId|OrIgnore)?\(/',
+        '/->forceDelete\(/',
+        '/->(save|update)Quietly\(/',
+        '/->(increment|decrement|touch)\(/',
+        '/DB::(statement|insert|update|delete|unprepared|affectingStatement)\(/',
         '/DB::table\(\s*[\'"]attendance_logs[\'"]\s*\)\s*->\s*(insert|insertOrIgnore|insertGetId|update|upsert|delete)\(/',
     ];
 
@@ -406,6 +440,13 @@ test('only RecordAnnulment writes attendance_annulments', function (): void {
         '/updateOrCreate\(/',
         '/firstOrCreate\(/',
         '/->upsert\(/',
+        // Same broadened write-form coverage as the attendance_logs guard: a bare builder
+        // insert, quiet-save/force-delete, the increment helpers, and raw SQL.
+        '/->insert(GetId|OrIgnore)?\(/',
+        '/->forceDelete\(/',
+        '/->(save|update)Quietly\(/',
+        '/->(increment|decrement|touch)\(/',
+        '/DB::(statement|insert|update|delete|unprepared|affectingStatement)\(/',
         '/DB::table\(\s*[\'"]attendance_annulments[\'"]\s*\)\s*->\s*(insert|insertOrIgnore|insertGetId|update|upsert|delete)\(/',
     ];
 

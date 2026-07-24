@@ -86,3 +86,26 @@ it('keeps the CHECK lists in sync with the enum cases', function (): void {
         ->and($sorted($checkValues('requests_state_check')))
         ->toBe($sorted(array_map(fn ($c) => $c->value, RequestState::cases())));
 });
+
+it('rejects a rejected request with no decision_note at the DB level', function (): void {
+    $employee = Employee::factory()->create();
+
+    $insert = fn (string $state, ?string $note) => DB::table('requests')->insert([
+        'id' => (string) Illuminate\Support\Str::uuid7(),
+        'employee_id' => $employee->id,
+        'type' => 'attendance_adjustment',
+        'state' => $state,
+        'note' => 'x',
+        'decision_note' => $note,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    // Valid rows first — a CHECK violation aborts the whole Postgres transaction (and the
+    // test's RefreshDatabase wraps one), so the refused insert has to come last.
+    // A rejection WITH a note is fine; a non-rejected row may leave the note null.
+    expect($insert('rejected', 'Not enough evidence.'))->toBeTrue();
+    expect($insert('pending', null))->toBeTrue();
+
+    // A rejection with no decision_note is refused by requests_rejected_note_check.
+    expect(fn () => $insert('rejected', null))->toThrow(Illuminate\Database\QueryException::class);
+});
