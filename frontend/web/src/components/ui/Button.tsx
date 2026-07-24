@@ -50,7 +50,7 @@ export function Button({
       style={{
         ...VARIANT_STYLE[variant],
         borderRadius: 'var(--radius)',
-        height: '48px',
+        height: 'var(--sp-xxl)',
         padding: '0 var(--sp-md)',
         gap: 'var(--sp-xs)',
         font: 'var(--t-body-sm)',
