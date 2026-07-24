@@ -22,6 +22,8 @@ use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
+use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayController;
+use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
 
@@ -84,6 +86,14 @@ Route::prefix('v1')->group(function (): void {
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
             Route::post('/attendance/punch', ManualPunchController::class);
+        });
+
+        // Per-office config, gated by OfficeScope::administeredBy() inside each
+        // controller — an out-of-scope office 404s exactly like a nonexistent one (the
+        // same 404-not-403 discipline as the requests spine above).
+        Route::prefix('office')->group(function (): void {
+            Route::get('/holidays', ListHolidaysController::class);
+            Route::post('/holidays', CreateHolidayController::class);
         });
     });
 });

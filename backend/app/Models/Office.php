@@ -36,6 +36,12 @@ final class Office extends Model
         return $this->hasMany(Department::class);
     }
 
+    /** @return HasMany<Holiday, $this> */
+    public function holidays(): HasMany
+    {
+        return $this->hasMany(Holiday::class);
+    }
+
     public function newUniqueId(): string
     {
         // uuidv7 everywhere, model-path included — time-ordered keys keep the btree happy.
