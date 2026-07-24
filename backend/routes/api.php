@@ -36,6 +36,8 @@ use App\Http\Controllers\Office\Schedules\DeleteTemplateController;
 use App\Http\Controllers\Office\Schedules\ListAssignmentsController;
 use App\Http\Controllers\Office\Schedules\ListOverridesController;
 use App\Http\Controllers\Office\Schedules\ListTemplatesController;
+use App\Http\Controllers\Office\Schedules\ResolvedScheduleController;
+use App\Http\Controllers\Office\Schedules\SetDefaultTemplateController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
@@ -124,6 +126,8 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/schedule-overrides', CreateOverrideController::class);
             Route::patch('/schedule-overrides/{override}', UpdateOverrideController::class);
             Route::delete('/schedule-overrides/{override}', DeleteOverrideController::class);
+            Route::patch('/default-template', SetDefaultTemplateController::class);
+            Route::get('/schedule/resolved', ResolvedScheduleController::class);
         });
     });
 });
