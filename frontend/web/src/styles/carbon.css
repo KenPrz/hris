@@ -35,7 +35,7 @@
   --sp-xxs: 4px;  --sp-xs: 8px;   --sp-sm: 12px;  --sp-md: 16px;
   --sp-lg: 24px;  --sp-xl: 32px;  --sp-xxl: 48px; --sp-section: 96px;
 
-  /* type: size / weight / line-height / tracking */
+  /* type: size / weight / line-height (font shorthand can't carry letter-spacing) */
   --t-display-md: 300 42px/1.20 var(--font-plex);
   --t-headline:   400 32px/1.25 var(--font-plex);
   --t-card-title: 400 24px/1.33 var(--font-plex);
@@ -44,4 +44,19 @@
   --t-body-sm:    400 14px/1.29 var(--font-plex);
   --t-emphasis:   600 14px/1.29 var(--font-plex);
   --t-caption:    400 12px/1.33 var(--font-plex);
+
+  /*
+   * tracking — the CSS `font` shorthand above cannot express letter-spacing, so it rides
+   * alongside as a companion property. Values are DESIGN.md's typography block, verbatim;
+   * see its Do's/Don'ts — "a Carbon precision detail — don't remove it." Only non-zero
+   * steps get a token (display-md, headline, card-title, subhead and body-lg are all 0,
+   * i.e. the CSS default, so they need no override).
+   *
+   * Anywhere a component sets `font: var(--t-*)`, it MUST also set the matching
+   * `letter-spacing: var(--ls-*)` — the shorthand alone silently drops tracking.
+   */
+  --ls-body: 0.16px;       /* body, body-sm, body-emphasis, button, eyebrow */
+  --ls-caption: 0.32px;    /* caption */
+  --ls-display-xl: -0.5px; /* display-xl (76px, not yet mirrored as a --t- token) */
+  --ls-display-lg: -0.4px; /* display-lg (60px, not yet mirrored as a --t- token) */
 }

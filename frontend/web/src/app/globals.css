@@ -5,4 +5,6 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font: var(--t-body);
+  /* `font` shorthand can't carry tracking — DESIGN.md's body letter-spacing rides alongside. */
+  letter-spacing: var(--ls-body);
 }
