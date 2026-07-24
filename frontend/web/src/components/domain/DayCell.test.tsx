@@ -37,6 +37,27 @@ describe('DayCell', () => {
     expect(screen.getByText(/out.*17:05/i)).toBeInTheDocument()
   })
 
+  it('treats an even but mis-ordered day (in, in, out, out) as unpaired rather than cross-matching', () => {
+    // The count is even, so an ordering-blind pairer would happily invent a total.
+    // Two people's shifts, a device replay, a missed clock-out followed by a fresh
+    // clock-in — all land here, and none of them mean "one span". Show the punches.
+    const punches = [
+      punch({ id: 'a', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
+      punch({ id: 'b', direction: 'in', punched_at: '2026-07-20T09:00:00+08:00' }),
+      punch({ id: 'c', direction: 'out', punched_at: '2026-07-20T17:00:00+08:00' }),
+      punch({ id: 'd', direction: 'out', punched_at: '2026-07-20T18:00:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
+
+    // Every punch still visible — the ledger is never occluded.
+    expect(screen.getByText(/in.*08:00/i)).toBeInTheDocument()
+    expect(screen.getByText(/out.*18:00/i)).toBeInTheDocument()
+    // But no total was guessed (a cross-matching pairer would have produced 9h/18h).
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).toBeNull()
+    expect(screen.getByText(/unpaired/i)).toBeInTheDocument()
+  })
+
   it('shows the total for a day that pairs cleanly', () => {
     const punches = [
       punch({ id: 'in', direction: 'in', punched_at: '2026-07-20T08:00:00+08:00' }),
