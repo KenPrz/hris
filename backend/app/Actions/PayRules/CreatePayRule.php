@@ -8,6 +8,7 @@ use App\Domain\Pay\StatutoryFloor;
 use App\Exceptions\Domain\PayRateBelowFloor;
 use App\Exceptions\Domain\PayRuleExists;
 use App\Models\PayRule;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -30,24 +31,25 @@ final class CreatePayRule
         }
 
         return DB::transaction(function () use ($in): PayRule {
-            // Pre-check inside the transaction. Unlike CreateHoliday there is no parent
-            // row to lockForUpdate() first — a pay rule is a company singleton, not a
-            // child of some office row — so this pre-check plus the unique(effective_from)
-            // index (the backstop for the rare concurrent race) is the whole guard.
-            $duplicate = PayRule::query()->where('effective_from', $in->effectiveFrom)->exists();
-
-            if ($duplicate) {
+            // Unlike CreateHoliday there is no parent row to lockForUpdate() first — a pay
+            // rule is a company singleton, not a child of some office row — so an unlocked
+            // exists() pre-check would let two concurrent creates on the same date both pass
+            // and the loser's insert 500 on the raw unique violation. Instead the
+            // unique(effective_from) constraint IS the guard: try the insert and translate
+            // its violation into the clean 409. This is race-safe and covers the sequential
+            // duplicate identically (the second create hits the same constraint).
+            try {
+                $payRule = PayRule::query()->create([
+                    'effective_from' => $in->effectiveFrom,
+                    'overtime_ordinary_bp' => $in->overtimeOrdinaryBp,
+                    'overtime_premium_bp' => $in->overtimePremiumBp,
+                    'night_diff_bp' => $in->nightDiffBp,
+                    'note' => $in->note,
+                    'created_by' => $in->actorId,
+                ]);
+            } catch (UniqueConstraintViolationException) {
                 throw new PayRuleExists($in->effectiveFrom);
             }
-
-            $payRule = PayRule::query()->create([
-                'effective_from' => $in->effectiveFrom,
-                'overtime_ordinary_bp' => $in->overtimeOrdinaryBp,
-                'overtime_premium_bp' => $in->overtimePremiumBp,
-                'night_diff_bp' => $in->nightDiffBp,
-                'note' => $in->note,
-                'created_by' => $in->actorId,
-            ]);
 
             foreach ($in->dayRates as $rate) {
                 $payRule->dayRates()->create([

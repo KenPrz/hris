@@ -15,7 +15,11 @@ final class CreateController
 {
     public function __invoke(CreatePayRuleRequest $request, CreatePayRule $action): JsonResponse
     {
-        $dayRates = collect($request->input('day_rates'))
+        // Read from validated() so the FormRequest is the single source of the data that
+        // reaches the action — nothing unvalidated slips through.
+        $validated = $request->validated();
+
+        $dayRates = collect($validated['day_rates'])
             ->map(fn (array $rate): array => [
                 'day_type' => (string) $rate['day_type'],
                 'worked_bp' => (int) $rate['worked_bp'],
@@ -26,12 +30,12 @@ final class CreateController
 
         $payRule = $action->execute(
             new CreatePayRuleInput(
-                effectiveFrom: $request->string('effective_from')->toString(),
-                overtimeOrdinaryBp: (int) $request->input('overtime_ordinary_bp'),
-                overtimePremiumBp: (int) $request->input('overtime_premium_bp'),
-                nightDiffBp: (int) $request->input('night_diff_bp'),
+                effectiveFrom: (string) $validated['effective_from'],
+                overtimeOrdinaryBp: (int) $validated['overtime_ordinary_bp'],
+                overtimePremiumBp: (int) $validated['overtime_premium_bp'],
+                nightDiffBp: (int) $validated['night_diff_bp'],
                 dayRates: $dayRates,
-                note: $request->input('note'),
+                note: $validated['note'] ?? null,
                 actorId: $request->user()->id,
             ),
             config('hris.pay_floors'),
