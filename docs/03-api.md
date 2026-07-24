@@ -485,6 +485,160 @@ count) against the `Office` as subject, since a clone spans many rows rather tha
 `scripts/e2e-holidays.sh` proves the whole surface — including the byte-identical 404 pair —
 against the live stack.
 
+## Office — schedules *(M4b)*
+
+Shift templates, their assignment to an employee or department, per-date overrides, an
+office-wide default, and the resolved read that walks all four for one employee. Every
+endpoint here is gated by the same `App\Domain\Scope\OfficeScope` as the holidays above
+(`05-rbac.md`) — the identical 404-not-403 discipline, applied to a second resource: every
+`FormRequest` here validates an id as shape only (`uuid`), never `exists:`, so a fabricated
+id and an out-of-scope real one are byte-identical `404`s. `scripts/e2e-schedules.sh` walks
+the whole surface — including the byte-identical 404 pair — against the live stack.
+
+### Shift templates
+
+```
+POST /api/v1/office/shift-templates   # auth:sanctum — HR Admin/System Admin, scoped
+  { "office_id": "0199…", "name": "Standard Mon-Fri", "days": [
+      { "weekday": 0, "is_rest": false, "start_minute": 480, "end_minute": 1080, "break_minutes": 60 },
+      …,                                                    # exactly 7 entries, one per weekday 0-6
+      { "weekday": 5, "is_rest": true } ] }
+  → 201 { data: { id, office_id, name, days: [ { weekday, is_rest, start_minute, end_minute, break_minutes }, … ] } }
+  → 400 validation_failed     # not exactly 7 days, is_rest carrying hours (or a working day missing them),
+                              #   or an invalid minute range
+  → 404 not_found             # office_id is out of the caller's scope, or doesn't exist
+```
+
+```
+GET /api/v1/office/shift-templates?office=<uuid>       # list, scoped
+  → { data: [ { id, office_id, name, days: […] }, … ] }
+  → 400 validation_failed | 404 not_found
+
+GET /api/v1/office/shift-templates/{template}          # show, scoped
+  → { data: { id, office_id, name, days: […] } }
+  → 404 not_found
+
+PATCH /api/v1/office/shift-templates/{template}        # replaces the whole week
+  { "name": "Standard Mon-Fri", "days": [ … 7 entries … ] }
+  → 200 { data: { id, office_id, name, days: […] } }
+  → 400 validation_failed | 404 not_found
+
+DELETE /api/v1/office/shift-templates/{template}
+  → 204 No Content
+  → 404 not_found
+  → 422 template_in_use       # still an office's default, or still pointed at by a schedule
+                              #   assignment; details: { template_id }
+```
+
+`template_in_use` is a clean domain refusal, not the raw `500` a dangling foreign key would
+otherwise risk — the scope `404` always runs first, so this is only ever reachable for a
+template the caller administers, leaking nothing about other offices'.
+
+### Schedule assignments — employee or department, effective-dated
+
+```
+POST /api/v1/office/schedule-assignments
+  { "shift_template_id": "0199…", "employee_id": "0199…", "effective_from": "2026-08-01" }
+  # or "department_id" instead of "employee_id" — exactly one of the two, never both, never neither
+  → 201 { data: { id, shift_template_id, employee_id, department_id, effective_from } }
+  → 400 validation_failed     # neither/both employee_id and department_id present, or bad shape
+  → 404 not_found             # the target's office (employee's current office, or department's
+                              #   office), or the template's office, is out of the caller's scope
+  → 422 schedule_assignment_exists   # that target already has an assignment effective on that date;
+                              #   details: { target_type, target_id, effective_from }
+```
+
+**An assignment's office is its target's office, not a column of its own** — an employee's
+`current_office_id`, or a department's `office_id` — so a template from a different office
+than the target 404s identically to a fabricated template id (no separate error code for
+"wrong office").
+
+```
+GET /api/v1/office/schedule-assignments?office=<uuid>&employee=<uuid>&department=<uuid>
+  # employee/department optionally narrow an already-scoped list
+  → { data: [ { id, shift_template_id, employee_id, department_id, effective_from }, … ] }
+  → 400 validation_failed | 404 not_found
+
+DELETE /api/v1/office/schedule-assignments/{assignment}
+  → 204 No Content
+  → 404 not_found
+```
+
+### Schedule overrides — the per-date, per-employee exception
+
+```
+POST /api/v1/office/schedule-overrides
+  { "employee_id": "0199…", "date": "2026-08-08", "is_rest": false,
+    "start_minute": 480, "end_minute": 1080, "break_minutes": 60, "note": "Covering a shift" }
+  → 201 { data: { id, employee_id, date, is_rest, start_minute, end_minute, break_minutes, note } }
+  → 400 validation_failed     # is_rest carrying hours, a working override missing them, or a bad range
+  → 404 not_found             # the employee's current office is out of the caller's scope
+  → 422 schedule_override_exists   # that employee already has an override on that date;
+                              #   details: { employee_id, date }
+```
+
+```
+GET /api/v1/office/schedule-overrides?office=<uuid>&employee=<uuid>&month=<YYYY-MM>
+  → { data: [ { id, employee_id, date, is_rest, … }, … ] }    # date-ordered
+  → 400 validation_failed | 404 not_found
+
+PATCH /api/v1/office/schedule-overrides/{override}    # no employee_id/date — fixed at creation
+  { "is_rest": true }
+  → 200 { data: { id, employee_id, date, is_rest, … } }
+  → 400 validation_failed | 404 not_found
+
+DELETE /api/v1/office/schedule-overrides/{override}
+  → 204 No Content
+  → 404 not_found
+```
+
+### Office default template
+
+```
+PATCH /api/v1/office/default-template
+  { "office_id": "0199…", "template_id": "0199…" }
+  → 200 { data: { id, default_shift_template_id } }   # id is the office's own id
+  → 400 validation_failed
+  → 404 not_found     # office_id is out of scope, or template_id isn't that same office's own template
+```
+
+There is no `GET` for an office's current default — this endpoint is write-and-echo-back
+only. The frontend's `/office/schedules` screen names this gap explicitly: it can only show
+a default it set *this session*, never one read back after a reload (see that screen's
+file-level comment).
+
+### The resolved read
+
+```
+GET /api/v1/office/schedule/resolved?employee=<uuid>&month=<YYYY-MM>
+  → { data: { "2026-08-01": { is_rest, start_minute, end_minute, break_minutes,
+                               scheduled_minutes, source }, … } }   # one entry per day of the month
+  → 400 validation_failed     # employee not a uuid, or month outside YYYY-MM
+  → 404 not_found             # the employee's current office is out of the caller's scope,
+                              #   or the employee has no current office at all (never a 500
+                              #   from a null-derived uuid)
+  → 422 office_has_no_default_template   # resolution fell through to the office-default layer
+                              #   and the office has none set; details: { office_id }
+```
+
+`ScheduleResolver` also defines an `employee_has_no_office` (422) domain exception, but this
+endpoint can never surface it: the controller 404s a null `current_office_id` (the scope
+check above) *before* the resolver runs, so an office-less employee is indistinguishable from
+a fabricated one. `employee_has_no_office` is reserved for M5's direct, non-HTTP resolver
+callers (a queued compute job resolving an employee who legitimately has no office yet).
+
+`ScheduleResolver` runs once per date of the month (`02-data-model.md`): override → employee
+assignment → department assignment → office default, first hit wins, `source` names which
+layer answered. `scheduled_minutes` is always pre-computed — `0` for a rest day, `(end -
+start) - break` otherwise, cross-midnight included — never re-derived by the client.
+
+Every write here — template create/update/delete, assignment create/delete, override
+create/update/delete — is logged by `ShiftTemplate`/`ScheduleAssignment`/`ScheduleOverride`'s
+`Spatie\Activitylog\Traits\LogsActivity` (log names `shift_template`, `schedule_assignment`,
+`schedule_override`), the model itself as the uuid-morph subject, causer resolved
+automatically from the authenticated guard. `Office` has no `LogsActivity` trait, so setting
+the default logs manually against the `Office`, the same way `CloneHolidays` does.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -525,12 +679,12 @@ you). See `05-rbac.md`.
 
 ## What is not here yet
 
-Schedules, leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`);
-their endpoints land with them. Holidays shipped in M4a (above); nothing yet *reads* the
-holiday calendar to compute pay — that's M5's compute engine, which consumes M4a's table
-alongside M4b's schedules and M4c's `pay_rules`. Leave and overtime requests reuse the
-`requests` spine M3.6 built above, but their own detail tables and endpoints are not built
-yet.
+Leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`); their
+endpoints land with them. Holidays (M4a) and schedules (M4b, above) have both shipped;
+nothing yet *reads* either to compute pay — that's M5's compute engine, which consumes
+M4a's `holidays` and M4b's schedule tables alongside M4c's `pay_rules`. Leave and overtime
+requests reuse the `requests` spine M3.6 built above, but their own detail tables and
+endpoints are not built yet.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

@@ -188,7 +188,44 @@ office/admin screens; those arrive with the milestones that own their data.
   holiday marked here is configuration only until the compute engine (a later milestone)
   exists to turn a special-non-working day into a 130% payout.
 
+## Shift templates and schedules *(M4b)*
+
+- **A shift template is a reusable weekly shape.** An HR admin builds a 7-day week — say,
+  Monday through Friday 8:00 to 18:00 with an hour's break, weekends off — once, and reuses
+  it across however many people actually work that pattern, rather than setting hours
+  person by person.
+- **One template per office becomes that office's default.** Set it once, and anyone in the
+  office with no more specific assignment falls back to it automatically — a new hire
+  is scheduled correctly from day one without anyone having to remember to assign them
+  anything.
+- **A template can be assigned to a specific employee, effective a chosen date** — the way
+  to schedule someone differently from their office's default, from a date forward, without
+  losing the history of who was on what before. (Assigning by whole department is supported
+  too, on the same screen's underlying API; there is no department picker on the screen
+  itself yet, only an employee one.)
+- **A per-date override handles the one-off** — a rest-day swap, covering someone else's
+  shift on a Saturday and taking the following Monday off in exchange, or any single day
+  that needs to differ from the template it would otherwise resolve to. It always wins over
+  whatever a template or assignment would have said for that date.
+- **A cross-midnight shift is a real, supported shape** — 17:00 to 03:00 the next day is one
+  shift, not two, and it resolves correctly to how many minutes were actually worked.
+- **The resolved calendar shows what actually applies, and why.** Pick an employee on
+  `/office/schedules` and see, day by day, whether they're scheduled to work or rest, their
+  hours if working, and which layer decided it — their own override, an assignment to them
+  specifically, their department's assignment, or the office default — click any day to add
+  or edit that day's override directly.
+- **One office's schedules never leak into another's**, the same scoping rule the holiday
+  calendar uses: a Cebu HR admin can't see, edit, or confirm the existence of a Manila
+  shift template, assignment, or override — trying returns "not found," identical to
+  trying one that was never created.
+- **Every change is logged** — who built a template, who assigned it, who set an office
+  default, who wrote an override — the same audit trail the holiday calendar's changes get.
+- **Not yet in this milestone:** nothing reads a resolved schedule to change anyone's pay.
+  A schedule is configuration and a resolved answer only, until the compute engine (a later
+  milestone) exists to turn "was this person scheduled to work" into an actual computed
+  total.
+
 ---
 
-*(Turning punches into computed pay — the schedules and premium-rate engine — follows in a
+*(Turning punches into computed pay — the premium-rate engine — follows in a
 later milestone, once the rest of the configuration spine exists for it to read.)*

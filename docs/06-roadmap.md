@@ -641,7 +641,7 @@ the actual build made the scope concrete:**
 | Slice | Covers | Status |
 | --- | --- | --- |
 | **M4a — Holiday Calendars** | Per-office holiday CRUD + clone-from-previous-year | **Complete** — below |
-| **M4b — Shift Templates** | Template CRUD, assignment, per-date override, resolution order | Not started |
+| **M4b — Shift Templates** | Template CRUD, assignment, per-date override, resolution order | **Complete** — below |
 | **M4c — Pay Rules** | `pay_rules` editor, statutory-floor validation | Not started |
 
 **`RecomputeRange` moves to M5, alongside the compute engine it exists to drive.** There is
@@ -766,6 +766,104 @@ What the building turned on, for whoever picks up M4b next:
   import until `npm install` ran inside the container to catch the volume up. Native
   `npm test` (host `node_modules`, installed fresh) never saw this, the same asymmetry that
   hid the `ext-exif` gap from native `./vendor/bin/pest` in M3.6.
+
+## M4b — Shift Templates
+
+Shift-template CRUD, employee/department assignment, per-date overrides, an office-wide
+default, and the resolution order that ties them together — the second slice of the
+configuration spine.
+
+- `shift_templates`/`shift_template_days` — a template is a named week; the seven weekday
+  rows (`App\Domain\Schedule\Weekday`, `0=Monday..6=Sunday`) each carry `is_rest` XOR a
+  minute-range shift, `CHECK`-constrained so a cross-midnight shift (`end_minute` up to
+  `start_minute + 1440`) is representable but a nonsensical range isn't. `schedule_assignments`
+  targets exactly one of an employee or a department (`CHECK` + two partial unique indexes
+  on effective date); `schedule_overrides` is the per-`(employee, date)` exception.
+  `offices.default_shift_template_id` is the resolution floor. See `02-data-model.md`.
+- `App\Domain\Schedule\ScheduleResolver` — the single interface M5's compute engine will
+  call: override → employee assignment → department assignment → office default, first hit
+  wins, `source` names which layer answered. Pure read, no transaction, no writes.
+- `POST/GET/PATCH/DELETE /office/shift-templates`, `/schedule-assignments`,
+  `/schedule-overrides`, `PATCH /office/default-template`, `GET
+  /office/schedule/resolved` — every one scoped by the same `App\Domain\Scope\OfficeScope`
+  M4a built, no new authority model; every refusal is `404`, never `403`, byte-identical
+  between an out-of-scope real id and a fabricated one (`03-api.md`).
+- `App\Exceptions\Domain\TemplateInUse`/`ScheduleAssignmentExists`/`ScheduleOverrideExists`/
+  `OfficeHasNoDefaultTemplate`/`EmployeeHasNoOffice` — the same "turn a database constraint
+  or a resolution dead-end into a clean `422`, never a `500` or a silent orphan" pattern
+  `HolidayExists` set in M4a.
+- The frontend `/office/schedules` screen — templates, an office-default picker, an
+  assignment list, and a resolved calendar built on `MonthCalendar` (its third consumer),
+  click-a-day to open a single-day override editor. Two honest, cosmetic gaps, not
+  correctness ones (both documented in the screen's own file-level comment):
+  - **Assignment targets are employee-only in the UI.** The backend and API fully support a
+    department-target assignment (tested end to end, and proven live by
+    `scripts/e2e-schedules.sh`'s step 7) — there is simply no `GET /office/departments` list
+    endpoint yet for a target-type toggle to source options from.
+  - **The office-default indicator is session-local.** `PATCH /office/default-template` is
+    write-and-echo-back only — there is no `GET` for an office's current default — so the
+    screen only ever highlights a default it set *this session*; a reload, or an office it
+    never touched, legitimately shows none highlighted even though one exists server-side.
+- CompanySeeder seeds both offices a "Standard Mon-Fri" template as their office default, an
+  employee-level assignment of it to Miguel Santos (MNL-0002), and one rest-day-swap
+  override for him, so `/office/schedules` and the resolved read are non-empty on a fresh
+  `make dev`.
+- Every write is logged the same way M4a's holidays are:
+  `ShiftTemplate`/`ScheduleAssignment`/`ScheduleOverride`'s own `LogsActivity` trait for
+  their own creates/updates/deletes (the model itself as the uuid-morph subject); setting
+  the office default logs manually against `Office` (which has no `LogsActivity` of its
+  own), the same way `CloneHolidays` logs its from/to/created-count summary.
+
+**Done when:** a Manila HR admin builds a Mon-Fri 08:00-18:00 (Sat/Sun rest) template,
+sets it as Manila's office default, and assigns it to a seeded employee; the resolved read
+returns Sat/Sun `is_rest:true, scheduled_minutes:0` and weekdays at `scheduled_minutes:540`;
+a second template with a Tue 17:00→03:00 shift resolves `end_minute:1620`; an override
+swaps one Saturday to working and the following Monday to rest, both flipping with
+`source:"override"`; a Cebu-only HR admin gets byte-identical `404`s touching a Manila
+template; the activity log names who did what. **No pay is computed** — schedules are the
+second input M5's compute engine will read, alongside M4a's holidays and M4c's `pay_rules`.
+
+**Status: complete.** **382 backend tests** (1,242 assertions — the four schedule tables'
+schema, `ScheduleResolver`'s own unit suite including the cross-midnight case, and the six
+schedule endpoints' create/list/show/update/delete coverage, including the byte-identical-404
+proof exercised directly; M4a's own docs recorded 302, but `main` had grown past that by the
+time this branch forked, so 382 is this run's real total, not a precise "+80 for M4b" delta),
+**19 arch tests** (unchanged from M4a — `OfficeScope` already carried the Domain-layer carve-out
+this milestone's controllers reuse, so M4b introduces no new arch-guarded invariant of its
+own), frontend at **279 tests** (M4a recorded 222; the `/office/schedules` screen, its five new
+hooks — `useShiftTemplates`, `useScheduleAssignments`, `useScheduleOverrides`,
+`useResolvedMonth`, `useEmployees` — and the new `ResolvedDayCell` component make up most of
+the difference, the same "real total, not a precise per-milestone delta" caveat M4a's own
+count carries). `lint`, `typecheck`, and `build` are green native and inside the `make test`
+containers alike.
+`scripts/e2e-schedules.sh` walks the whole surface — template/default/assignment/night-shift/
+department-assignment/override/resolve, the byte-identical 404 pair, and the activity-log row
+— against the live stack. What the building turned on, for whoever picks up M4c next:
+
+- **A fourth table family reusing `OfficeScope` unchanged proves the boundary is genuinely
+  reusable, not accidentally holiday-shaped.** Unlike a holiday (which owns its own
+  `office_id`), a schedule assignment or override has no office column of its own — its
+  office is its *target's* office (an employee's `current_office_id`, or a department's
+  `office_id`) — and the controllers resolve that indirection once, then hand the same
+  `office_id` to the same two `OfficeScope` calls M4a already had. No new scope class, no
+  new 404 machinery.
+- **A cross-midnight shift is the one place minutes-not-times pays for itself twice over.**
+  `end_minute` allowed up to `start_minute + 1440` (never wrapped to a smaller number) means
+  a 17:00→03:00 shift is one row, one `CHECK`, and one resolver code path — the same
+  `ResolvedScheduleTest` pins both a same-day shift and this one so they can't silently
+  regress into each other.
+- **Two backend-complete, UI-deferred gaps, named rather than hidden.** Department-target
+  assignment and reading an office's current default both work end-to-end against the API
+  (the former proven live by the e2e script) with no screen for the first and only a
+  session-local view of the second — recorded above and in the screen's own comment, so
+  "why doesn't the UI do X" has an answer instead of looking like an oversight.
+- **Containerized frontend test runs showed transient timing flakiness across two unrelated
+  files (`schedules.test.tsx`, then on a separate run `attendance.test.tsx`) that a bare
+  rerun cleared both times** — neither file was touched by the failure a second time,
+  pointing at container resource contention under Vitest's parallel workers rather than a
+  real regression; native `npm test` never reproduced it. Different from M4a's
+  `node_modules`-drift gotcha (that one was deterministic and fixed by `npm install`); this
+  one is worth knowing about if a future `make test` run flakes on an unrelated file.
 
 ## M5 — Requests and approvals
 

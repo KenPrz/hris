@@ -56,6 +56,8 @@ arch('domain value objects are final')
         'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
+        'App\Domain\Schedule\Weekday',
+        'App\Domain\Schedule\ScheduleSource',
     ])
     ->toBeFinal()
     ->ignoring([
@@ -66,6 +68,8 @@ arch('domain value objects are final')
         'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
+        'App\Domain\Schedule\Weekday',
+        'App\Domain\Schedule\ScheduleSource',
     ]);
 
 arch('controllers are final single-action classes')

@@ -108,7 +108,10 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     const byKey = Object.fromEntries(groups.map((g) => [g.key, g]))
     expect(byKey.me?.items.length).toBeGreaterThan(0)
     expect(byKey.team?.items).toEqual([])
-    expect(byKey.office?.items).toEqual([{ href: '/office/holidays', label: 'Holidays' }])
+    expect(byKey.office?.items).toEqual([
+      { href: '/office/holidays', label: 'Holidays' },
+      { href: '/office/schedules', label: 'Schedules' },
+    ])
     expect(byKey.admin?.items).toEqual([])
   })
 })
@@ -164,7 +167,7 @@ describe('SideNav — rendered', () => {
     expect(screen.queryByText('Admin')).not.toBeInTheDocument()
   })
 
-  it('an HR admin sees an Office group with a Holidays link (the first Office-scope route)', async () => {
+  it('an HR admin sees an Office group with Holidays AND Schedules links', async () => {
     setToken('sekrit')
     stubFetch(200, sessionBody({ hr_offices: ['office-1'] }))
 
@@ -179,6 +182,10 @@ describe('SideNav — rendered', () => {
     // Me), so only waiting on the thing that depends on the loaded session is a real wait.
     const holidaysLink = await screen.findByRole('link', { name: 'Holidays' })
     expect(holidaysLink).toHaveAttribute('href', '/office/holidays')
+
+    const schedulesLink = await screen.findByRole('link', { name: 'Schedules' })
+    expect(schedulesLink).toHaveAttribute('href', '/office/schedules')
+
     expect(screen.getByText('Office')).toBeInTheDocument()
   })
 
@@ -198,6 +205,7 @@ describe('SideNav — rendered', () => {
 
     expect(screen.queryByText('Office')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Holidays' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Schedules' })).not.toBeInTheDocument()
   })
 
   it('marks the active route with aria-current="page" and a 3px --blue left border', async () => {
