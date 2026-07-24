@@ -73,6 +73,12 @@ it('accepts a cross-midnight working row (end_minute up to start+1440) and rejec
         'is_rest' => false, 'start_minute' => 480, 'end_minute' => 540, 'break_minutes' => 60,
         'created_at' => now(), 'updated_at' => now(),
     ]))->toThrow(QueryException::class);
+    // end beyond start + 1440 invalid: a shift may span at most 24h. start 1020, end 2461 (> 2460).
+    expect(fn () => DB::table('shift_template_days')->insert([
+        'id' => Str::uuid7()->toString(), 'shift_template_id' => $t->id, 'weekday' => 5,
+        'is_rest' => false, 'start_minute' => 1020, 'end_minute' => 2461, 'break_minutes' => 0,
+        'created_at' => now(), 'updated_at' => now(),
+    ]))->toThrow(QueryException::class);
     expect(true)->toBeTrue();
 })->group('schema');
 
