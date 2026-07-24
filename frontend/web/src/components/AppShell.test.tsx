@@ -143,3 +143,43 @@ describe('AppShell — sign out', () => {
     expect(getToken()).toBeNull()
   })
 })
+
+describe('AppShell — account menu dismissal', () => {
+  async function openMenu() {
+    setToken('sekrit')
+    stubFetch({ '/me': { status: 200, body: sessionBody } })
+    render(
+      <Providers>
+        <AppShell>
+          <div>content</div>
+        </AppShell>
+      </Providers>,
+    )
+    const trigger = await screen.findByRole('button', { name: 'Account menu' })
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument()
+    return trigger
+  }
+
+  it('closes on Escape and returns focus to the trigger', async () => {
+    const trigger = await openMenu()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menuitem', { name: 'Sign out' })).not.toBeInTheDocument()
+    })
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes on a pointer press outside the menu', async () => {
+    await openMenu()
+
+    fireEvent.pointerDown(document.body)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menuitem', { name: 'Sign out' })).not.toBeInTheDocument()
+    })
+  })
+})
