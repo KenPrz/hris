@@ -32,6 +32,10 @@ return new class extends Migration
 
         DB::statement("ALTER TABLE requests ADD CONSTRAINT requests_type_check CHECK (type IN ('attendance_adjustment'))");
         DB::statement("ALTER TABLE requests ADD CONSTRAINT requests_state_check CHECK (state IN ('pending','approved','rejected','cancelled'))");
+        // "decision_note required on rejection" is enforced in the app (RejectRequest), but
+        // the DB backs it too, so a raw write or a future bug can't leave an unexplained
+        // rejection. A non-rejected row may have a null note; a rejected one may not.
+        DB::statement("ALTER TABLE requests ADD CONSTRAINT requests_rejected_note_check CHECK (state <> 'rejected' OR decision_note IS NOT NULL)");
     }
 
     public function down(): void
