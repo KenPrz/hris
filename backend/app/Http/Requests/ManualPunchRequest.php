@@ -24,7 +24,12 @@ final class ManualPunchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'employee_id' => ['required', 'uuid', 'exists:employees,id'],
+            // No `exists:employees,id` on purpose: it runs before the controller's scope
+            // check, so a real-but-out-of-scope id (controller → 404) and a nonexistent id
+            // (exists → 400) would return different statuses, letting an HR admin enumerate
+            // who exists company-wide. The controller resolves the id and 404s uniformly for
+            // both a missing and an out-of-scope employee.
+            'employee_id' => ['required', 'uuid'],
             'direction' => ['required', Rule::in(['in', 'out'])],
             'punched_at' => ['required', 'date'],
         ];

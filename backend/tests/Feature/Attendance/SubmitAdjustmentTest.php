@@ -90,6 +90,35 @@ it('submits a void adjustment against an existing log', function (): void {
         ->and($detail->punched_at)->toBeNull();
 });
 
+it('rejects a void targeting another employee log the same way as a nonexistent one', function (): void {
+    // target_log_id is scoped to the submitter's own logs. A foreign log used to be accepted
+    // (201) and only failed at approval — clogging the manager's queue and leaking that some
+    // log id exists. Now a foreign log and a fabricated one both fail validation identically,
+    // and nothing is persisted.
+    $employee = adjustmentActingEmployee();
+    $someoneElse = Employee::factory()->create();
+    $foreignLog = AttendanceLog::factory()->create(['employee_id' => $someoneElse->id]);
+
+    $foreign = $this->postJson('/api/v1/attendance/adjustments', [
+        'operation' => 'void', 'note' => 'probe', 'target_log_id' => $foreignLog->id,
+    ]);
+    $fake = $this->postJson('/api/v1/attendance/adjustments', [
+        'operation' => 'void', 'note' => 'probe', 'target_log_id' => '00000000-0000-7000-8000-000000000000',
+    ]);
+
+    $foreign->assertStatus(400)->assertJsonPath('error.code', 'validation_failed');
+    $fake->assertStatus(400)->assertJsonPath('error.code', 'validation_failed');
+    expect($foreign->json())->toEqual($fake->json());
+    // Nothing lands in the approval queue — no griefing.
+    expect(Request::query()->count())->toBe(0);
+
+    // Sanity: the submitter's OWN log is still a valid void target.
+    $ownLog = AttendanceLog::factory()->create(['employee_id' => $employee->id]);
+    $this->postJson('/api/v1/attendance/adjustments', [
+        'operation' => 'void', 'note' => 'mine', 'target_log_id' => $ownLog->id,
+    ])->assertCreated();
+});
+
 it('submits an amend adjustment with target, direction, and punched_at', function (): void {
     $employee = adjustmentActingEmployee();
     $log = AttendanceLog::factory()->create(['employee_id' => $employee->id]);

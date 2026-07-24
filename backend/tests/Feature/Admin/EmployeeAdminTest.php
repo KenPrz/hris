@@ -123,3 +123,22 @@ it('forbids a non-admin from creating employees', function (): void {
         'hired_at' => '2026-02-01',
     ])->assertStatus(403)->assertJsonPath('error.code', 'forbidden');
 });
+
+it('does not let a non-admin enumerate employees via the subject admin routes', function (): void {
+    // These routes carry the employee id in the URL, so a 403-for-real / 404-for-nonexistent
+    // split would leak which employee ids exist company-wide. A non-admin must get the same
+    // 404 for a real employee as for a fabricated id — byte-identical, no enumeration signal.
+    $realEmployee = Employee::factory()->create();
+    $fakeId = '00000000-0000-7000-8000-000000000000';
+    Sanctum::actingAs(User::factory()->create());   // a plain, non-admin employee
+
+    foreach (['user', 'employment'] as $action) {
+        $real = $this->postJson("/api/v1/admin/employees/{$realEmployee->id}/{$action}", []);
+        $fake = $this->postJson("/api/v1/admin/employees/{$fakeId}/{$action}", []);
+
+        $real->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+        $fake->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+        // Same status, same code, same (empty) details — nothing distinguishes real from fake.
+        expect($real->json())->toEqual($fake->json());
+    }
+});
