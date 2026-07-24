@@ -103,7 +103,13 @@ export function weekdayIndex(date: string): number {
   return (utcDate.getUTCDay() + 6) % 7
 }
 
-/** `HH:mm` (24-hour) for a punch's ISO instant, rendered in its office's `timeZone`. */
+/**
+ * `HH:mm` (24-hour) for a punch's ISO instant, rendered in its office's `timeZone`.
+ *
+ * `iso` MUST carry an explicit offset or `Z` — the backend's `toIso8601String()` always
+ * does. A bare local-looking timestamp would be parsed against the host's zone, which is
+ * exactly the day-shift this module exists to prevent.
+ */
 export function timeInZone(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone,
