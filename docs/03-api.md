@@ -619,9 +619,13 @@ GET /api/v1/office/schedule/resolved?employee=<uuid>&month=<YYYY-MM>
                               #   from a null-derived uuid)
   → 422 office_has_no_default_template   # resolution fell through to the office-default layer
                               #   and the office has none set; details: { office_id }
-  → 422 employee_has_no_office           # resolution fell through to the office-default layer
-                              #   and the employee has no current office; details: { employee_id }
 ```
+
+`ScheduleResolver` also defines an `employee_has_no_office` (422) domain exception, but this
+endpoint can never surface it: the controller 404s a null `current_office_id` (the scope
+check above) *before* the resolver runs, so an office-less employee is indistinguishable from
+a fabricated one. `employee_has_no_office` is reserved for M5's direct, non-HTTP resolver
+callers (a queued compute job resolving an employee who legitimately has no office yet).
 
 `ScheduleResolver` runs once per date of the month (`02-data-model.md`): override → employee
 assignment → department assignment → office default, first hit wins, `source` names which
