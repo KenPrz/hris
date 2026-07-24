@@ -6,9 +6,9 @@ several offices.
 ## Running it
 
 ```bash
-cp -n .env.example .env        # first time only
-make dev-key                   # first time only — paste the value into .env
-make dev                       # db + api + web, hot reload
+[ -f .env ] || cp .env.example .env   # first time only
+make dev-key                          # first time only — paste the value into .env
+make dev                              # db + api + web, hot reload
 ```
 
 <http://127.0.0.1:5176> should say **System healthy** and print the Postgres version.

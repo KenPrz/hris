@@ -54,9 +54,9 @@ Production compose lands in M8; there is no `compose.prod.yml` yet.
 containers, hot-reloading against your working tree — nothing but Docker needed.
 
 ```bash
-cp -n .env.example .env        # first time only
-make dev-key                   # first time only — mints HRIS_DEV_APP_KEY; paste into .env
-make dev                       # db + api + web, hot reload
+[ -f .env ] || cp .env.example .env   # first time only
+make dev-key                          # first time only — mints HRIS_DEV_APP_KEY; paste into .env
+make dev                              # db + api + web, hot reload
 ```
 
 First boot installs `vendor/` and `node_modules` into fresh named volumes; it takes
@@ -81,7 +81,7 @@ Still fully supported — the dev compose adds a path, it doesn't remove one.
 **1. Postgres.** Run just the `db` service, or point `backend/.env` at any Postgres 18:
 
 ```bash
-cp -n .env.example .env
+[ -f .env ] || cp .env.example .env
 docker compose -f compose.dev.yml up -d db     # postgres:18-alpine on ${HRIS_DEV_DB_PORT:-5433}
 ```
 
@@ -92,7 +92,9 @@ docker compose -f compose.dev.yml up -d db     # postgres:18-alpine on ${HRIS_DE
 
 ```bash
 cd backend
-cp -n .env.example .env && php artisan key:generate   # first time only
+# first time only. The braces matter: `a || b && c` groups as `(a || b) && c`, so without
+# them key:generate would rewrite APP_KEY every time .env already existed.
+[ -f .env ] || { cp .env.example .env && php artisan key:generate; }
 composer install
 php artisan serve --port=8001
 ```
