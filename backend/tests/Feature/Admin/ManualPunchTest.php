@@ -99,6 +99,27 @@ it('404s when HR backfills for an employee outside their scope', function (): vo
     ])->assertStatus(404);
 });
 
+it('gives a nonexistent employee the same 404 as an out-of-scope one — no enumeration', function (): void {
+    // Dropping the `exists:employees,id` rule means the controller resolves the id and 404s
+    // uniformly. A real-but-out-of-scope employee (previous test) and a fabricated id must be
+    // indistinguishable, so an HR admin can't probe who exists company-wide from the status.
+    $manila = Office::factory()->create();
+    $cebu = Office::factory()->create();
+    $hrUser = User::factory()->create();
+    Employee::factory()->for($hrUser)->create(['current_office_id' => $manila->id]);
+    $hrUser->hrAdminOffices()->attach($manila->id);
+    $cebuWorker = Employee::factory()->create(['current_office_id' => $cebu->id]);
+    Sanctum::actingAs($hrUser);
+
+    $body = ['direction' => 'in', 'punched_at' => '2026-03-01T08:00:00+08:00'];
+    $outOfScope = $this->postJson('/api/v1/admin/attendance/punch', [...$body, 'employee_id' => $cebuWorker->id]);
+    $nonexistent = $this->postJson('/api/v1/admin/attendance/punch', [...$body, 'employee_id' => '00000000-0000-7000-8000-000000000000']);
+
+    $outOfScope->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+    $nonexistent->assertStatus(404)->assertJsonPath('error.code', 'not_found');
+    expect($outOfScope->json())->toEqual($nonexistent->json());
+});
+
 it('requires a supplied punched_at for a manual entry', function (): void {
     $office = Office::factory()->create();
     $hrUser = User::factory()->create();
