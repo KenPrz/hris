@@ -577,10 +577,25 @@ in and sees the hero reflect it, clocks out, sees the punch on today's cell with
 in/out times, navigates to the previous month, and signs out — the whole surface rendered
 from `carbon.css`, with no component reading a raw token or a literal query key.
 
-**Status: complete.** **165 frontend tests** (up from 16 at the end of M3.6), backend
-**unchanged at 267 + 17 arch** — this milestone touches no PHP. `lint`, `test`, `typecheck`,
-and `build` are all green, native and inside the `make test` containers alike. What the
-building turned on, for whoever extends the frontend next:
+**Status: complete, with one verification gap recorded below.** **165 frontend tests** (up
+from 16 at the end of M3.6), backend **unchanged at 267 + 17 arch** — this milestone touches
+no PHP. `lint`, `test`, `typecheck`, and `build` are all green, native and inside the
+`make test` containers alike.
+
+**The Done-When above was proven at the API and component-test level, not by a live browser
+click-through.** The whole flow was walked against the running stack with real HTTP — sign
+in, session fetch, an idempotent clock-in whose retry provably replayed the same row rather
+than writing a second punch, clock-out, the month ledger grouped exactly as the calendar
+consumes it, an empty previous month, sign-out, and a 401 in the real envelope — and every
+screen has component tests. But the rendered UI was never visually confirmed: React
+hydration would not complete in the build sandbox's browser, which reproduced identically on
+M0's long-shipped health page and is therefore environmental rather than a defect in this
+milestone's code. Unlike M3 and M3.6, which each ship an `e2e-*.sh` proving their flow end to
+end, **M3.5 has no equivalent live-UI evidence — a human click-through is outstanding, and
+an e2e harness for the frontend is unclaimed work.** Treat the visual layer as unverified
+until someone loads it in a real browser.
+
+What the building turned on, for whoever extends the frontend next:
 
 - **Vitest does not read `tsconfig.json`'s `paths`.** The `@/*` → `./src/*` alias has to be
   declared a second time, in `vitest.config.ts`'s own `resolve.alias`, or every component

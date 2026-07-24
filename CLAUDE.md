@@ -254,6 +254,12 @@ invented total). **267 backend tests + 17 arch tests, 165 frontend tests.** See
 `docs/06-roadmap.md` for the full status of each milestone and `docs/features.md` for
 what a user can actually do today.
 
+One caveat worth knowing before you trust the UI: M3.5's flow is proven by component tests
+and a live API walkthrough, but **the rendered screens have never been confirmed in a real
+browser** — hydration would not complete in the build sandbox (it fails the same way on M0's
+health page, so it is environmental). There is no frontend e2e harness yet. Load it yourself
+before assuming it looks right; see the M3.5 status block in `docs/06-roadmap.md`.
+
 Next: **M4 — configuration spine.** Holiday calendars, shift templates, and `pay_rules`,
 all admin-editable per office — everything M3.5's frontend and M5's compute engine will
 read. See `docs/06-roadmap.md`.
