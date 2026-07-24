@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Models\Employee;
 use App\Models\Office;
+use App\Models\ScheduleAssignment;
 use App\Models\ShiftTemplate;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -200,6 +202,171 @@ it('404s listing an out-of-scope office, identically to a fabricated office', fu
 
     $oos = $this->getJson("/api/v1/office/shift-templates?office={$other->id}")->assertStatus(404);
     $fake = $this->getJson('/api/v1/office/shift-templates?office='.(string) Str::uuid7())->assertStatus(404);
+
+    $oos->assertExactJson($fake->json());
+    $oos->assertJsonPath('error.code', 'not_found');
+});
+
+// --- Show -------------------------------------------------------------
+
+it('shows a template with its seven days', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Office']);
+    foreach (sevenWorkingDays() as $day) {
+        $template->days()->create($day);
+    }
+
+    $res = $this->getJson("/api/v1/office/shift-templates/{$template->id}")->assertOk();
+
+    expect($res->json('data.id'))->toBe($template->id)
+        ->and($res->json('data.name'))->toBe('Office')
+        ->and($res->json('data.days'))->toHaveCount(7);
+});
+
+it('404s showing a template not administered, identically to a fabricated template', function (): void {
+    $mine = scheduleOffice();
+    $other = scheduleOffice();
+    $hr = hrAdminOfSchedule($mine);
+    Sanctum::actingAs($hr);
+
+    $theirs = ShiftTemplate::query()->create(['office_id' => $other->id, 'name' => 'Theirs']);
+    $theirs->days()->create(['weekday' => 0, 'is_rest' => true]);
+
+    $oos = $this->getJson("/api/v1/office/shift-templates/{$theirs->id}")->assertStatus(404);
+    $fake = $this->getJson('/api/v1/office/shift-templates/'.(string) Str::uuid7())->assertStatus(404);
+
+    $oos->assertExactJson($fake->json());
+    $oos->assertJsonPath('error.code', 'not_found');
+});
+
+// --- Update -----------------------------------------------------------
+
+it('updates a template\'s name and replaces its days', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Old']);
+    foreach (sevenWorkingDays() as $day) {
+        $template->days()->create($day);
+    }
+
+    $newDays = sevenRestDays();
+
+    $res = $this->patchJson("/api/v1/office/shift-templates/{$template->id}", [
+        'name' => 'New',
+        'days' => $newDays,
+    ])->assertOk();
+
+    expect($res->json('data.name'))->toBe('New')
+        ->and($res->json('data.days'))->toHaveCount(7)
+        ->and($res->json('data.days.*.is_rest'))->toBe([true, true, true, true, true, true, true]);
+
+    $this->assertDatabaseHas('shift_templates', ['id' => $template->id, 'name' => 'New']);
+    $this->assertDatabaseCount('shift_template_days', 7);
+});
+
+it('rejects an update whose days do not cover the seven weekdays', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Old']);
+    foreach (sevenWorkingDays() as $day) {
+        $template->days()->create($day);
+    }
+
+    $this->patchJson("/api/v1/office/shift-templates/{$template->id}", [
+        'name' => 'New',
+        'days' => [['weekday' => 0, 'is_rest' => true]],
+    ])->assertStatus(400)->assertJsonPath('error.code', 'validation_failed');
+});
+
+it('404s updating a template not administered, identically to a fabricated template', function (): void {
+    $mine = scheduleOffice();
+    $other = scheduleOffice();
+    $hr = hrAdminOfSchedule($mine);
+    Sanctum::actingAs($hr);
+
+    $theirs = ShiftTemplate::query()->create(['office_id' => $other->id, 'name' => 'Theirs']);
+    foreach (sevenRestDays() as $day) {
+        $theirs->days()->create($day);
+    }
+
+    $body = ['name' => 'New', 'days' => sevenRestDays()];
+
+    $oos = $this->patchJson("/api/v1/office/shift-templates/{$theirs->id}", $body)->assertStatus(404);
+    $fake = $this->patchJson('/api/v1/office/shift-templates/'.(string) Str::uuid7(), $body)->assertStatus(404);
+
+    $oos->assertExactJson($fake->json());
+    $oos->assertJsonPath('error.code', 'not_found');
+});
+
+// --- Delete -------------------------------------------------------------
+
+it('deletes an unused template', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Unused']);
+    foreach (sevenRestDays() as $day) {
+        $template->days()->create($day);
+    }
+
+    $this->deleteJson("/api/v1/office/shift-templates/{$template->id}")->assertNoContent();
+
+    $this->assertDatabaseMissing('shift_templates', ['id' => $template->id]);
+    $this->assertDatabaseCount('shift_template_days', 0);
+});
+
+it('refuses to delete a template that is an office default', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Default']);
+    $office->update(['default_shift_template_id' => $template->id]);
+
+    $this->deleteJson("/api/v1/office/shift-templates/{$template->id}")
+        ->assertStatus(422)->assertJsonPath('error.code', 'template_in_use');
+
+    $this->assertDatabaseHas('shift_templates', ['id' => $template->id]);
+});
+
+it('refuses to delete a template that has an assignment', function (): void {
+    $office = scheduleOffice();
+    $hr = hrAdminOfSchedule($office);
+    Sanctum::actingAs($hr);
+
+    $template = ShiftTemplate::query()->create(['office_id' => $office->id, 'name' => 'Assigned']);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+    ScheduleAssignment::create([
+        'shift_template_id' => $template->id,
+        'employee_id' => $employee->id,
+        'effective_from' => '2026-08-01',
+    ]);
+
+    $this->deleteJson("/api/v1/office/shift-templates/{$template->id}")
+        ->assertStatus(422)->assertJsonPath('error.code', 'template_in_use');
+
+    $this->assertDatabaseHas('shift_templates', ['id' => $template->id]);
+});
+
+it('404s deleting a template not administered, identically to a fabricated template', function (): void {
+    $mine = scheduleOffice();
+    $other = scheduleOffice();
+    $hr = hrAdminOfSchedule($mine);
+    Sanctum::actingAs($hr);
+
+    $theirs = ShiftTemplate::query()->create(['office_id' => $other->id, 'name' => 'Theirs']);
+    $theirs->days()->create(['weekday' => 0, 'is_rest' => true]);
+
+    $oos = $this->deleteJson("/api/v1/office/shift-templates/{$theirs->id}")->assertStatus(404);
+    $fake = $this->deleteJson('/api/v1/office/shift-templates/'.(string) Str::uuid7())->assertStatus(404);
 
     $oos->assertExactJson($fake->json());
     $oos->assertJsonPath('error.code', 'not_found');

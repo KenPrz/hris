@@ -7,7 +7,7 @@ namespace App\Http\Requests;
 use App\Http\Requests\Concerns\ValidatesShiftDays;
 use Illuminate\Foundation\Http\FormRequest;
 
-final class CreateShiftTemplateRequest extends FormRequest
+final class UpdateShiftTemplateRequest extends FormRequest
 {
     use ValidatesShiftDays;
 
@@ -17,14 +17,13 @@ final class CreateShiftTemplateRequest extends FormRequest
     }
 
     /**
-     * Shape only — deliberately NO `exists:offices,id`. That would let a fake office id
-     * 400 while an out-of-scope real one 404s in the controller, reintroducing the
-     * enumeration oracle the 404-not-403 rule exists to close.
+     * No `office_id` here — the office is fixed by the route-bound {template}, not the
+     * body. Same day shape as create: exactly seven entries, re-validated in full (a
+     * PATCH replaces the whole week, never a partial day).
      */
     public function rules(): array
     {
         return [
-            'office_id' => ['required', 'uuid'],
             'name' => ['required', 'string'],
             'days' => ['required', 'array', 'size:7'],
             'days.*.weekday' => ['required', 'integer', 'between:0,6'],

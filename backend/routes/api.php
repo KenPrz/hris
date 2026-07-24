@@ -28,7 +28,10 @@ use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayContro
 use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
 use App\Http\Controllers\Office\Holidays\UpdateController as UpdateHolidayController;
 use App\Http\Controllers\Office\Schedules\CreateTemplateController;
+use App\Http\Controllers\Office\Schedules\DeleteTemplateController;
 use App\Http\Controllers\Office\Schedules\ListTemplatesController;
+use App\Http\Controllers\Office\Schedules\ShowTemplateController;
+use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
 
@@ -104,6 +107,9 @@ Route::prefix('v1')->group(function (): void {
             Route::delete('/holidays/{holiday}', DeleteHolidayController::class);
             Route::get('/shift-templates', ListTemplatesController::class);
             Route::post('/shift-templates', CreateTemplateController::class);
+            Route::get('/shift-templates/{template}', ShowTemplateController::class);
+            Route::patch('/shift-templates/{template}', UpdateTemplateController::class);
+            Route::delete('/shift-templates/{template}', DeleteTemplateController::class);
         });
     });
 });

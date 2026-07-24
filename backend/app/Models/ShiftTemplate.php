@@ -5,6 +5,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 use Spatie\Activitylog\LogOptions;
@@ -20,6 +21,9 @@ final class ShiftTemplate extends Model
 
     /** @return array<int,string> */
     public function uniqueIds(): array { return ['id']; }
+
+    /** @return BelongsTo<Office, $this> */
+    public function office(): BelongsTo { return $this->belongsTo(Office::class); }
 
     /** @return HasMany<ShiftTemplateDay> */
     public function days(): HasMany { return $this->hasMany(ShiftTemplateDay::class); }
