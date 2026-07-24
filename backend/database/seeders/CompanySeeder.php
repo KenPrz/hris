@@ -20,6 +20,9 @@ use App\Models\Employee;
 use App\Models\Holiday;
 use App\Models\Office;
 use App\Models\Organization;
+use App\Models\ScheduleAssignment;
+use App\Models\ScheduleOverride;
+use App\Models\ShiftTemplate;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
@@ -101,6 +104,18 @@ final class CompanySeeder extends Seeder
             'name' => 'Rizal Day',
         ]);
 
+        // M4b: both offices get the same "Standard Mon–Fri" shift template — Mon-Fri
+        // 08:00-18:00 with an hour's break, Sat/Sun rest — set as each office's own
+        // default so `/office/schedules` and the resolved read are non-empty on a fresh
+        // `make dev` even before any assignment exists. Written directly through the
+        // model, the same as `Holiday::create` above: templates/days have no cache to
+        // keep in sync, so there is no single-writer rule here to honour.
+        $manilaShiftTemplate = $this->standardMondayToFridayTemplate($manila);
+        $manila->update(['default_shift_template_id' => $manilaShiftTemplate->id]);
+
+        $cebuShiftTemplate = $this->standardMondayToFridayTemplate($cebu);
+        $cebu->update(['default_shift_template_id' => $cebuShiftTemplate->id]);
+
         $manilaOps = $this->department($manila, 'Operations', 'OPS');
         $manilaPeople = $this->department($manila, 'People & Culture', 'PPL');
         $cebuOps = $this->department($cebu, 'Operations', 'OPS');
@@ -148,6 +163,34 @@ final class CompanySeeder extends Seeder
             actorId: $actor,
             login: ['name' => 'Miguel Santos', 'email' => 'employee.manila@hris.test'],
         );
+
+        // M4b: an employee-level assignment for Miguel, effective from the start of 2026 —
+        // so ScheduleResolver has an `employee` source to fall back to before the office
+        // default, and the resolved read on `/office/schedules` is non-empty for him from
+        // the first month a fresh `make dev` looks at. Same office/template, so nothing
+        // about this changes what he's scheduled to work — it demonstrates the assignment
+        // layer sitting in front of the office default that's already covering him.
+        ScheduleAssignment::create([
+            'shift_template_id' => $manilaShiftTemplate->id,
+            'employee_id' => $miguel->id,
+            'effective_from' => '2026-01-01',
+            'created_by' => $actor,
+        ]);
+
+        // One rest-day-swap override for demonstration: 2026-08-01 is a Saturday (a rest
+        // day under the standard template above); this flips it to a working day the same
+        // 08:00-18:00 shape as his usual weekday, so the resolved calendar shows a real
+        // `source: "override"` cell without the seed needing to invent a stranger shape.
+        ScheduleOverride::create([
+            'employee_id' => $miguel->id,
+            'date' => '2026-08-01',
+            'is_rest' => false,
+            'start_minute' => 480,
+            'end_minute' => 1080,
+            'break_minutes' => 60,
+            'note' => 'Rest-day swap: covering a Saturday shift',
+            'created_by' => $actor,
+        ]);
 
         // A seeded in/out pair so scripts/e2e-adjustments.sh has a real target_log_id to
         // void without first having to punch and discover one live. Written through
@@ -293,6 +336,33 @@ final class CompanySeeder extends Seeder
             geoLat: null,
             geoLng: null,
         ));
+    }
+
+    /**
+     * "Standard Mon–Fri": Mon-Fri 08:00-18:00 (480-1080 minutes) with an hour's break,
+     * Sat/Sun rest — the same shape `ResolvedScheduleTest`/`ShiftTemplateReadWriteTest`
+     * build by hand, given a name here so it reads as a real template on the screen
+     * rather than the tests' bare "Template"/"Office".
+     */
+    private function standardMondayToFridayTemplate(Office $office): ShiftTemplate
+    {
+        $template = ShiftTemplate::create([
+            'office_id' => $office->id,
+            'name' => 'Standard Mon–Fri',
+        ]);
+
+        foreach (range(0, 6) as $weekday) {
+            $isWeekend = $weekday >= 5; // Weekday::Saturday = 5, Weekday::Sunday = 6
+            $template->days()->create([
+                'weekday' => $weekday,
+                'is_rest' => $isWeekend,
+                'start_minute' => $isWeekend ? null : 480,
+                'end_minute' => $isWeekend ? null : 1080,
+                'break_minutes' => $isWeekend ? null : 60,
+            ]);
+        }
+
+        return $template;
     }
 
     private function department(Office $office, string $name, string $code): Department

@@ -223,9 +223,9 @@ seeder for the full cast.
 
 `EmployeeScope` answers "which employees may this user see"; `App\Domain\Scope\OfficeScope`
 (`app/Domain/Scope/`) is its sibling for per-office **configuration** — holiday calendars
-today (M4a), schedules and `pay_rules` as M4b/M4c land. Same shape, same reasoning: a query
-constraint, not a boolean, so it composes into any office query and there is exactly one
-place "who may administer this office" is defined.
+(M4a) and schedules (M4b) today, `pay_rules` as M4c lands. Same shape, same reasoning: a
+query constraint, not a boolean, so it composes into any office query and there is exactly
+one place "who may administer this office" is defined.
 
 | Actor | Constraint |
 | --- | --- |
@@ -262,6 +262,19 @@ nonexistent holiday id — the `FormRequest`s validate `office_id`/`office` as s
 `uuid`, deliberately never `exists:offices,id`, so a fabricated id and an out-of-scope real
 one take the identical code path to the identical `NotFoundHttpException`. See `03-api.md`
 for the endpoint-level detail and `02-data-model.md` for the `holidays` table.
+
+**M4b's schedules are governed by the exact same `OfficeScope`, with no new authority
+model.** Every shift-template, assignment, override, default-template, and resolved-read
+endpoint resolves scope through `administered()`/`administers()` the same way holidays do —
+a shift template is scoped by its own `office_id` (like a holiday); a schedule assignment or
+override is scoped by its *target*'s office (an employee's `current_office_id`, or a
+department's `office_id` — there being no `office_id` column on the assignment/override rows
+themselves), which the controller resolves before ever calling `OfficeScope`. Same
+404-not-403 discipline throughout: every schedule `FormRequest` validates an id as
+shape-only `uuid`, never `exists:`, so an out-of-scope real id and a fabricated one 404
+identically (`scripts/e2e-schedules.sh` proves this against the live stack, mirroring
+`e2e-holidays.sh`). See `03-api.md` for the endpoint-level detail and `02-data-model.md` for
+the four schedule tables.
 
 ## Testing
 

@@ -667,13 +667,151 @@ not a boolean:
   (`administeredBy()` joins `hrAdminOffices()->pluck('offices.id')`).
 - **Anyone else** — zero offices, forced empty (`whereRaw('1 = 0')`), never unconstrained.
 
-Two pure, HTTP-agnostic helpers built on `administeredBy()`, used by every holiday endpoint:
+Two pure, HTTP-agnostic helpers built on `administeredBy()`, used by every holiday **and
+schedule** endpoint (M4b reuses the exact same two calls — see below):
 `administered(User, ?officeId): ?Office` (the list/create/clone endpoints, which take an
 office id in the request) and `administers(User, officeId): bool` (the update/delete
 endpoints, which already have the record via route-model binding). Both hand the 404 decision
 to the controller — `OfficeScope` itself only ever returns `null`/`false`/a constrained
 query, never throws. See `05-rbac.md` for the full authority model and `03-api.md` for the
 byte-identical-404 proof this scope makes possible.
+
+---
+
+## Shift templates, assignments, overrides, and the resolution chain: schedules *(M4b)*
+
+```sql
+create table shift_templates (
+  id          uuid primary key default uuidv7(),
+  office_id   uuid not null references offices(id) on delete cascade,
+  name        text not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create table shift_template_days (
+  id                 uuid primary key default uuidv7(),
+  shift_template_id  uuid not null references shift_templates(id) on delete cascade,
+  weekday            smallint not null,     -- 0=Monday..6=Sunday (App\Domain\Schedule\Weekday)
+  is_rest            boolean not null,
+  start_minute       smallint,               -- null when is_rest
+  end_minute         smallint,               -- null when is_rest; may exceed 1439 (cross-midnight)
+  break_minutes      smallint,               -- null when is_rest
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  unique (shift_template_id, weekday),
+  check (weekday between 0 and 6),
+  check (   -- is_rest XOR hours
+    (is_rest = true  and start_minute is null and end_minute is null and break_minutes is null)
+    or
+    (is_rest = false and start_minute is not null and end_minute is not null and break_minutes is not null)
+  ),
+  check (   -- working-row minute ranges; rest rows short-circuit
+    is_rest = true or (
+      start_minute >= 0 and start_minute < 1440
+      and end_minute > start_minute and end_minute <= start_minute + 1440
+      and break_minutes >= 0 and break_minutes < (end_minute - start_minute)
+    )
+  )
+);
+
+create table schedule_assignments (
+  id                 uuid primary key default uuidv7(),
+  shift_template_id  uuid not null references shift_templates(id) on delete cascade,
+  employee_id        uuid references employees(id) on delete cascade,
+  department_id      uuid references departments(id) on delete cascade,
+  effective_from     date not null,
+  created_by         uuid references users(id) on delete set null,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  check (   -- exactly one of employee_id / department_id
+    (employee_id is not null and department_id is null)
+    or (employee_id is null and department_id is not null)
+  )
+);
+-- one row per target per effective date — see below for why these are PARTIAL indexes
+create unique index schedule_assignments_employee_effective_unique
+  on schedule_assignments (employee_id, effective_from) where employee_id is not null;
+create unique index schedule_assignments_department_effective_unique
+  on schedule_assignments (department_id, effective_from) where department_id is not null;
+
+create table schedule_overrides (
+  id             uuid primary key default uuidv7(),
+  employee_id    uuid not null references employees(id) on delete cascade,
+  date           date not null,
+  is_rest        boolean not null,
+  start_minute   smallint,
+  end_minute     smallint,
+  break_minutes  smallint,
+  note           text,
+  created_by     uuid references users(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+
+  unique (employee_id, date)
+  -- plus the same is_rest XOR hours / minute-range CHECKs as shift_template_days
+);
+
+alter table offices add column default_shift_template_id
+  uuid references shift_templates(id) on delete set null;
+```
+
+**A shift template is a named week, not a date.** `shift_templates` carries just an
+`office_id` and a `name`; the actual shape lives in `shift_template_days`, exactly seven
+rows — one per `App\Domain\Schedule\Weekday` case, `0=Monday..6=Sunday`, the one int-backed
+enum in the system, because a weekday's identity genuinely *is* an ordinal (aligned 1:1 with
+the frontend's `weekdayIndex`), unlike `DayType` where the string itself is the meaning. Each
+row is either `is_rest` (all three minute columns `null`) or a working day (all three
+required) — the same is_rest-XOR-hours `CHECK` pattern on both `shift_template_days` and
+`schedule_overrides`, so the database rejects a rest day carrying hours regardless of
+whether a form got it right.
+
+**Minutes, not times — and a cross-midnight shift is a range past 1440, never a wrap.**
+`start_minute`/`end_minute` are minutes-since-midnight (`08:00` = 480), matching
+`01-architecture.md`'s "never a float, never a `Date` object" rule for worked time. A shift
+that crosses midnight (17:00 → 03:00) is `start_minute: 1020, end_minute: 1620` —
+`end_minute` is allowed up to `start_minute + 1440`, one full day past start, rather than
+wrapping back to a smaller number that would make `end > start` false and the shift look
+zero- or negative-length. `App\Domain\Schedule\ResolvedSchedule::scheduledMinutes` is always
+`(end - start) - break` (`0` for a rest day), computed the same way whether or not the shift
+crosses midnight.
+
+**`schedule_assignments` targets exactly one of an employee or a department, never both,
+never neither** — one `CHECK` makes the two mutually exclusive, and two *partial* unique
+indexes (one scoped to `employee_id IS NOT NULL`, one to `department_id IS NOT NULL`)
+enforce "one assignment per target per effective date." A plain `unique(employee_id,
+effective_from)` would not work here: Postgres treats `NULL` as distinct from every other
+`NULL` in a unique index, but only one of the two target columns is ever populated per row,
+so an unscoped index would silently let duplicate department-only rows through (or vice
+versa) — the partial index is what actually enforces one-per-target.
+
+**`schedule_overrides` is the per-date exception, one row per `(employee_id, date)`.** It
+carries the same is_rest-XOR-hours shape as a template day, plus a free-text `note` for why
+— a rest-day swap, a one-off early release — that a template day has no room for.
+
+**`offices.default_shift_template_id` is the resolution chain's floor.** Nullable, `on
+delete set null` (deleting a template a caller has retired never orphans the office row),
+and gated from the *other* side by `App\Exceptions\Domain\TemplateInUse` — a template that
+is either an office's default or still pointed at by a `schedule_assignments` row refuses to
+be deleted (`422 template_in_use`) rather than leaving a dangling reference or a silent
+`NULL` an employee's schedule would then have nowhere to fall back to.
+
+**`App\Domain\Schedule\ScheduleResolver` is the one place "what is this employee scheduled
+to work on this date" is answered**, for a single `(employee, date)` pair — a pure read, no
+transaction, no writes: the single interface M5's compute engine will call. It walks, in
+order, and returns the first hit:
+
+1. **`schedule_overrides`** for that exact `(employee_id, date)` — `source: "override"`.
+2. **The employee's own `schedule_assignments` row** with the latest `effective_from` on or
+   before the date — `source: "employee"`.
+3. **The employee's `current_department_id`'s `schedule_assignments` row**, same
+   latest-effective-from rule — `source: "department"`.
+4. **The employee's `current_office_id`'s `default_shift_template_id`** — `source:
+   "office_default"`. If the employee has no current office, `EmployeeHasNoOffice`; if the
+   office has no default template, `OfficeHasNoDefaultTemplate` — both `422`s, since
+   resolution genuinely cannot proceed any further.
 
 ---
 
@@ -705,3 +843,15 @@ Stated plainly, since these are the reasons for the constraints above:
 - An office cannot have two holidays on the same date, and a holiday's `day_type` cannot be
   anything but one of the four non-`Ordinary` cases. (`unique(office_id, date)` +
   `CHECK (day_type IN (...))`, above.)
+- A shift template day cannot be a rest day carrying hours, or a working day missing them,
+  and a working day's minute range must actually make sense (`end > start`, `break <
+  end - start`). (The is_rest-XOR-hours `CHECK` + minute-range `CHECK` on
+  `shift_template_days`, mirrored on `schedule_overrides`.)
+- A schedule assignment cannot target both an employee and a department, or neither, and
+  two assignments cannot cover the same target on the same effective date. (`CHECK`
+  + the two partial unique indexes on `schedule_assignments`, above.)
+- An employee cannot have two schedule overrides on the same date. (`unique(employee_id,
+  date)` on `schedule_overrides`.)
+- A shift template that is still an office's default, or still pointed at by a schedule
+  assignment, cannot be deleted. (`App\Exceptions\Domain\TemplateInUse`, `422
+  template_in_use` — a domain refusal, not a dangling foreign key.)
