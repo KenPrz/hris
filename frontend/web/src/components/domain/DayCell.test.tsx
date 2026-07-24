@@ -86,7 +86,26 @@ describe('DayCell', () => {
     // But there is no invented total — a missing clock-out must not be papered over.
     expect(screen.queryByText('4h')).not.toBeInTheDocument()
     expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).not.toBeInTheDocument()
+    // On a past day (no isToday), a trailing open `in` is a forgotten clock-out — warn.
     expect(screen.getByText(/unpaired/i)).toBeInTheDocument()
+  })
+
+  it('reads an open shift on today as "in progress", not the unpaired warning', () => {
+    // The exact shape the first browser pass caught: one completed session plus a
+    // trailing `in` you haven't clocked out of because you're still working. The hero
+    // says "clocked in"; the cell must not contradict it with a warning.
+    const punches = [
+      punch({ id: 'in1', direction: 'in', punched_at: '2026-07-24T08:00:00+08:00' }),
+      punch({ id: 'out1', direction: 'out', punched_at: '2026-07-24T12:00:00+08:00' }),
+      punch({ id: 'in2', direction: 'in', punched_at: '2026-07-24T13:00:00+08:00' }),
+    ]
+
+    render(<DayCell date="2026-07-24" punches={punches} timeZone="Asia/Manila" isToday />)
+
+    expect(screen.getByText(/in progress/i)).toBeInTheDocument()
+    expect(screen.queryByText(/unpaired/i)).not.toBeInTheDocument()
+    // Still no invented total on the cell — the running total lives in the hero.
+    expect(screen.queryByText(/^\d+h(\s\d+m)?$/)).not.toBeInTheDocument()
   })
 
   it('surfaces the flag reason for a flagged punch as a warning tag', () => {

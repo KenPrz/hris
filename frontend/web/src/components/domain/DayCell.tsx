@@ -15,16 +15,37 @@ export interface DayCellProps {
 }
 
 /**
- * A total only renders when the day pairs cleanly (`pairPunches` returns `'paired'`).
- * A day that's still open (a trailing, uncosed `in`) or genuinely irregular both render
- * with no total here — the ledger is never occluded, but this layer is never allowed to
- * invent a number for either case. (The attendance hero adds a *live* total for the
- * open case, because it re-renders every second and knows "now"; a static day cell does
- * not, so it stays silent rather than show a total that's already stale.)
+ * What the cell shows beneath the punch list, from the shared pairing rule:
+ *  - `total`   — the day paired cleanly; show the worked minutes.
+ *  - `open`    — an open shift on *today*: you're clocked in right now. Normal, not a
+ *                warning. The hero carries the live running total; the static cell only
+ *                notes the state so it doesn't look like a missing punch.
+ *  - `warn`    — genuinely irregular, or an open shift on a *past* day (a forgotten
+ *                clock-out). No total is invented; the day is flagged for attention.
+ *  - `none`    — nothing to say (no punches, or an empty day).
+ * Splitting `open`-today from the warning is the whole point: an employee is clocked in
+ * all day, and a "Unpaired" warning on today's cell — contradicting the hero one row up —
+ * is exactly the false alarm that split surfaced in the first browser pass.
  */
-function pairedTotalMinutes(sortedPunches: AttendanceLog[]): number | null {
+type DayStatus =
+  | { kind: 'total'; minutes: number }
+  | { kind: 'open' }
+  | { kind: 'warn' }
+  | { kind: 'none' }
+
+function dayStatus(sortedPunches: AttendanceLog[], isToday: boolean): DayStatus {
   const pairing = pairPunches(sortedPunches)
-  return pairing.kind === 'paired' ? pairing.totalMinutes : null
+
+  switch (pairing.kind) {
+    case 'paired':
+      return { kind: 'total', minutes: pairing.totalMinutes }
+    case 'open':
+      return isToday ? { kind: 'open' } : { kind: 'warn' }
+    case 'unpaired':
+      return { kind: 'warn' }
+    case 'none':
+      return { kind: 'none' }
+  }
 }
 
 /**
@@ -39,8 +60,7 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
 
   const sortedPunches = sortByPunchedAt(punches)
 
-  const totalMinutes = pairedTotalMinutes(sortedPunches)
-  const isUnpaired = sortedPunches.length > 0 && totalMinutes === null
+  const status = dayStatus(sortedPunches, isToday)
 
   return (
     <div
@@ -84,13 +104,15 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
         </ul>
       ) : null}
 
-      {totalMinutes !== null ? (
+      {status.kind === 'total' ? (
         <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
-          <Duration minutes={totalMinutes} />
+          <Duration minutes={status.minutes} />
         </span>
       ) : null}
 
-      {isUnpaired ? <Tag kind="warning">Unpaired — no total</Tag> : null}
+      {status.kind === 'open' ? <Tag kind="neutral">In progress</Tag> : null}
+
+      {status.kind === 'warn' ? <Tag kind="warning">Unpaired — no total</Tag> : null}
     </div>
   )
 }
