@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Scope;
+
+use App\Models\Office;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * The one definition of "which offices may this user administer" — the M4 config boundary,
+ * mirroring EmployeeScope for employees. Returns a query constraint, so it composes into any
+ * office query and the boundary lives in one place. See docs/05-rbac.md.
+ */
+final class OfficeScope
+{
+    /** @return Builder<Office> */
+    public static function administeredBy(User $user): Builder
+    {
+        $query = Office::query();
+
+        if ($user->is_system_admin) {
+            return $query;
+        }
+
+        $officeIds = $user->hrAdminOffices()->pluck('offices.id')->all();
+
+        // No HR offices → administers nothing. Force empty, never unconstrained.
+        return $officeIds === []
+            ? $query->whereRaw('1 = 0')
+            : $query->whereIn('id', $officeIds);
+    }
+}
