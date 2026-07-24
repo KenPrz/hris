@@ -39,7 +39,7 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
     { href: '/office/holidays', label: 'Holidays' },
     { href: '/office/schedules', label: 'Schedules' },
   ],
-  admin: [],
+  admin: [{ href: '/admin/pay-rules', label: 'Pay rules' }],
 }
 
 const GROUP_LABEL: Record<NavGroupKey, string> = {
