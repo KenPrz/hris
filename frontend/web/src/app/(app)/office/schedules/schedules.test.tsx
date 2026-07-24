@@ -1,18 +1,27 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import type { Employee, ScheduleAssignment, ShiftTemplate } from '@/lib/api'
+import type { Employee, ResolvedMonth, ScheduleAssignment, ScheduleOverride, ShiftTemplate } from '@/lib/api'
+import { currentMonth } from '@/lib/date'
+import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import { clearToken, setToken } from '@/lib/session'
 import { Providers } from '@/components/Providers'
 
 const push = vi.fn()
 const replace = vi.fn()
+let searchParams = new URLSearchParams()
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, replace }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
   usePathname: () => '/office/schedules',
 }))
+
+// Fixed once at import, the way /office/holidays's test does — every resolved-calendar
+// test below keys its mocked data off this real "today" instead of a hardcoded date, so
+// the test doesn't drift out of sync with `currentMonth`'s fallback when no `?month=` is
+// in the (always-empty, in these tests) search params.
+const THIS_MONTH = currentMonth(OFFICE_TIME_ZONE)
 
 import SchedulesPage from './page'
 
@@ -29,6 +38,7 @@ afterEach(() => {
   clearToken()
   push.mockClear()
   replace.mockClear()
+  searchParams = new URLSearchParams()
 })
 
 const REST_DAY = { is_rest: true, start_minute: null, end_minute: null, break_minutes: null }
@@ -106,10 +116,16 @@ function stubApi(options: {
   assignmentsByOffice?: Record<string, ScheduleAssignment[]>
   onCreateAssignment?: (body: unknown) => { status: number; body: unknown }
   onDeleteAssignment?: (id: string) => { status: number; body: unknown }
+  resolvedByEmployeeMonth?: Record<string, ResolvedMonth>
+  overridesByEmployeeMonth?: Record<string, ScheduleOverride[]>
+  onCreateOverride?: (body: unknown) => { status: number; body: unknown }
+  onUpdateOverride?: (id: string, body: unknown) => { status: number; body: unknown }
 }): ReturnType<typeof vi.fn> {
   const templatesByOffice = options.templatesByOffice ?? {}
   const employees = options.employees ?? []
   const assignmentsByOffice = options.assignmentsByOffice ?? {}
+  const resolvedByEmployeeMonth = options.resolvedByEmployeeMonth ?? {}
+  const overridesByEmployeeMonth = options.overridesByEmployeeMonth ?? {}
 
   const fn = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
@@ -179,6 +195,82 @@ function stubApi(options: {
         status: outcome.status,
         json: async () => outcome.body,
       }
+    }
+
+    if (url.startsWith('/api/v1/office/schedule/resolved?') && method === 'GET') {
+      const parsed = new URL(url, 'http://x')
+      const employeeParam = parsed.searchParams.get('employee') ?? ''
+      const month = parsed.searchParams.get('month') ?? ''
+      const resolved = resolvedByEmployeeMonth[`${employeeParam}:${month}`]
+
+      if (resolved === undefined) {
+        // No fixture for this employee/month — the same "resolver can't produce a
+        // schedule" shape the backend returns for an office with no default template,
+        // so a test that never seeds resolvedByEmployeeMonth exercises the 422 path
+        // instead of silently 404ing or throwing "Unhandled fetch."
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({
+            error: {
+              code: 'office_has_no_default_template',
+              message: "This employee's office has no default shift template, so their schedule can't be resolved.",
+              details: {},
+            },
+          }),
+        }
+      }
+
+      return { ok: true, status: 200, json: async () => ({ data: resolved }) }
+    }
+
+    if (url.startsWith('/api/v1/office/schedule-overrides?') && method === 'GET') {
+      const parsed = new URL(url, 'http://x')
+      const employeeParam = parsed.searchParams.get('employee') ?? ''
+      const month = parsed.searchParams.get('month') ?? ''
+      const data = overridesByEmployeeMonth[`${employeeParam}:${month}`] ?? []
+      return { ok: true, status: 200, json: async () => ({ data }) }
+    }
+
+    if (url === '/api/v1/office/schedule-overrides' && method === 'POST') {
+      const body: unknown = JSON.parse(String(init?.body ?? '{}'))
+      const outcome = options.onCreateOverride?.(body) ?? {
+        status: 200,
+        body: {
+          data: {
+            id: 'ov1',
+            employee_id: 'e1',
+            date: `${THIS_MONTH}-01`,
+            is_rest: true,
+            start_minute: null,
+            end_minute: null,
+            break_minutes: null,
+            note: null,
+          },
+        },
+      }
+      return { ok: outcome.status >= 200 && outcome.status < 300, status: outcome.status, json: async () => outcome.body }
+    }
+
+    if (url.startsWith('/api/v1/office/schedule-overrides/') && method === 'PATCH') {
+      const id = url.split('/').at(-1) ?? ''
+      const body: unknown = JSON.parse(String(init?.body ?? '{}'))
+      const outcome = options.onUpdateOverride?.(id, body) ?? {
+        status: 200,
+        body: {
+          data: {
+            id,
+            employee_id: 'e1',
+            date: `${THIS_MONTH}-01`,
+            is_rest: true,
+            start_minute: null,
+            end_minute: null,
+            break_minutes: null,
+            note: null,
+          },
+        },
+      }
+      return { ok: outcome.status >= 200 && outcome.status < 300, status: outcome.status, json: async () => outcome.body }
     }
 
     throw new Error(`Unhandled fetch in test: ${method} ${url}`)
@@ -562,5 +654,160 @@ describe('/office/schedules — assign a template', () => {
     ).toBeInTheDocument()
     // The dialog stays open — the failed create never closed it.
     expect(screen.getByRole('dialog', { name: 'Assign template' })).toBeInTheDocument()
+  })
+})
+
+function resolvedMonth(days: Record<string, Partial<ResolvedMonth[string]>>): ResolvedMonth {
+  const month: ResolvedMonth = {}
+  for (const [date, overrides] of Object.entries(days)) {
+    month[date] = {
+      is_rest: false,
+      start_minute: 480,
+      end_minute: 1080,
+      break_minutes: 60,
+      scheduled_minutes: 540,
+      source: 'office_default',
+      ...overrides,
+    }
+  }
+  return month
+}
+
+describe('/office/schedules — resolved calendar', () => {
+  it('picking an employee renders the resolved calendar with rest days and working hours', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      resolvedByEmployeeMonth: {
+        [`e1:${THIS_MONTH}`]: resolvedMonth({
+          [`${THIS_MONTH}-01`]: { is_rest: true, start_minute: null, end_minute: null, break_minutes: null, scheduled_minutes: 0 },
+          [`${THIS_MONTH}-02`]: {},
+        }),
+      },
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByLabelText('Show schedule for'))
+    fireEvent.click(await screen.findByRole('option', { name: 'E-001' }))
+
+    expect(await screen.findByText('Rest')).toBeInTheDocument()
+    expect(screen.getByText('08:00–18:00')).toBeInTheDocument()
+  })
+
+  it('clicking a day opens the override Dialog', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      resolvedByEmployeeMonth: {
+        [`e1:${THIS_MONTH}`]: resolvedMonth({ [`${THIS_MONTH}-01`]: {} }),
+      },
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByLabelText('Show schedule for'))
+    fireEvent.click(await screen.findByRole('option', { name: 'E-001' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: `Edit schedule for ${THIS_MONTH}-01` }))
+
+    expect(await screen.findByRole('dialog', { name: 'Edit schedule' })).toBeInTheDocument()
+  })
+
+  it('submitting a rest override calls api.scheduleOverrides.create and the resolved query refetches', async () => {
+    const fetchMock = stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      resolvedByEmployeeMonth: {
+        [`e1:${THIS_MONTH}`]: resolvedMonth({ [`${THIS_MONTH}-01`]: {} }),
+      },
+      onCreateOverride: (body) => ({
+        status: 200,
+        body: {
+          data: {
+            id: 'ov1',
+            note: null,
+            ...(body as object),
+          },
+        },
+      }),
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByLabelText('Show schedule for'))
+    fireEvent.click(await screen.findByRole('option', { name: 'E-001' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: `Edit schedule for ${THIS_MONTH}-01` }))
+    await screen.findByRole('dialog', { name: 'Edit schedule' })
+
+    fireEvent.click(screen.getByLabelText('Override rest day'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save override' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          (call) => call[0] === '/api/v1/office/schedule-overrides' && (call[1] as RequestInit)?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+
+    const createCall = fetchMock.mock.calls.find(
+      (call) => call[0] === '/api/v1/office/schedule-overrides' && (call[1] as RequestInit)?.method === 'POST',
+    )!
+    const body = JSON.parse(String((createCall[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body).toEqual({
+      employee_id: 'e1',
+      date: `${THIS_MONTH}-01`,
+      is_rest: true,
+      start_minute: null,
+      end_minute: null,
+      break_minutes: null,
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    // The resolved calendar refetches after the override — the double invalidation in
+    // useScheduleOverrides.ts fires a second GET for the same employee/month.
+    await waitFor(() => {
+      const resolvedCalls = fetchMock.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].startsWith('/api/v1/office/schedule/resolved?'),
+      )
+      expect(resolvedCalls.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
+  it('surfaces a resolver 422 office_has_no_default_template error via InlineNotification instead of crashing', async () => {
+    stubApi({
+      hrOffices: ['o1'],
+      templatesByOffice: { o1: [template()] },
+      employees: [employee()],
+      // No resolvedByEmployeeMonth fixture — stubApi's default GET /office/schedule/resolved
+      // response is the 422 this test exercises.
+    })
+
+    renderPage()
+
+    await screen.findByText('No assignments yet')
+
+    fireEvent.click(screen.getByLabelText('Show schedule for'))
+    fireEvent.click(await screen.findByRole('option', { name: 'E-001' }))
+
+    expect(
+      await screen.findByText(
+        "This employee's office has no default shift template, so their schedule can't be resolved.",
+      ),
+    ).toBeInTheDocument()
   })
 })

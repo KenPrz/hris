@@ -16,7 +16,19 @@
  * `ScheduleAssignmentCreateInput`); the UI seam for a target-type toggle is left as a
  * comment on `AssignmentForm` below, to add once that endpoint exists.
  *
- * Deliberately out of scope here (later tasks): the resolved-calendar view.
+ * Extended again in M4b's Task 14 with a RESOLVED CALENDAR region: pick an employee, see
+ * `ScheduleResolver`'s output for a month via `useResolvedMonth` (rest days, working
+ * hours, and which precedence tier produced them — `ResolvedDayCell`), and click a day to
+ * open a single-day override editor. That editor reuses `DayShapeFields` — the
+ * is_rest/hours/break/crosses-midnight fields extracted out of `WeekEditor`'s per-row
+ * internals so the weekly template editor and the single-day override editor share one
+ * implementation of the crosses-midnight math instead of two. Submitting calls
+ * `useCreateScheduleOverride` (no existing override for that date) or
+ * `useUpdateScheduleOverride` (one already exists) — both invalidate the overrides AND
+ * resolved query keys (see `useScheduleOverrides.ts`), so the calendar reflects the edit
+ * without a manual refetch. An employee whose office has no default template can't be
+ * resolved (`office_has_no_default_template`, 422) — surfaced via InlineNotification, not
+ * a crash.
  *
  * The office-default Select has one real gap worth naming: the API has no GET for an
  * office's current `default_shift_template_id` (`PATCH /office/default-template` is
@@ -30,7 +42,12 @@
 
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
+import type { DayShape } from '@/components/domain/DayShapeFields'
+import { DayShapeFields } from '@/components/domain/DayShapeFields'
+import { MonthCalendar } from '@/components/domain/MonthCalendar'
+import { ResolvedDayCell } from '@/components/domain/ResolvedDayCell'
 import { WeekEditor } from '@/components/domain/WeekEditor'
 import { AppShell } from '@/components/AppShell'
 import { EmptyState } from '@/components/EmptyState'
@@ -42,13 +59,21 @@ import { Select } from '@/components/ui/Select'
 import type { SelectOption } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { TextInput } from '@/components/ui/TextInput'
-import type { ScheduleAssignment, ShiftDay, ShiftTemplate, Weekday } from '@/lib/api'
+import type { ResolvedDay, ScheduleAssignment, ShiftDay, ShiftTemplate, Weekday } from '@/lib/api'
 import { ApiError } from '@/lib/api'
+import { addMonths, currentMonth, monthLabel } from '@/lib/date'
+import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import {
   useCreateScheduleAssignment,
   useDeleteScheduleAssignment,
   useScheduleAssignments,
 } from '@/hooks/useScheduleAssignments'
+import {
+  useCreateScheduleOverride,
+  useScheduleOverrides,
+  useUpdateScheduleOverride,
+} from '@/hooks/useScheduleOverrides'
+import { useResolvedMonth } from '@/hooks/useResolvedMonth'
 import {
   useCreateShiftTemplate,
   useDeleteShiftTemplate,
@@ -58,6 +83,15 @@ import {
 } from '@/hooks/useShiftTemplates'
 import { useEmployees } from '@/hooks/useEmployees'
 import { useSession } from '@/hooks/useSession'
+
+// Month 01–12 only, same guard as /office/holidays and /me/attendance — an impossible
+// `?month=` falls back to the current month instead of rendering "undefined 2026" over an
+// empty grid.
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
+
+function parseViewedMonth(raw: string | null): string {
+  return raw !== null && MONTH_PATTERN.test(raw) ? raw : currentMonth(OFFICE_TIME_ZONE)
+}
 
 // Mon..Fri working 08:00-18:00 with an hour's break, Sat/Sun rest — a plain, unsurprising
 // starting point every admin edits from, matching WeekEditor's own 0=Mon..6=Sun convention.
@@ -217,6 +251,83 @@ function AssignmentForm({
   )
 }
 
+// What a newly-opened override dialog starts from when the clicked date has no resolved
+// shape to seed from (should not happen in practice — every date in the loaded month
+// resolves to something — but a plain working day is the unsurprising fallback).
+const DEFAULT_OVERRIDE_SHAPE: DayShape = {
+  is_rest: false,
+  start_minute: 480,
+  end_minute: 1080,
+  break_minutes: 60,
+}
+
+function shapeFromResolved(resolved: ResolvedDay | undefined): DayShape {
+  if (resolved === undefined) return DEFAULT_OVERRIDE_SHAPE
+  return {
+    is_rest: resolved.is_rest,
+    start_minute: resolved.start_minute,
+    end_minute: resolved.end_minute,
+    break_minutes: resolved.break_minutes,
+  }
+}
+
+type OverrideDialogState = { mode: 'closed' } | { mode: 'open'; date: string }
+
+interface OverrideFormProps {
+  date: string
+  initialShape: DayShape
+  submitting: boolean
+  submitError: string | null
+  onCancel: () => void
+  onSubmit: (shape: DayShape) => void
+}
+
+/** Owns its own day-shape state — mounted fresh (via a `key` on the caller) every time the
+ * dialog opens on a different date, so switching days never leaks the previous draft into
+ * the new one. Reuses `DayShapeFields` — the same rest/hours/break/crosses-midnight fields
+ * `WeekEditor` edits per weekday, here editing a single override date instead of a whole
+ * week. */
+function OverrideForm({ date, initialShape, submitting, submitError, onCancel, onSubmit }: OverrideFormProps) {
+  const [shape, setShape] = useState<DayShape>(initialShape)
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    onSubmit(shape)
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: 'var(--sp-md)' }}>
+      <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
+        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+          Date
+        </span>
+        {/* Fixed by the day clicked — never a field the admin types into, same rule as
+            /office/holidays's HolidayForm. */}
+        <span style={{ font: 'var(--t-body)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>{date}</span>
+      </div>
+
+      <div className="flex items-center flex-wrap" style={{ gap: 'var(--sp-md)' }}>
+        <DayShapeFields label="Override" value={shape} onChange={setShape} />
+      </div>
+
+      {submitError !== null ? (
+        <InlineNotification kind="error" title="That didn't save.">
+          {submitError}
+        </InlineNotification>
+      ) : null}
+
+      <div className="flex" style={{ gap: 'var(--sp-sm)' }}>
+        <Button type="submit" loading={submitting} disabled={submitting}>
+          Save override
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 interface AssignmentRowProps {
   assignment: ScheduleAssignment
   employeeLabel: string
@@ -309,6 +420,9 @@ function TemplateRow({ template, isDefault, onEdit, onDelete, deleting }: Templa
 }
 
 export default function SchedulesPage() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { session } = useSession()
 
   const hrOffices = session?.hr_offices ?? []
@@ -349,6 +463,56 @@ export default function SchedulesPage() {
   const assignmentsQuery = useScheduleAssignments(officeId)
   const createAssignmentMutation = useCreateScheduleAssignment(officeId)
   const deleteAssignmentMutation = useDeleteScheduleAssignment(officeId)
+
+  // The resolved calendar's own month — independent of the templates/assignments regions
+  // above, which aren't month-scoped. Same `?month=` querystring convention as
+  // /office/holidays and /me/attendance.
+  const viewedMonth = parseViewedMonth(searchParams.get('month'))
+
+  // No fallback to "the first employee in the office" — unlike `officeId` (every admin
+  // needs SOME office picked to see anything), an unpicked employee here just means
+  // "nothing to resolve yet," which is the honest state until the admin actually chooses
+  // one. That also keeps this Select's trigger blank rather than echoing an employee_no
+  // that might collide with the Assignments list rendering the same text elsewhere.
+  const [resolvedEmployeeId, setResolvedEmployeeId] = useState<string | null>(null)
+
+  const resolvedQuery = useResolvedMonth(resolvedEmployeeId, viewedMonth)
+  const overridesQuery = useScheduleOverrides(officeId, resolvedEmployeeId, viewedMonth)
+  const createOverrideMutation = useCreateScheduleOverride(resolvedEmployeeId, viewedMonth)
+  const updateOverrideMutation = useUpdateScheduleOverride(resolvedEmployeeId, viewedMonth)
+
+  const [overrideDialogState, setOverrideDialogState] = useState<OverrideDialogState>({ mode: 'closed' })
+
+  function navigateToMonth(nextMonth: string) {
+    router.replace(`${pathname}?month=${nextMonth}`)
+  }
+
+  function closeOverrideDialog() {
+    setOverrideDialogState({ mode: 'closed' })
+  }
+
+  function handleOverrideSubmit(shape: DayShape) {
+    if (resolvedEmployeeId === null || overrideDialogState.mode === 'closed') return
+
+    const date = overrideDialogState.date
+    const existing = overridesQuery.data?.find((override) => override.date === date)
+    const shapeFields = {
+      is_rest: shape.is_rest,
+      start_minute: shape.start_minute,
+      end_minute: shape.end_minute,
+      break_minutes: shape.break_minutes,
+    }
+
+    if (existing !== undefined) {
+      updateOverrideMutation.mutate({ id: existing.id, body: shapeFields }, { onSuccess: closeOverrideDialog })
+      return
+    }
+
+    createOverrideMutation.mutate(
+      { employee_id: resolvedEmployeeId, date, ...shapeFields },
+      { onSuccess: closeOverrideDialog },
+    )
+  }
 
   function closeDialog() {
     setDialogState({ mode: 'closed' })
@@ -426,6 +590,19 @@ export default function SchedulesPage() {
     deleteAssignmentMutation.error instanceof ApiError
       ? deleteAssignmentMutation.error.message
       : 'Check your connection and try again.'
+
+  const resolvedMonth = resolvedQuery.data ?? {}
+
+  const resolvedErrorMessage =
+    resolvedQuery.error instanceof ApiError ? resolvedQuery.error.message : 'Check your connection and try again.'
+
+  const activeOverrideError = createOverrideMutation.error ?? updateOverrideMutation.error
+  const overrideErrorMessage =
+    createOverrideMutation.isError || updateOverrideMutation.isError
+      ? activeOverrideError instanceof ApiError
+        ? activeOverrideError.message
+        : 'Check your connection and try again.'
+      : null
 
   return (
     <AppShell>
@@ -550,6 +727,86 @@ export default function SchedulesPage() {
                 </InlineNotification>
               ) : null}
             </div>
+
+            <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+              <SectionHeader title="Resolved calendar" />
+
+              <Select
+                id="resolved-employee"
+                label="Show schedule for"
+                value={resolvedEmployeeId ?? ''}
+                onChange={setResolvedEmployeeId}
+                options={officeEmployees.map((employee) => ({ value: employee.id, label: employee.employee_no }))}
+              />
+
+              {resolvedEmployeeId === null ? (
+                <EmptyState title="Pick an employee">
+                  Choose an employee above to see how their schedule resolves for a month.
+                </EmptyState>
+              ) : (
+                <>
+                  <SectionHeader
+                    title={monthLabel(viewedMonth)}
+                    actions={
+                      <>
+                        <Button variant="ghost" onClick={() => navigateToMonth(addMonths(viewedMonth, -1))}>
+                          Previous month
+                        </Button>
+                        <Button variant="ghost" onClick={() => navigateToMonth(addMonths(viewedMonth, 1))}>
+                          Next month
+                        </Button>
+                      </>
+                    }
+                  />
+
+                  {resolvedQuery.isLoading ? (
+                    <Skeleton height="20rem" />
+                  ) : resolvedQuery.isError ? (
+                    <InlineNotification kind="error" title="Couldn't resolve this employee's schedule.">
+                      {resolvedErrorMessage}
+                    </InlineNotification>
+                  ) : (
+                    <MonthCalendar
+                      month={viewedMonth}
+                      timeZone={OFFICE_TIME_ZONE}
+                      renderDay={({ date, isToday, inMonth }) => (
+                        <button
+                          type="button"
+                          aria-label={`Edit schedule for ${date}`}
+                          onClick={() => setOverrideDialogState({ mode: 'open', date })}
+                          className="flex h-full w-full flex-col items-start text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
+                          style={{
+                            gap: 'var(--sp-xxs)',
+                            padding: 'var(--sp-xs)',
+                            background: isToday ? 'var(--surface-1)' : 'transparent',
+                            opacity: inMonth ? 1 : 0.4,
+                            border: 'none',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span
+                            style={{
+                              font: isToday ? 'var(--t-emphasis)' : 'var(--t-body-sm)',
+                              letterSpacing: 'var(--ls-body)',
+                              color: inMonth ? 'var(--ink)' : 'var(--ink-subtle)',
+                            }}
+                          >
+                            {Number(date.slice(8, 10))}
+                          </span>
+                          <ResolvedDayCell resolved={resolvedMonth[date]} />
+                        </button>
+                      )}
+                    />
+                  )}
+
+                  {overrideErrorMessage !== null ? (
+                    <InlineNotification kind="error" title="That override didn't save.">
+                      {overrideErrorMessage}
+                    </InlineNotification>
+                  ) : null}
+                </>
+              )}
+            </div>
           </>
         )}
 
@@ -587,6 +844,20 @@ export default function SchedulesPage() {
               onSubmit={handleAssignSubmit}
             />
           ) : null}
+        </Dialog>
+
+        <Dialog open={overrideDialogState.mode !== 'closed'} onClose={closeOverrideDialog} title="Edit schedule">
+          {overrideDialogState.mode === 'closed' ? null : (
+            <OverrideForm
+              key={overrideDialogState.date}
+              date={overrideDialogState.date}
+              initialShape={shapeFromResolved(resolvedMonth[overrideDialogState.date])}
+              submitting={createOverrideMutation.isPending || updateOverrideMutation.isPending}
+              submitError={overrideErrorMessage}
+              onCancel={closeOverrideDialog}
+              onSubmit={handleOverrideSubmit}
+            />
+          )}
         </Dialog>
       </div>
     </AppShell>
