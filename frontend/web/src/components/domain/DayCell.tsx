@@ -100,12 +100,18 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
       {visibleSpans.length > 0 ? (
         <ul className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
           {visibleSpans.map((span) => (
+            // Full-width bars, not corner text — each span fills the cell the way a
+            // calendar event does, so a day with punches reads as occupied rather than
+            // near-empty. Monochrome: a subtle fill with a left accent, no colour coding.
             <li
               key={span.start.id}
               style={{
                 font: 'var(--t-caption)',
                 letterSpacing: 'var(--ls-caption)',
-                color: 'var(--ink-muted)',
+                color: 'var(--ink)',
+                background: 'var(--surface-2)',
+                borderLeft: '2px solid var(--ink-subtle)',
+                padding: '1px var(--sp-xxs)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
