@@ -32,7 +32,9 @@ import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
 
-const MONTH_PATTERN = /^\d{4}-\d{2}$/
+// Month 01–12 only. A shape-only `\d{2}` would accept `2026-99`, which then renders
+// "undefined 2026" and an empty grid instead of falling back to the current month.
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
 
 function parseViewedMonth(raw: string | null): string {
   return raw !== null && MONTH_PATTERN.test(raw) ? raw : currentMonth(OFFICE_TIME_ZONE)

@@ -94,7 +94,7 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
                   color: 'var(--ink-muted)',
                 }}
               >
-                {punch.direction} {timeInZone(punch.punched_at, timeZone)}
+                {punch.direction === 'in' ? 'In' : 'Out'} {timeInZone(punch.punched_at, timeZone)}
               </span>
               {punch.verification === 'flagged' ? (
                 <Tag kind="warning">{punch.flag_reason ?? 'Flagged'}</Tag>

@@ -33,8 +33,9 @@ describe('DayCell', () => {
 
     render(<DayCell date="2026-07-20" punches={punches} timeZone="Asia/Manila" />)
 
-    expect(screen.getByText(/in.*08:02/i)).toBeInTheDocument()
-    expect(screen.getByText(/out.*17:05/i)).toBeInTheDocument()
+    // Reads as copy ("In 08:02"), not the wire enum ("in") — case-sensitive on purpose.
+    expect(screen.getByText('In 08:02')).toBeInTheDocument()
+    expect(screen.getByText('Out 17:05')).toBeInTheDocument()
   })
 
   it('treats an even but mis-ordered day (in, in, out, out) as unpaired rather than cross-matching', () => {
