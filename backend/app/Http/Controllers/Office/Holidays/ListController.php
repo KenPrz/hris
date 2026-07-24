@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Office\Holidays;
 
 use App\Domain\Scope\OfficeScope;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use App\Http\Requests\ListHolidaysRequest;
 use App\Http\Resources\HolidayResource;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -15,7 +16,8 @@ final class ListController
     {
         // 404, not 403: an out-of-scope office and a nonexistent one must be
         // indistinguishable to the caller (the 404-not-403 discipline).
-        $office = OfficeScope::administeredOrFail($request->user(), $request->string('office')->toString());
+        $office = OfficeScope::administered($request->user(), $request->string('office')->toString())
+            ?? throw new NotFoundHttpException;
 
         $holidays = $office->holidays()
             ->whereYear('date', $request->query('year'))

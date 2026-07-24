@@ -176,3 +176,19 @@ it('400s a malformed office_id rather than 500ing on the uuid cast', function ()
         ->assertStatus(400)
         ->assertJsonPath('error.code', 'validation_failed');
 });
+
+it('copies the same month/day across a leap boundary, never a +365-day shift', function (): void {
+    // 2023 → 2024 crosses Feb 29. A naive addDays(365) would land 2023-03-15 on 2024-03-14;
+    // the same month/day rule keeps it on 2024-03-15. Only a leap-crossing year pair can tell
+    // the two apart, so this is the case that actually pins the "never +365" property.
+    $manila = holidayOffice();
+    $hrUser = hrAdminOf($manila);
+    Holiday::factory()->for($manila, 'office')->create(['date' => '2023-03-15', 'day_type' => DayType::SpecialNonWorking, 'name' => 'Founding Day']);
+
+    Sanctum::actingAs($hrUser);
+
+    $this->postJson('/api/v1/office/holidays/clone', [
+        'office_id' => $manila->id, 'from_year' => 2023, 'to_year' => 2024,
+    ])->assertCreated()
+        ->assertJsonPath('data.0.date', '2024-03-15');   // same month/day, not 03-14
+});

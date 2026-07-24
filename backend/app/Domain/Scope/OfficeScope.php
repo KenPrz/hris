@@ -7,7 +7,6 @@ namespace App\Domain\Scope;
 use App\Models\Office;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * The one definition of "which offices may this user administer" — the M4 config boundary,
@@ -34,33 +33,23 @@ final class OfficeScope
     }
 
     /**
-     * Resolves an office id to the Office the caller administers, or 404s. Shared by every
-     * endpoint that takes an office id on the request (list/create/clone) — an out-of-scope
-     * office and a nonexistent one must be indistinguishable to the caller (404-not-403), so
-     * this is the one place that throws for both.
+     * The office the caller administers with this id, or null. Pure — no HTTP. Shared by
+     * every endpoint that takes an office id on the request (list/create/clone); the
+     * controller turns a null into the 404 (an out-of-scope office and a nonexistent one
+     * are indistinguishable to the caller — the 404-not-403 discipline). Domain stays
+     * HTTP-agnostic so this is equally callable from a command, a seeder, or a queued job.
      */
-    public static function administeredOrFail(User $user, ?string $officeId): Office
+    public static function administered(User $user, ?string $officeId): ?Office
     {
-        $office = self::administeredBy($user)->find($officeId);
-
-        if ($office === null) {
-            throw new NotFoundHttpException;
-        }
-
-        return $office;
+        return self::administeredBy($user)->find($officeId);
     }
 
     /**
-     * Same 404-not-403 discipline as administeredOrFail(), for the route-model-bound
-     * endpoints (update/delete) that already have the record and only need to confirm the
-     * caller administers its office.
+     * Whether the caller administers this office — for the route-model-bound endpoints
+     * (update/delete) that already have the record. Pure; the controller throws the 404.
      */
-    public static function assertAdministers(User $user, string $officeId): void
+    public static function administers(User $user, string $officeId): bool
     {
-        $administers = self::administeredBy($user)->whereKey($officeId)->exists();
-
-        if (! $administers) {
-            throw new NotFoundHttpException;
-        }
+        return self::administeredBy($user)->whereKey($officeId)->exists();
     }
 }

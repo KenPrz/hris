@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Office\Holidays;
 use App\Actions\Holidays\CloneHolidays;
 use App\Actions\Holidays\CloneHolidaysInput;
 use App\Domain\Scope\OfficeScope;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use App\Http\Requests\CloneHolidaysRequest;
 use App\Http\Resources\HolidayResource;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +20,8 @@ final class CloneController
         // 404, not 403: an out-of-scope office and a nonexistent one must be
         // indistinguishable to the caller (the 404-not-403 discipline). This is why
         // CloneHolidaysRequest validates office_id as shape only (uuid), never `exists`.
-        $office = OfficeScope::administeredOrFail($request->user(), $request->string('office_id')->toString());
+        $office = OfficeScope::administered($request->user(), $request->string('office_id')->toString())
+            ?? throw new NotFoundHttpException;
 
         $created = $action->execute(new CloneHolidaysInput(
             office: $office,

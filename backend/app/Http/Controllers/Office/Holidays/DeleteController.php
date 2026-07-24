@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Office\Holidays;
 
 use App\Actions\Holidays\DeleteHoliday;
 use App\Domain\Scope\OfficeScope;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use App\Models\Holiday;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -17,7 +18,9 @@ final class DeleteController
         // 404, not 403: same office-scope discipline as UpdateController — a holiday
         // whose office the caller doesn't administer 404s exactly like a nonexistent
         // {holiday}.
-        OfficeScope::assertAdministers($request->user(), $holiday->office_id);
+        if (! OfficeScope::administers($request->user(), $holiday->office_id)) {
+            throw new NotFoundHttpException;
+        }
 
         $action->execute($holiday);
 

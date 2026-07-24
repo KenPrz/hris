@@ -8,6 +8,7 @@ use App\Actions\Holidays\UpdateHoliday;
 use App\Actions\Holidays\UpdateHolidayInput;
 use App\Domain\Pay\DayType;
 use App\Domain\Scope\OfficeScope;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use App\Http\Requests\UpdateHolidayRequest;
 use App\Http\Resources\HolidayResource;
 use App\Models\Holiday;
@@ -21,7 +22,9 @@ final class UpdateController
         // indistinguishable from a nonexistent {holiday} (which route-binding already
         // 404s on its own). The scope check lives here, not in the request, so both
         // paths land in the same NotFoundHttpException.
-        OfficeScope::assertAdministers($request->user(), $holiday->office_id);
+        if (! OfficeScope::administers($request->user(), $holiday->office_id)) {
+            throw new NotFoundHttpException;
+        }
 
         $updated = $action->execute($holiday, new UpdateHolidayInput(
             dayType: DayType::from($request->string('day_type')->toString()),
