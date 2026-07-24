@@ -25,6 +25,7 @@ import { api } from '@/lib/api'
 import { currentMonth } from '@/lib/date'
 import { keys } from '@/lib/keys'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
+import { uuidV4 } from '@/lib/uuid'
 
 export function usePunch() {
   const queryClient = useQueryClient()
@@ -35,7 +36,9 @@ export function usePunch() {
     retryDelay: 0,
     mutationFn: (direction) => {
       if (idempotencyKeyRef.current === null) {
-        idempotencyKeyRef.current = crypto.randomUUID()
+        // uuidV4, not crypto.randomUUID directly — the latter is undefined on a plain-HTTP
+        // deployment, which would break every punch. See lib/uuid.
+        idempotencyKeyRef.current = uuidV4()
       }
       return api.punch(direction, idempotencyKeyRef.current)
     },
