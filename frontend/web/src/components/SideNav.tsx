@@ -8,6 +8,7 @@
  * does not see a "Team" heading that dead-ends at nothing.
  */
 
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import type { Session } from '@/lib/api'
@@ -71,9 +72,12 @@ export function navEntriesFor(session: Session | null): NavGroup[] {
   return groups
 }
 
-/** Real `<a>` tags, not `next/link` — every group but Me has zero routes today, and the
- * ones that do exist need nothing beyond a plain href; keeping this dependency-free also
- * keeps the component trivially renderable in isolation. */
+/**
+ * Navigates with `next/link`, not bare anchors. A plain `<a>` inside the `(app)` route
+ * tree triggers a full document navigation, which remounts Providers, builds a fresh
+ * QueryClient, and re-fetches `GET /me` on every nav click — defeating the single-session
+ * -fetch guarantee the session layer exists to provide.
+ */
 export function SideNav() {
   const { session } = useSession()
   const pathname = usePathname()
@@ -98,7 +102,8 @@ export function SideNav() {
               color: 'var(--ink-subtle)',
               padding: '0 var(--sp-md)',
               marginBottom: 'var(--sp-xs)',
-              textTransform: 'uppercase',
+              // Sentence case, deliberately: DESIGN.md — "Carbon resists all-caps
+              // tracking; stick to sentence case for eyebrows and section labels."
             }}
           >
             {group.label}
@@ -109,7 +114,7 @@ export function SideNav() {
 
               return (
                 <li key={item.href}>
-                  <a
+                  <Link
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
                     className="block focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
@@ -125,7 +130,7 @@ export function SideNav() {
                     }}
                   >
                     {item.label}
-                  </a>
+                  </Link>
                 </li>
               )
             })}

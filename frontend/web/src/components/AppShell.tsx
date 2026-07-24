@@ -42,7 +42,6 @@ export function AppShell({ children }: AppShellProps) {
   // No office-name lookup exists yet (Session only carries `current_office_id`, an id, not
   // a name) — showing the raw id is honest about what M3.5 actually has, rather than
   // fabricating a display name.
-  const officeContext = session?.employee?.current_office_id ?? null
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -58,17 +57,12 @@ export function AppShell({ children }: AppShellProps) {
       >
         <div className="flex items-center" style={{ gap: 'var(--sp-md)' }}>
           <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)' }}>{PRODUCT_NAME}</span>
-          {officeContext ? (
-            <span
-              style={{
-                font: 'var(--t-caption)',
-                letterSpacing: 'var(--ls-caption)',
-                color: 'var(--inverse-ink-muted)',
-              }}
-            >
-              Office {officeContext}
-            </span>
-          ) : null}
+          {/*
+            Office context is intentionally absent. The session carries only
+            `current_office_id` — a uuid — and a bare uuid in the product header reads as
+            broken chrome. It returns when the session (or a lookup) carries a real office
+            name; showing nothing is better than showing an id.
+          */}
         </div>
 
         <div className="relative">
