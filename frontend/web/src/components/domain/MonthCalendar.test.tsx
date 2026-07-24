@@ -19,10 +19,10 @@ function punch(overrides: Partial<AttendanceLog> = {}): AttendanceLog {
 }
 
 describe('MonthCalendar', () => {
-  it('uses table semantics with Monday-first column headers a screen reader can navigate', () => {
+  it('uses grid semantics with Monday-first column headers a screen reader can navigate', () => {
     render(<MonthCalendar month="2026-07" days={{}} timeZone="Asia/Manila" />)
 
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getByRole('grid')).toBeInTheDocument()
     const headers = screen.getAllByRole('columnheader')
     expect(headers.map((header) => header.textContent)).toEqual([
       'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
@@ -41,12 +41,12 @@ describe('MonthCalendar', () => {
     render(<MonthCalendar month="2026-07" days={{}} timeZone="Asia/Manila" />)
 
     const firstCell = screen.getByText('1')
-    const row = firstCell.closest('tr')
+    const row = firstCell.closest('[role="row"]')
     expect(row).not.toBeNull()
 
     // Monday-first columns: Mon, Tue, Wed, Thu, Fri, Sat, Sun. 2026-07-01 is a
-    // Wednesday, so it must be the 3rd <td> in its row (two leading blanks before it).
-    const cellIndex = Array.from(row!.children).indexOf(firstCell.closest('td')!)
+    // Wednesday, so it must be the 3rd cell in its row (two leading blanks before it).
+    const cellIndex = Array.from(row!.children).indexOf(firstCell.closest('[role="gridcell"]')!)
     expect(cellIndex).toBe(2)
   })
 
@@ -75,7 +75,7 @@ describe('MonthCalendar', () => {
     expect(punchTime).toBeInTheDocument()
 
     // It must land under day 20, not day 19.
-    const day20 = screen.getByText('20').closest('td')
+    const day20 = screen.getByText('20').closest('[role="gridcell"]')
     expect(day20).toContainElement(punchTime)
   })
 })
