@@ -82,7 +82,31 @@ describe('bearer token attachment', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
-    expect(headers.Authorization).toBeUndefined()
+    // Absence, not an undefined-valued key — a regression that set the header to
+    // `undefined` would still ship an empty Authorization to the server.
+    expect('Authorization' in headers).toBe(false)
+  })
+
+  it('carries the token alongside caller headers without clobbering them', async () => {
+    // punch() supplies Content-Type and Idempotency-Key; auth injection must add to
+    // those, never replace the header object. The backend rejects a punch with no
+    // Idempotency-Key, so a clobber here would be a 4xx nobody could explain.
+    setToken('sekrit')
+    const fetchMock = stubFetch(201, {
+      data: {
+        id: 'p1', employee_id: 'e1', office_id: 'o1',
+        punched_at: '2026-07-20T08:00:00+08:00',
+        direction: 'in', source: 'web', verification: 'verified', flag_reason: null,
+      },
+    })
+
+    await api.punch('in', 'key-123')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+    expect(headers.Authorization).toBe('Bearer sekrit')
+    expect(headers['Idempotency-Key']).toBe('key-123')
+    expect(headers['Content-Type']).toBe('application/json')
   })
 })
 

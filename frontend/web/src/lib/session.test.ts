@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearToken, emitLogout, getToken, onLogout, setToken } from './session'
 
 afterEach(() => {
-  clearToken()
+  // Restore `window` before clearing: a test that stubs window away and then sets a
+  // token would otherwise leave it behind, leaking into the next case.
   vi.unstubAllGlobals()
+  clearToken()
 })
 
 describe('token storage', () => {
