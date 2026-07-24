@@ -150,9 +150,13 @@ describe('/login — network failure', () => {
     render(<LoginPage />)
     fillAndSubmit('a@b.com', 'correct-horse')
 
-    await waitFor(() => {
-      expect(screen.queryByText("That email and password don't match.")).not.toBeInTheDocument()
-    })
+    // Assert the message is actually rendered, not merely that the credentials copy is
+    // absent — a regression that swallowed the error into a blank screen would satisfy
+    // an absence-only assertion.
+    expect(
+      await screen.findByText('Cannot reach the server. Check your connection and try again.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("That email and password don't match.")).not.toBeInTheDocument()
     expect(getToken()).toBeNull()
   })
 })
