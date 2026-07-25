@@ -371,7 +371,7 @@ describe('/me/attendance — the computed layer', () => {
     }
   }
 
-  it('shows the computed worked total, the OT badge, and the breakdown ALONGSIDE the still-visible raw punch times', async () => {
+  it('shows the compact worked total and OT badge IN THE CELL, alongside the still-visible raw punch times', async () => {
     searchParams = new URLSearchParams('month=2026-05')
     stubApi({
       attendanceByMonth: {
@@ -393,13 +393,19 @@ describe('/me/attendance — the computed layer', () => {
     // The raw ledger: DayCell's punch-span text, unmodified.
     expect(await screen.findByText('08:00–16:00')).toBeInTheDocument()
 
-    // The computed layer, on the same calendar cell: the worked total, the OT badge
-    // (an overtime_* line exists), and the priced breakdown lines — all additive to the
-    // raw punch span above, never a replacement for it.
-    expect(screen.getByText('9h')).toBeInTheDocument()
+    // The compact computed indicator, on the same calendar cell: the worked total and the
+    // OT badge (an overtime_* line exists) — additive to the raw punch span above, never a
+    // replacement for it. The full breakdown (line items) does NOT render in the cell.
+    const total = screen.getByText('9h')
+    expect(total).toBeInTheDocument()
     expect(screen.getByText('OT')).toBeInTheDocument()
-    expect(screen.getByText('Regular (day)')).toBeInTheDocument()
-    expect(screen.getByText('Overtime (day)')).toBeInTheDocument()
+    expect(screen.queryByText('Regular (day)')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overtime (day)')).not.toBeInTheDocument()
+
+    // Both the raw span and the compact indicator live inside the SAME gridcell.
+    const cell = total.closest('[role="gridcell"]')
+    expect(cell).not.toBeNull()
+    expect(cell).toHaveTextContent('08:00–16:00')
 
     // Both coexist for the same day — the honest ledger stays visible.
     expect(screen.getByText('08:00–16:00')).toBeInTheDocument()
@@ -447,5 +453,67 @@ describe('/me/attendance — the computed layer', () => {
     expect(await screen.findByText('08:00–17:00')).toBeInTheDocument()
     expect(screen.queryByText('OT')).not.toBeInTheDocument()
     expect(screen.queryByText('incomplete')).not.toBeInTheDocument()
+  })
+
+  it('shows a hint in the day-detail panel until a day is selected', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    await screen.findByText('08:00–16:00')
+
+    expect(screen.getByText(/select a day above/i)).toBeInTheDocument()
+    // Nothing from the full breakdown has rendered anywhere yet.
+    expect(screen.queryByText('Regular (day)')).not.toBeInTheDocument()
+  })
+
+  it('clicking a day with a computed summary shows the full breakdown in the day-detail panel, OUTSIDE the gridcell, alongside that day\'s raw punch times', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    await screen.findByText('08:00–16:00')
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for 2026-05-10' }))
+
+    // The full breakdown — line items DaySummaryDetail alone renders — now shows.
+    const regularLine = await screen.findByText('Regular (day)')
+    const overtimeLine = screen.getByText('Overtime (day)')
+
+    // STRUCTURAL assertion: the breakdown is rendered OUTSIDE any gridcell, so a future
+    // regression that stuffs it back into the clipped calendar cell is caught even though
+    // jsdom can't see the visual clipping itself.
+    expect(regularLine.closest('[role="gridcell"]')).toBeNull()
+    expect(overtimeLine.closest('[role="gridcell"]')).toBeNull()
+
+    // The day-detail panel also shows that day's raw punch times, alongside the breakdown
+    // — the ledger stays visible even off the calendar grid.
+    expect(screen.getByText(/Clock in at 08:00/)).toBeInTheDocument()
+    expect(screen.getByText(/Clock out at 16:00/)).toBeInTheDocument()
+
+    // And the raw ledger in the calendar cell itself is unaffected by the selection.
+    expect(screen.getByText('08:00–16:00')).toBeInTheDocument()
   })
 })

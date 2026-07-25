@@ -52,11 +52,13 @@ function dayStatus(sortedPunches: AttendanceLog[], isToday: boolean): DayStatus 
 const MAX_VISIBLE_SPANS = 3
 
 /**
- * The month ledger's atomic unit — a fixed-height cell so the grid stays even whether a
- * day has one punch or eight. Each span reads as `08:00–17:00` (both real times, in the
- * office's zone), not a rolled-up number; a busy day shows the first few and "+N more".
- * The day's state (total, in-progress, or a warning) pins to the bottom so it lands in
- * the same place in every cell.
+ * The month ledger's atomic unit — reads as `08:00–17:00` (both real times, in the
+ * office's zone) per span, not a rolled-up number; a busy day shows the first few and
+ * "+N more". Sized to its own content (no forced height) rather than stretching to fill
+ * its grid cell: `MonthCalendar`'s gridcell already owns the uniform height and clips
+ * overflow, and leaving `DayCell` unstretched is what lets a sibling — the compact
+ * computed-layer indicator on `/me/attendance` — share the same cell instead of being
+ * pushed past the clip boundary by a `DayCell` that claimed 100% of it alone.
  */
 export function DayCell({ date, punches, timeZone, isToday = false, inMonth = true }: DayCellProps) {
   const dayNumber = Number(date.slice(8, 10))
@@ -81,10 +83,9 @@ export function DayCell({ date, punches, timeZone, isToday = false, inMonth = tr
       style={{
         gap: 'var(--sp-xxs)',
         padding: 'var(--sp-xs)',
-        // Fills its grid cell, which owns the uniform height (see MonthCalendar). The
-        // cell clips overflow, so a busy day can never push its own cell taller than its
-        // neighbours — the asymmetry the table layout used to produce.
-        height: '100%',
+        // No forced height here — see the component doc comment above. `overflow: hidden`
+        // stays as a defensive clip for a pathologically busy day; in the ordinary case
+        // this box is exactly as tall as its own content.
         boxSizing: 'border-box',
         overflow: 'hidden',
         background: isToday ? 'var(--surface-1)' : 'transparent',

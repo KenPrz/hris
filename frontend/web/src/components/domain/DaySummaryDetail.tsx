@@ -22,11 +22,13 @@ const LINE_LABEL: Record<SummaryLineKind, string> = {
 // a premium (night differential, overtime, holiday) rather than a straight hour.
 const PREMIUM_THRESHOLD_BP = 10_000
 
-function hasOvertimeLine(lines: DailySummaryLine[]): boolean {
+// Exported so `DaySummaryIndicator` — the compact in-cell footprint of this same computed
+// layer — can badge a day identically without re-deriving the rule twice.
+export function hasOvertimeLine(lines: DailySummaryLine[]): boolean {
   return lines.some((line) => line.kind === 'overtime_day' || line.kind === 'overtime_night')
 }
 
-function hasPremiumLine(lines: DailySummaryLine[]): boolean {
+export function hasPremiumLine(lines: DailySummaryLine[]): boolean {
   return lines.some((line) => line.applied_bp > PREMIUM_THRESHOLD_BP)
 }
 
