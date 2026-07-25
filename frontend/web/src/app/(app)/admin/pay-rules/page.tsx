@@ -469,6 +469,10 @@ export default function PayRulesPage() {
 
   function closeDialog(): void {
     setDialogOpen(false)
+    // Clear any 422/409 from the last attempt — TanStack keeps mutation.error until the
+    // next mutate(), so without this the stale violation banner re-appears when the dialog
+    // is cancelled and reopened.
+    createMutation.reset()
   }
 
   function handleSubmit(input: PayRuleCreateInput): void {

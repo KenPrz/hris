@@ -239,6 +239,34 @@ describe('/admin/pay-rules — new version', () => {
     expect(screen.getByLabelText('Night differential')).toHaveAttribute('aria-invalid', 'true')
   })
 
+  it('clears a prior submission error when the dialog is cancelled and reopened', async () => {
+    stubApi({
+      onCreate: () => ({
+        status: 422,
+        code: 'pay_rate_below_floor',
+        message: 'One or more proposed rates fall below the statutory floor.',
+        details: { violations: [{ multiplier: 'night_diff', proposed_bp: 10000, floor_bp: 11000 }] },
+      }),
+    })
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New version' }))
+    await screen.findByRole('dialog')
+    fireEvent.change(screen.getByLabelText('Effective from'), { target: { value: '2026-08-01' } })
+    fireEvent.change(screen.getByLabelText('Night differential'), { target: { value: '100' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create version' }))
+
+    expect(await screen.findByText(/below the statutory floor/i)).toBeInTheDocument()
+
+    // Cancel, then reopen — the stale violation banner must be gone (createMutation.reset()).
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New version' }))
+    await screen.findByRole('dialog')
+
+    expect(screen.queryByText(/below the statutory floor/i)).not.toBeInTheDocument()
+  })
+
   it('a 409 surfaces the duplicate-date message', async () => {
     stubApi({
       onCreate: () => ({
