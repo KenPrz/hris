@@ -161,7 +161,7 @@ echo "6. re-cloning 2025->2026: created=$(echo "$RECLONE" | jq -c '.data') (expe
 
 # 7. The activity log names Carmen as the causer of the original create (step 2), with the
 #    holiday itself as the uuid-morph subject. No HTTP endpoint reads the log yet (M4a
-#    doesn't build an audit-log viewer — that's M7), so this reads `activity_log` directly,
+#    doesn't build an audit-log viewer — that's M8), so this reads `activity_log` directly,
 #    the same way scripts/e2e-adjustments.sh reads `attendance_annulments` directly.
 ACTIVITY_ROW=$(docker compose -f "$REPO_ROOT/compose.dev.yml" exec -T db \
   psql -U hris -d hris -tAc \

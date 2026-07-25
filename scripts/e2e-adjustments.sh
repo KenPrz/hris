@@ -20,7 +20,7 @@
 # One thing this script deliberately does NOT assert via HTTP: that the voided punch
 # "disappears" from GET /me/attendance. It does not, on purpose — `/me/attendance` is the
 # raw, append-only ledger (docs/02-data-model.md), and an annulled punch still happened and
-# is still shown there; only the M5 compute engine (not yet built) reads the *effective*
+# is still shown there; only the M5 compute engine (built in M5a) reads the *effective*
 # ledger (attendance_logs minus attendance_annulments). This script proves the void the way
 # the milestone actually exposes it today: the approval succeeds, and the annulment row is
 # there in the database. See docs/02-data-model.md's "Requests, adjustments, and the
@@ -149,7 +149,7 @@ echo "10. raw /me/attendance still lists the annulled punch: count=$STILL_THERE 
 ANNULMENT_COUNT=$(docker compose -f "$REPO_ROOT/compose.dev.yml" exec -T db \
   psql -U hris -d hris -tAc "select count(*) from attendance_annulments where attendance_log_id = '$TARGET_LOG_ID'")
 echo "    attendance_annulments rows for that punch: $(echo "$ANNULMENT_COUNT" | tr -d '[:space:]') \
-(expect 1 — this is the effective ledger dropping it, proven at the DB the M5 engine will read)"
+(expect 1 — this is the effective ledger dropping it, proven at the DB the M5 engine reads)"
 [ "$(echo "$ANNULMENT_COUNT" | tr -d '[:space:]')" = "1" ] || { echo "FAIL: no annulment row was written for the voided punch"; exit 1; }
 
 # 11. Self-approval is refused. File one more trivial add, then have Miguel try to approve

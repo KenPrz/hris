@@ -44,10 +44,10 @@ them all:
 | --- | --- |
 | `employee.manage` | Create and edit employee records |
 | `employee.pii.edit` | Edit personally-identifiable / sensitive fields |
-| `leave.approve` | Approve a leave request (feature lands M5) |
+| `leave.approve` | Approve a leave request (feature lands M6) |
 | `schedule.manage` | Manage schedules (M4) |
 | `holiday.manage` | Manage the holiday calendar (M4) |
-| `cutoff.manage` | Open and close cutoff periods (M6) |
+| `cutoff.manage` | Open and close cutoff periods (M7) |
 
 Four of these six gate features that do not exist yet. They are seeded now anyway because
 the role catalog is the "fully configurable" surface the brief asked for, and naming a
@@ -63,7 +63,7 @@ check, not a permission check — which is why a non-admin hitting them gets `40
 Admin's actual authority in M2 is entirely scope-based: `EmployeeScope` plus
 `EmployeePolicy::view` let them view and list employees within their `hr_admin_offices`, and
 that authority exists whether or not they hold the `HR Admin` role's verbs at all. The six
-verbs become load-bearing only when M4–M6 wire an employee-edit or leave-approval endpoint
+verbs become load-bearing only when M4–M8 wire an employee-edit or leave-approval endpoint
 that names one.
 
 ### Scope — `EmployeeScope`
@@ -192,7 +192,7 @@ this honest:
    *reference*; the semantics (right ability, right query) are proven by the feature matrix,
    not the grep.
 
-The leave, schedule, holiday, and cutoff policies arrive with their features in M4–M6, built
+The leave, schedule, holiday, and cutoff policies arrive with their features in M4–M7, built
 on this same two-check shape.
 
 `EmployeeScope` lives in `app/Domain/Scope/` and is the one Domain class allowed to touch
