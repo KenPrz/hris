@@ -29,6 +29,11 @@ use Illuminate\Support\Carbon;
  * (scheduled end <= 24:00) or a rest day/no schedule collapses this to the ordinary
  * calendar-date window [00:00, 24:00].
  *
+ * The window's LOWER bound is not always date N's midnight, either: if date N-1 was a
+ * cross-midnight shift that ran into date N, date N's window starts where date N-1's left
+ * off, so consecutive night-shift windows tile instead of overlapping (see the M5b note
+ * on windowStartMinutes()).
+ *
  * Approved corrections already materialize as a new attendance_logs row (M3.6's
  * adjustment flow) — this class does not merge or reinterpret anything, it only excludes
  * rows an attendance_annulments record has voided.
@@ -41,12 +46,18 @@ final class EffectivePunches
         $timezone = $employee->currentOffice->timezone;
         $localMidnight = Carbon::parse($date, $timezone)->startOfDay();
 
-        $windowStart = $localMidnight->copy()->setTimezone('UTC');
+        $startMinute = self::windowStartMinutes($employee, $date);
+        $windowStart = $localMidnight->copy()->addMinutes($startMinute)->setTimezone('UTC');
         $windowEnd = $localMidnight->copy()->addMinutes(self::windowMinutes($employee, $date))->setTimezone('UTC');
 
+        // The start is exclusive when bounded by the previous day's window end: that exact
+        // instant was already claimed inclusively by forDate(previous date)'s own '<=' end,
+        // so counting it again here would double-claim the punch. An unbounded start (the
+        // ordinary date-local-midnight case) stays inclusive — there is no earlier window to
+        // have already claimed it.
         $logs = AttendanceLog::query()
             ->where('employee_id', $employee->id)
-            ->where('punched_at', '>=', $windowStart)
+            ->where('punched_at', $startMinute > 0 ? '>' : '>=', $windowStart)
             ->where('punched_at', '<=', $windowEnd)
             ->orderBy('punched_at')
             ->get();
@@ -69,13 +80,6 @@ final class EffectivePunches
 
     /**
      * The shift window's length in minutes: the calendar day, or the scheduled end if it runs later.
-     *
-     * M5b note: when the SAME cross-midnight shift repeats on consecutive days, day N's window
-     * (which runs past midnight) and day N+1's window overlap, so a punch in that overlap — or one
-     * timestamped exactly on a day boundary — is claimable by both dates. That does not arise for a
-     * single-occurrence night shift (M5a's scope), but whoever drives EffectivePunches across a range
-     * in M5b must resolve it (e.g. bound a day's window start at the previous day's resolved window
-     * end, or treat a consumed punch as spent).
      */
     private static function windowMinutes(Employee $employee, string $date): int
     {
@@ -86,6 +90,37 @@ final class EffectivePunches
         }
 
         return max(1440, $schedule->endMinute);
+    }
+
+    /**
+     * The shift window's start, in minutes from date N's local midnight — 0 unless date
+     * N-1 was a cross-midnight shift that ran into date N.
+     *
+     * M5b fix: when the SAME cross-midnight shift repeats on consecutive days, day N's
+     * window (which runs past midnight) used to overlap day N+1's window at [00:00, N's
+     * scheduled end - 1440], so a punch in that overlap was claimable by both dates. Fixed
+     * by resolving date N-1's schedule and, if it ran past midnight (endMinute > 1440),
+     * starting date N's window at (prevEndMinute - 1440) instead of 0 — the minutes before
+     * that point already belong to date N-1's window and were returned by
+     * forDate(dateN-1). forDate() also treats this bounded start as exclusive (see its
+     * comment), so the exact boundary instant is claimed by exactly one of the two dates.
+     * Consecutive windows now tile without overlap. A normal previous day, a rest day, or
+     * no schedule leaves the start at 0 (unchanged behavior).
+     */
+    private static function windowStartMinutes(Employee $employee, string $date): int
+    {
+        $previousDate = Carbon::parse($date)->subDay()->toDateString();
+        $previousSchedule = (new ScheduleResolver)->resolve($employee, $previousDate);
+
+        if ($previousSchedule->isRestDay || $previousSchedule->endMinute === null) {
+            return 0;
+        }
+
+        if ($previousSchedule->endMinute <= 1440) {
+            return 0;
+        }
+
+        return $previousSchedule->endMinute - 1440;
     }
 
     /**
