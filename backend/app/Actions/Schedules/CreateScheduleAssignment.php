@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\Schedules;
 
+use App\Actions\Compute\RecomputeRange;
+use App\Domain\Compute\AffectedSummaries;
+use App\Domain\Compute\RecomputeTrigger;
 use App\Exceptions\Domain\ScheduleAssignmentExists;
 use App\Models\Department;
 use App\Models\Employee;
@@ -16,6 +19,12 @@ use Illuminate\Support\Facades\DB;
  * The target's office-scope check (does the caller administer it?) and the template's
  * office match already happened in the controller — this action trusts its input and
  * only writes.
+ *
+ * After the write commits, enqueues an audited recompute (M5b Task 6) of every EXISTING
+ * summary for the target's employees — an employee target recomputes just that employee;
+ * a department target resolves its current members and merges forEmployee over each
+ * (over-inclusion is safe — RecomputeRange dedups, and a department with zero current
+ * members is a clean no-op).
  */
 final class CreateScheduleAssignment
 {
@@ -47,13 +56,33 @@ final class CreateScheduleAssignment
                 throw new ScheduleAssignmentExists($targetType, $targetId, $in->effectiveFrom);
             }
 
-            return ScheduleAssignment::query()->create([
+            $assignment = ScheduleAssignment::query()->create([
                 'shift_template_id' => $in->shiftTemplateId,
                 'employee_id' => $in->employeeId,
                 'department_id' => $in->departmentId,
                 'effective_from' => $in->effectiveFrom,
                 'created_by' => $in->actorId,
             ]);
+
+            DB::afterCommit(function () use ($in, $assignment): void {
+                $pairs = $in->employeeId !== null
+                    ? AffectedSummaries::forEmployee($in->employeeId)
+                    : Employee::query()
+                        ->where('current_department_id', $in->departmentId)
+                        ->pluck('id')
+                        ->flatMap(fn (string $employeeId): array => AffectedSummaries::forEmployee($employeeId))
+                        ->all();
+
+                RecomputeRange::dispatch(
+                    $pairs,
+                    RecomputeTrigger::ScheduleAssignment,
+                    $assignment->id,
+                    "Schedule assignment {$assignment->id} created effective {$in->effectiveFrom}",
+                    $in->actorId,
+                );
+            });
+
+            return $assignment;
         });
     }
 }
