@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Models\DailyAttendanceSummary;
+use App\Models\Employee;
 use App\Models\PayRule;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -226,6 +228,37 @@ it('deletes a version and cascades its day-rates, 204', function (): void {
 
     $this->assertDatabaseMissing('pay_rules', ['id' => $payRuleId]);
     $this->assertDatabaseMissing('pay_rule_day_rates', ['pay_rule_id' => $payRuleId]);
+});
+
+it('409s deleting a version a daily_attendance_summaries row is stamped with (pay_rule_in_use, not 500)', function (): void {
+    Sanctum::actingAs(sysAdmin());
+
+    $created = $this->postJson('/api/v1/admin/pay-rules', validPayRulePayload('2026-01-01'))->assertCreated();
+    $payRuleId = $created->json('data.id');
+
+    $employee = Employee::factory()->create();
+    DailyAttendanceSummary::query()->create([
+        'employee_id' => $employee->id,
+        'date' => '2026-08-03',
+        'day_type' => 'ordinary',
+        'is_rest_day' => false,
+        'scheduled_minutes' => 480,
+        'is_art82_exempt' => false,
+        'rule_version_id' => $payRuleId,
+        'worked_minutes' => 480,
+        'late_minutes' => 0,
+        'undertime_minutes' => 0,
+        'status' => 'computed',
+        'is_incomplete' => false,
+        'computed_at' => now(),
+    ]);
+
+    $this->deleteJson('/api/v1/admin/pay-rules/'.$payRuleId)
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'pay_rule_in_use')
+        ->assertJsonPath('error.details.pay_rule_id', $payRuleId);
+
+    $this->assertDatabaseHas('pay_rules', ['id' => $payRuleId]);
 });
 
 // --- Immutability -------------------------------------------------------------
