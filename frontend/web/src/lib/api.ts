@@ -185,6 +185,47 @@ export type HolidayUpdateInput = { day_type: DayType; name: string }
 export type HolidayCloneInput = { office_id: string; from_year: number; to_year: number }
 
 // ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/PayRuleResource.php.
+// ---------------------------------------------------------------------------
+
+// The full backend App\Domain\Pay\DayType set — all FIVE values, including `ordinary`.
+// This is deliberately wider than DayTypeTag's `DayType` (which is the holiday subset:
+// a holiday is never `ordinary`). A pay rule must price every kind of day an employee
+// can work, so `CreatePayRuleRequest` mandates exactly these five day_rates.
+export type PayRuleDayType =
+  | 'ordinary'
+  | 'special_working'
+  | 'special_non_working'
+  | 'regular_holiday'
+  | 'double_regular_holiday'
+
+export type PayRuleDayRate = {
+  day_type: PayRuleDayType
+  worked_bp: number
+  worked_rest_bp: number
+  unworked_bp: number
+}
+
+export type PayRule = {
+  id: string
+  effective_from: string // YYYY-MM-DD
+  overtime_ordinary_bp: number
+  overtime_premium_bp: number
+  night_diff_bp: number
+  note: string | null
+  day_rates: PayRuleDayRate[]
+}
+
+export type PayRuleCreateInput = {
+  effective_from: string
+  overtime_ordinary_bp: number
+  overtime_premium_bp: number
+  night_diff_bp: number
+  note?: string | null
+  day_rates: PayRuleDayRate[]
+}
+
+// ---------------------------------------------------------------------------
 // Wire types — verified against app/Http/Resources/ShiftTemplateResource.php,
 // ScheduleAssignmentResource.php, ScheduleOverrideResource.php, and
 // ResolvedScheduleController::toWireShape (app/Http/Controllers/Office/Schedules/).
@@ -310,6 +351,17 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),
+  },
+  payRules: {
+    list: () => request<PayRule[]>('/admin/pay-rules'),
+    create: (body: PayRuleCreateInput) =>
+      request<PayRule>('/admin/pay-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    get: (id: string) => request<PayRule>(`/admin/pay-rules/${id}`),
+    delete: (id: string) => request<undefined>(`/admin/pay-rules/${id}`, { method: 'DELETE' }),
   },
   shiftTemplates: {
     list: (office: string) => request<ShiftTemplate[]>(`/office/shift-templates?office=${office}`),

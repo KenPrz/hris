@@ -815,6 +815,101 @@ order, and returns the first hit:
 
 ---
 
+## Pay rules: effective-dated rates, floored by law *(M4c)*
+
+```sql
+create table pay_rules (
+  id                    uuid primary key default uuidv7(),
+  effective_from        date not null unique,
+  overtime_ordinary_bp  integer not null,
+  overtime_premium_bp   integer not null,
+  night_diff_bp         integer not null,
+  note                  text,
+  created_by            uuid references users(id) on delete set null,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+
+  check (overtime_ordinary_bp >= 0 and overtime_premium_bp >= 0 and night_diff_bp >= 0)
+);
+
+create table pay_rule_day_rates (
+  id             uuid primary key default uuidv7(),
+  pay_rule_id    uuid not null references pay_rules(id) on delete cascade,
+  day_type       text not null,
+  worked_bp      integer not null,
+  worked_rest_bp integer not null,
+  unworked_bp    integer not null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+
+  check (day_type in ('ordinary','special_working','special_non_working',
+                       'regular_holiday','double_regular_holiday')),
+  check (worked_bp >= 0 and worked_rest_bp >= 0 and unworked_bp >= 0),
+  unique (pay_rule_id, day_type)
+);
+```
+
+**A `pay_rules` row is a version, not a setting.** `effective_from` is `unique` — two
+versions cannot take effect the same day — and there is deliberately no `PATCH` route
+(`03-api.md`): a rate correction is always a *new* version, effective from a later date,
+read alongside every earlier one, never an edit in place. `App\Http\Controllers\Admin\PayRules\DeleteController`
+is the only other write a version ever sees after creation, and it cascades onto its five
+`pay_rule_day_rates` rows via the FK.
+
+**Three scalars live directly on `pay_rules`** — `overtime_ordinary_bp`, `overtime_premium_bp`,
+`night_diff_bp` — because they don't vary by `DayType`; the five `day_type`-keyed rows in
+`pay_rule_day_rates` (`unique(pay_rule_id, day_type)`, one row per non-nullable
+`App\Domain\Pay\DayType` case, `Ordinary` included this time — unlike `holidays`, a pay
+rule prices every kind of day an employee can work, not just the non-ordinary ones) carry
+`worked_bp`/`worked_rest_bp`/`unworked_bp`, the same worked/worked-on-a-rest-day/unworked
+three-way split M1's premium matrix already encodes. `pay_rule_day_rates.day_type` follows
+the same string-column-plus-`CHECK` pattern as `holidays.day_type` — plain `text` in
+Postgres, cast to the backed enum in the model, with a `CHECK` mirroring
+`DayType::cases()` so the database still rejects garbage regardless of what the model
+layer does.
+
+**Every rate is validated against a statutory *floor* before it is ever validated against
+the database.** `App\Domain\Pay\StatutoryFloor::violations()` — pure, framework-agnostic,
+no config read of its own — compares a proposed matrix cell-by-cell against
+`config('hris.pay_floors')` (`04-backend-conventions.md`), which encodes the same DOLE
+minimums M1's premium matrix was built against (Arts. 86-94): worked floors of
+100%/130% (ordinary, not-rest/rest), 100%/130% (special working), 130%/150% (special
+non-working), 200%/260% (regular holiday), 300%/390% (double regular holiday); unworked
+floors of 0% for ordinary/special (no work, no pay) and 100%/200% for regular/double
+regular holiday (paid even unworked); plus the 125%/130% overtime and 110%
+night-differential scalar floors. A cell sitting *exactly* at the floor is compliant;
+only strictly-below is a violation. `App\Actions\PayRules\CreatePayRule` runs this check
+before its transaction ever opens — a below-floor write never reaches the database at
+all, and refuses with every violating cell at once
+(`App\Exceptions\Domain\PayRateBelowFloor`, `03-api.md`), not one field at a time.
+
+**The duplicate-`effective_from` guard is the unique constraint itself, not an
+`exists()` pre-check.** Unlike `CreateHoliday`, there is no parent row to `lockForUpdate()`
+first — a pay rule is a company singleton, not a child of some office row — so
+`CreatePayRule` tries the insert and translates a `UniqueConstraintViolationException` into
+the clean `App\Exceptions\Domain\PayRuleExists` (`409`, `03-api.md`), which is race-safe
+(two concurrent creates on the same date can't both succeed) and covers the sequential
+duplicate identically.
+
+**Resolution is effective-dated, the same shape as `employment_records`':** the version
+that applies to a given worked date is the one with the greatest `effective_from` on or
+before that date. Nothing resolves this yet — M5's compute engine is the first and only
+reader; no pay is computed by anything M4c ships.
+
+**`created_by` is nullable and `on delete set null`**, matching `schedule_assignments`/
+`schedule_overrides` — a version created by a since-deleted user's account is not
+meaningless the way a version belonging to a deleted office would be, so it survives the
+user's deletion rather than cascading.
+
+`PayRule`'s `Spatie\Activitylog\Traits\LogsActivity` (log name `pay_rule`) logs every
+create/delete with the `PayRule` itself as the uuid-morph subject, causer resolved
+automatically from the authenticated guard, `logOnlyDirty()` on the five logged columns
+(`effective_from`, the three scalar rates, and `note`) (`pay_rule_day_rates` rows are not
+separately logged — they are created once,
+atomically, with their parent and never edited).
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -855,3 +950,6 @@ Stated plainly, since these are the reasons for the constraints above:
 - A shift template that is still an office's default, or still pointed at by a schedule
   assignment, cannot be deleted. (`App\Exceptions\Domain\TemplateInUse`, `422
   template_in_use` — a domain refusal, not a dangling foreign key.)
+- Two pay-rule versions cannot take effect on the same date, and no scalar or per-day-type
+  rate can be negative or below its statutory floor. (`unique(effective_from)` + the
+  non-negative `CHECK`s on `pay_rules`/`pay_rule_day_rates`, below, + `StatutoryFloor`.)

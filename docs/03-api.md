@@ -639,6 +639,83 @@ create/update/delete — is logged by `ShiftTemplate`/`ScheduleAssignment`/`Sche
 automatically from the authenticated guard. `Office` has no `LogsActivity` trait, so setting
 the default logs manually against the `Office`, the same way `CloneHolidays` does.
 
+## Admin — pay rules *(M4c)*
+
+Effective-dated versions of the company's premium-pay matrix — three scalar rates
+(`overtime_ordinary_bp`, `overtime_premium_bp`, `night_diff_bp`) plus one
+`worked_bp`/`worked_rest_bp`/`unworked_bp` row per `DayType` (`02-data-model.md`). Unlike
+holidays and schedules (M4a/M4b), this is **not** `OfficeScope`-gated — a pay rule prices
+every office the same way, so there is no office to scope by. Every endpoint here is
+sysadmin-gated directly by its `FormRequest::authorize()` (`(bool)
+$this->user()?->is_system_admin`), the codebase's usual System-Admin-only idiom
+(`RecordEmploymentRequest` et al.), never `OfficeScope`.
+
+**A non-admin gets `403 forbidden`, not the `404`-not-`403` discipline M4a/M4b use.** That
+discipline exists to keep an out-of-scope *subject* from being confirmed to exist; pay
+rules are a company singleton with nothing to enumerate — there is no per-office or
+per-subject id a non-admin could be probing for. Refusing the actor outright with the
+default `failedAuthorization()` is the correct shape here, the same way onboarding
+(`POST /admin/employees` et al.) refuses a non-admin with `403`, not `404`.
+
+```
+POST /api/v1/admin/pay-rules      # auth:sanctum — System Admin only
+  { "effective_from": "2027-01-01",
+    "overtime_ordinary_bp": 12500, "overtime_premium_bp": 13000, "night_diff_bp": 11000,
+    "day_rates": [
+      { "day_type": "ordinary", "worked_bp": 10000, "worked_rest_bp": 13000, "unworked_bp": 0 },
+      …                                                # exactly 5 entries, one per DayType, no dup, none missing
+    ],
+    "note": "2027 rates" }
+  → 201 { data: { id, effective_from, overtime_ordinary_bp, overtime_premium_bp,
+                   night_diff_bp, note, day_rates: [ { day_type, worked_bp, worked_rest_bp,
+                   unworked_bp }, … ] } }
+  → 400 validation_failed     # bad shape, or day_rates not exactly the five DayType values once each
+  → 403 forbidden             # caller is not a System Admin
+  → 409 pay_rule_exists       # a version already takes effect on that effective_from
+  → 422 pay_rate_below_floor  # one or more cells fall below config('hris.pay_floors');
+                              #   details: { violations: [ { multiplier, proposed_bp, floor_bp }, … ] }
+```
+
+`pay_rate_below_floor` is checked before the transaction ever opens — a pure, read-only
+comparison against `config('hris.pay_floors')` — and reports **every** violating cell at
+once, not one field at a time; `multiplier` is a dotted path
+(`worked.regular_holiday.not_rest`, `unworked.double_regular_holiday`,
+`overtime_premium`, …) naming exactly which cell failed. `pay_rule_exists` is a clean `409`
+translated from the `unique(effective_from)` constraint violation itself — there is no
+parent row to lock first (a pay rule is a company singleton, not a child of some office
+row), so the insert is attempted and its unique-violation caught, which is race-safe as
+well as covering the sequential-duplicate case.
+
+```
+GET /api/v1/admin/pay-rules       # auth:sanctum — System Admin only
+  → { data: [ { id, effective_from, overtime_ordinary_bp, overtime_premium_bp,
+                night_diff_bp, note, day_rates: […] }, … ] }   # effective_from descending
+  → 403 forbidden
+
+GET /api/v1/admin/pay-rules/{payRule}
+  → { data: { id, effective_from, …, day_rates: […] } }
+  → 403 forbidden
+  → 404 not_found     # {payRule} does not exist — plain not-found here, not the
+                      #   404-not-403 scope discipline (there is no scope to leak)
+
+DELETE /api/v1/admin/pay-rules/{payRule}
+  → 204 No Content
+  → 403 forbidden
+  → 404 not_found
+```
+
+**There is no `PATCH` route at all — versions are immutable by omission, not by a
+guard.** A rate correction is always a new version, effective from a later date, read
+alongside every earlier one; requesting `PATCH /admin/pay-rules/{payRule}` gets Laravel's
+own `405 method_not_allowed` (`03-api.md`'s errors table below), because the route simply
+does not exist for that verb, the same as any other undeclared method on a real path.
+
+Every create/delete is logged by `PayRule`'s `Spatie\Activitylog\Traits\LogsActivity` (log
+name `pay_rule`), the `PayRule` itself as the uuid-morph subject, causer resolved
+automatically from the authenticated guard. `scripts/e2e-pay-rules.sh` proves the whole
+surface — floor-valid create, the below-floor `422`, the duplicate `409`, the immutable
+`405`, the non-admin `403`, and the activity-log row — against the live stack.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -665,11 +742,13 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 405 | `method_not_allowed` | Wrong HTTP verb on a real route. |
 | 409 | `idempotency_key_reused` | An `Idempotency-Key` replayed with a *different* body, or by a *different* user than minted it (the hash folds in the acting user). |
 | 409 | `request_not_pending` | Approving, rejecting, or cancelling a request that is already `approved`/`rejected`/`cancelled`. |
+| 409 | `pay_rule_exists` | Creating a pay-rule version whose `effective_from` matches one that already exists. |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
 | 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, or submit/list their own adjustments. |
 | 422 | `cannot_punch_self` | An HR/admin using the manual entry endpoint to record their *own* punch (separation of duties). |
 | 422 | `invalid_adjustment_target` | Approving a `void`/`amend` whose target punch is missing, belongs to someone else, or was already annulled by an earlier approval. |
+| 422 | `pay_rate_below_floor` | Creating a pay-rule version with one or more cells below `config('hris.pay_floors')` (`details.violations` names every offending cell). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 
@@ -680,11 +759,12 @@ you). See `05-rbac.md`.
 ## What is not here yet
 
 Leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`); their
-endpoints land with them. Holidays (M4a) and schedules (M4b, above) have both shipped;
-nothing yet *reads* either to compute pay — that's M5's compute engine, which consumes
-M4a's `holidays` and M4b's schedule tables alongside M4c's `pay_rules`. Leave and overtime
-requests reuse the `requests` spine M3.6 built above, but their own detail tables and
-endpoints are not built yet.
+endpoints land with them. Holidays (M4a), schedules (M4b), and pay rules (M4c, above) have
+all shipped — **M4, the configuration spine, is complete** — but nothing yet *reads* any
+of them to compute pay; that's M5's compute engine, which consumes M4a's `holidays` and
+M4b's schedule tables alongside M4c's `pay_rules`. Leave and overtime requests reuse the
+`requests` spine M3.6 built above, but their own detail tables and endpoints are not built
+yet.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

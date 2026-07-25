@@ -6,6 +6,10 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\PayRules\CreateController as CreatePayRuleController;
+use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleController;
+use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
+use App\Http\Controllers\Admin\PayRules\ShowController as ShowPayRuleController;
 use App\Http\Controllers\Attendance\Adjustments\ApproveController as ApproveAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\CancelController as CancelAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\DownloadAttachmentController;
@@ -103,6 +107,18 @@ Route::prefix('v1')->group(function (): void {
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
             Route::post('/attendance/punch', ManualPunchController::class);
+
+            // Pay rules are a company singleton, gated by each FormRequest's
+            // authorize() (is_system_admin), not OfficeScope — there is no office to
+            // scope by, and nothing to enumerate, so a non-admin gets the default 403
+            // rather than the 404-not-403 treatment used elsewhere in this file.
+            Route::get('/pay-rules', ListPayRulesController::class);
+            Route::post('/pay-rules', CreatePayRuleController::class);
+
+            // Versions are immutable — read and delete only, deliberately no
+            // PATCH/PUT route. A correction is a new version, never an edit in place.
+            Route::get('/pay-rules/{payRule}', ShowPayRuleController::class);
+            Route::delete('/pay-rules/{payRule}', DeletePayRuleController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each

@@ -100,7 +100,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(groups.map((g) => g.key)).toEqual(['me'])
   })
 
-  it('Team/Admin resolve to zero items — only Me and (as of M4a) Office have a shipped route', () => {
+  it('Team resolves to zero items — no shipped route yet', () => {
     const groups = navEntriesFor(
       buildSession({ is_system_admin: true, has_reports: true, hr_offices: ['office-1'] }),
     )
@@ -112,7 +112,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/office/holidays', label: 'Holidays' },
       { href: '/office/schedules', label: 'Schedules' },
     ])
-    expect(byKey.admin?.items).toEqual([])
+    expect(byKey.admin?.items).toEqual([{ href: '/admin/pay-rules', label: 'Pay rules' }])
   })
 })
 
@@ -150,9 +150,24 @@ describe('SideNav — rendered', () => {
     expect(screen.queryByText('Team')).not.toBeInTheDocument()
   })
 
-  it('a system admin sees NO empty "Admin" heading', async () => {
+  it('a sysadmin sees the Admin group with a Pay rules link', async () => {
     setToken('sekrit')
     stubFetch(200, sessionBody({ is_system_admin: true }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    const payRulesLink = await screen.findByRole('link', { name: 'Pay rules' })
+    expect(payRulesLink).toHaveAttribute('href', '/admin/pay-rules')
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+  })
+
+  it('a non-sysadmin does not see the Admin group or the Pay rules link', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ is_system_admin: false }))
 
     render(
       <Providers>
@@ -165,6 +180,7 @@ describe('SideNav — rendered', () => {
     })
 
     expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Pay rules' })).not.toBeInTheDocument()
   })
 
   it('an HR admin sees an Office group with Holidays AND Schedules links', async () => {
