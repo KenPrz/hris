@@ -1178,13 +1178,12 @@ after. What the building turned on, for whoever picks up M6 next:
   host's stock `php.ini` and the dev image's FrankenPHP default ship `memory_limit=128M`;
   Pest's Arch-layer docblock scan across the whole (now-larger) `App` namespace exceeds
   that ceiling deterministically, failing inside `phpstan/phpdoc-parser`/Collision's own
-  error renderer rather than in any actual assertion. `php -d memory_limit=1G
-  vendor/bin/pest` (no file changes, native or `docker compose exec`) passes clean at
-  490/490 every time — this is a local-environment ceiling, not a regression in this
-  milestone's code, and CI is unaffected: `shivammathur/setup-php`'s runner default is
-  `memory_limit=-1`. Left unfixed here on purpose — bumping a `php.ini`/Dockerfile value is
-  infrastructure tuning outside this task's docs+e2e+gate scope, not a docs or test-content
-  change; whoever next touches the dev image or `Makefile` should raise it.
+  error renderer rather than in any actual assertion — a local-environment ceiling, not a
+  regression in this milestone's code (490/490 pass with the ceiling raised), and CI is
+  unaffected: `shivammathur/setup-php`'s runner default is `memory_limit=-1`. **`make
+  test-backend` now runs pest as `php -d memory_limit=512M vendor/bin/pest`**, so the
+  containerized gate works out of the box; a native `./vendor/bin/pest` run relies on the
+  developer's own `php.ini` (most dev machines don't cap at 128M).
 - **`04-backend-conventions.md`'s locked-skip-vs-real-lock distinction is not automatically
   safe just because a lock will eventually exist.** `RecomputeDay`'s `$existing?->status ===
   'locked'` check is a plain, unlocked read — correct today because nothing else races to

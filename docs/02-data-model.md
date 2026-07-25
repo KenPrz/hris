@@ -1167,6 +1167,17 @@ an exact date or a clean `effective_from` lower bound, so narrowing there is exa
 approximation); `forShiftTemplate`/`forEmployee`/`forOffice` recompute every existing
 summary for the affected employees, full stop.
 
+**One config-adjacent edit is deliberately outside this recompute contract: a retroactive
+`employment_records` change.** A summary snapshots `is_art82_exempt` and `office_id` from the
+record effective on its date, so an employment change recorded effective a *past* date (a
+back-dated exemption or transfer) would leave already-computed days stale — and art82 exemption
+suppresses *every* premium, so that delta is large. M5b's trigger set is the six config-spine
+changes (holidays, pay rules, schedules); `RecordEmploymentChange` is not among them. This is a
+known boundary, not a regression (M5a already snapshotted art82 with no recompute): a later
+milestone adds a `RecomputeTrigger::Employment` case (the `forEmployee` resolver already exists
+for it), or an explicit operational rule that a back-dated employment edit is followed by a
+manual recompute of the affected range.
+
 **`App\Jobs\RecomputeDay` is the queued unit of work — `ShouldQueue` + `Batchable` +
 `InteractsWithQueue`, carrying only `$employeeId`/`$date` (ids, never a model)** — a job is
 serialized onto the queue connection, and an id round-trips through that cleanly where a
