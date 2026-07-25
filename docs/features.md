@@ -236,8 +236,9 @@ office/admin screens; those arrive with the milestones that own their data.
   accepted or merely warned about.
 - **A rate change is always a new version, never an edit to an old one.** Correcting last
   year's rates means adding a new version effective from today (or whenever the change
-  should take hold); every version ever set stays visible, so what applied on any past date
-  is never in question.
+  should take hold); a version is immutable once created — you supersede it, never rewrite
+  it — so what applied on any past date is never in question. (A just-created mistake can be
+  deleted outright; there is no edit-in-place.)
 - **Only a system administrator can touch this.** Unlike the holiday calendar or
   schedules, which any HR admin manages for their own office, pay rates apply to the whole
   company at once — there is no office to hand off to, so this is reserved for the one

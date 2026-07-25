@@ -923,6 +923,15 @@ route at all. **No pay is computed** — the version is the third and final inpu
 compute engine will read (alongside M4a's `holidays` and M4b's schedule tables) to stamp a
 worked date's `rule_version_id`.
 
+**One seam for M5 to close.** `DELETE /admin/pay-rules/{payRule}` is unrestricted today
+because nothing reads `pay_rules` yet — a hard delete cascades its day-rates and leaves only
+the `activity_log` `deleted` event. Immutability is airtight against *edits* (no `PATCH`,
+no update action), but not against deletion. When M5 adds
+`daily_attendance_summaries.rule_version_id → pay_rules(id)`, a *consumed* version must not
+be deletable: M5 introduces `ON DELETE RESTRICT` (or soft-deletes versions) so a stamped
+snapshot can never be orphaned. Recorded here so it is designed in, not discovered at
+compute time.
+
 **Status: complete.** **407 backend tests** (1,335 assertions — the two tables' schema,
 `StatutoryFloor`'s own cell-by-cell unit suite, and the create/list/show/delete endpoints'
 coverage including the below-floor/duplicate/immutable/non-admin refusals; M4b's own docs
