@@ -93,6 +93,13 @@ final class ComputeDailySummary
         $lines = $payRule !== null ? $computed->lines : [];
 
         return DB::transaction(function () use ($employee, $date, $dayType, $schedule, $isArt82Exempt, $payRule, $computed, $lines): DailyAttendanceSummary {
+            // Serialize concurrent computes of the same employee-day — two rapid punches each
+            // trigger a compute (Task 6), and an unlocked delete-then-insert would let both pass
+            // the delete and race the unique(employee_id, date) insert into a raw 500. Locking the
+            // employee row first makes the second compute wait, then cleanly replace. Mirrors
+            // CreateHoliday / ApplyAttendanceAdjustment.
+            Employee::query()->lockForUpdate()->findOrFail($employee->id);
+
             DailyAttendanceSummary::query()
                 ->where('employee_id', $employee->id)
                 ->whereDate('date', $date)
