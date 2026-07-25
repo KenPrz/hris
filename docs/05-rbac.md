@@ -223,9 +223,10 @@ seeder for the full cast.
 
 `EmployeeScope` answers "which employees may this user see"; `App\Domain\Scope\OfficeScope`
 (`app/Domain/Scope/`) is its sibling for per-office **configuration** — holiday calendars
-(M4a) and schedules (M4b) today, `pay_rules` as M4c lands. Same shape, same reasoning: a
-query constraint, not a boolean, so it composes into any office query and there is exactly
-one place "who may administer this office" is defined.
+(M4a) and schedules (M4b). Same shape, same reasoning: a query constraint, not a boolean,
+so it composes into any office query and there is exactly one place "who may administer
+this office" is defined. **`pay_rules` (M4c) deliberately does not use `OfficeScope`** —
+see below.
 
 | Actor | Constraint |
 | --- | --- |
@@ -275,6 +276,25 @@ shape-only `uuid`, never `exists:`, so an out-of-scope real id and a fabricated 
 identically (`scripts/e2e-schedules.sh` proves this against the live stack, mirroring
 `e2e-holidays.sh`). See `03-api.md` for the endpoint-level detail and `02-data-model.md` for
 the four schedule tables.
+
+## Pay rules — System Admin only, no scope at all *(M4c)*
+
+`pay_rules` management is gated by neither `OfficeScope` nor a spatie permission verb —
+there is no `pay_rules.manage` (or similarly named) entry in the permission catalog above,
+and none is needed. Every pay-rule `FormRequest`
+(`CreatePayRuleRequest`/`ListPayRulesRequest`/`PayRuleAdminRequest`) authorizes with the
+same one-line check the M2 onboarding endpoints use: `(bool)
+$this->user()?->is_system_admin`. `Gate::before` (above) would bypass any policy or
+permission check for a System Admin anyway, so this is the direct form of the identical
+rule, not a different one.
+
+**Why no scope:** `OfficeScope` answers "which offices may this actor administer" — a
+question that only makes sense for a resource that *has* an office. A pay rule prices
+every office identically; there is no `office_id` column to scope by, and therefore no
+per-subject enumeration risk the 404-not-403 discipline exists to close off. A non-admin
+gets the default `403 forbidden` from `failedAuthorization()`, exactly like a non-admin
+hitting `POST /admin/employees` — an actor refusal, not a subject one. See `03-api.md` for
+the endpoint detail and `02-data-model.md` for the `pay_rules`/`pay_rule_day_rates` tables.
 
 ## Testing
 

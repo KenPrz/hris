@@ -20,6 +20,7 @@ use App\Models\Employee;
 use App\Models\Holiday;
 use App\Models\Office;
 use App\Models\Organization;
+use App\Models\PayRule;
 use App\Models\ScheduleAssignment;
 use App\Models\ScheduleOverride;
 use App\Models\ShiftTemplate;
@@ -133,6 +134,10 @@ final class CompanySeeder extends Seeder
         // explicitly here — the one deliberate grant of the most powerful flag in the system.
         $sysAdmin->forceFill(['is_system_admin' => true])->save();
         $actor = $sysAdmin->id;
+
+        // M4c: one default pay-rule version, effective from the start of 2026, so M5 has
+        // a version to read and `/admin/pay-rules` is non-empty on a fresh `make dev`.
+        $this->seedDefaultPayRuleVersion($actor);
 
         // --- Manila ---
 
@@ -363,6 +368,40 @@ final class CompanySeeder extends Seeder
         }
 
         return $template;
+    }
+
+    /**
+     * The one default pay-rule version: every cell set to exactly the statutory floor
+     * (`config('hris.pay_floors')`), effective `2026-01-01`, `created_by` the System
+     * Admin. Read from config rather than re-hardcoded, so this can never drift from the
+     * same Labor Code minimums `CreatePayRule`/`StatutoryFloor` validate every write
+     * against. Written directly through `Model::create`, the same as `Holiday::create`
+     * and `standardMondayToFridayTemplate()` above — a pay rule has no cache to keep in
+     * sync, so there is no single-writer rule here to honour.
+     */
+    private function seedDefaultPayRuleVersion(string $actorId): void
+    {
+        $floors = config('hris.pay_floors');
+
+        $payRule = PayRule::create([
+            'effective_from' => '2026-01-01',
+            'overtime_ordinary_bp' => $floors['overtime_ordinary'],
+            'overtime_premium_bp' => $floors['overtime_premium'],
+            'night_diff_bp' => $floors['night_diff'],
+            'note' => 'Statutory floor matrix (DOLE minimums) — the initial version.',
+            'created_by' => $actorId,
+        ]);
+
+        foreach (DayType::cases() as $dayType) {
+            [$notRestBp, $restBp] = $floors['worked'][$dayType->value];
+
+            $payRule->dayRates()->create([
+                'day_type' => $dayType->value,
+                'worked_bp' => $notRestBp,
+                'worked_rest_bp' => $restBp,
+                'unworked_bp' => $floors['unworked'][$dayType->value],
+            ]);
+        }
     }
 
     private function department(Office $office, string $name, string $code): Department

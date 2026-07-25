@@ -405,9 +405,12 @@ different owners, and neither lives in both places.
 | Leave types and accrual | `leave_types` | Company policy; admin-editable. |
 | Roles → permissions | Seeder | Code. See `05-rbac.md`. |
 
-The table is where each setting *lands*. Only the first three rows exist today — M0 has no
-sessions, no rate limits, no idempotency, and no schema — and the rest arrive with the
-milestone that needs them.
+The table is where each setting *lands*. It was written at M0 as a forward declaration —
+only the first three rows existed then, and the rest were placeholders for whichever
+milestone would need them. As of M4c, every row is real: `offices` (M2), `holidays` (M4a),
+`pay_rules` and `config('hris.pay_floors')` (M4c) all exist and are read/validated exactly
+as described here. `leave_types` remains the one still-forward-declared row, arriving with
+M5.
 
 ### `config/hris.php`
 

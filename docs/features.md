@@ -225,7 +225,36 @@ office/admin screens; those arrive with the milestones that own their data.
   milestone) exists to turn "was this person scheduled to work" into an actual computed
   total.
 
+## Pay rules *(M4c)*
+
+- **A system administrator sets the company's pay rates, floored by law.** One matrix per
+  effective date: how much extra an ordinary day, a special working day, a special
+  non-working day, a regular holiday, and a double regular holiday pay — worked, worked on
+  a rest day, and unworked — plus overtime and night-differential rates. Every rate is
+  checked against the Labor Code's statutory minimum before it can be saved; a rate below
+  the floor is refused outright, naming exactly which figure is too low, never silently
+  accepted or merely warned about.
+- **A rate change is always a new version, never an edit to an old one.** Correcting last
+  year's rates means adding a new version effective from today (or whenever the change
+  should take hold); every version ever set stays visible, so what applied on any past date
+  is never in question.
+- **Only a system administrator can touch this.** Unlike the holiday calendar or
+  schedules, which any HR admin manages for their own office, pay rates apply to the whole
+  company at once — there is no office to hand off to, so this is reserved for the one
+  role with company-wide authority.
+- **On the pay-rules screen.** `/admin/pay-rules` lists every version that has ever been
+  set, newest first, with the one currently in effect called out; "New version" opens a
+  full rate matrix to fill in, showing the statutory floor beside each figure as a guide
+  before you even submit.
+- **Every change is logged** — who set which version and when — the same audit trail the
+  holiday calendar and schedules get.
+- **Not yet in this milestone:** nothing reads these rates to change anyone's pay. A pay
+  rule marked here is configuration only until the compute engine (a later milestone)
+  exists to turn a worked day into an actual paycheck line. **With this feature, the
+  configuration spine (M4) is complete** — holiday calendars, schedules, and pay rules are
+  all in place for that engine to read.
+
 ---
 
 *(Turning punches into computed pay — the premium-rate engine — follows in a
-later milestone, once the rest of the configuration spine exists for it to read.)*
+later milestone, now that the whole configuration spine exists for it to read.)*

@@ -633,7 +633,7 @@ What the building turned on, for whoever extends the frontend next:
 
 ## M4 — Configuration spine
 
-Everything M3.5 and M5 will read becomes admin-editable, per office.
+**Status: complete.** Everything M3.5 and M5 will read becomes admin-editable, per office.
 
 **Sliced into three milestones, the same move M3 got (vertical slice → M3/M3.6/M3.5) once
 the actual build made the scope concrete:**
@@ -642,7 +642,7 @@ the actual build made the scope concrete:**
 | --- | --- | --- |
 | **M4a — Holiday Calendars** | Per-office holiday CRUD + clone-from-previous-year | **Complete** — below |
 | **M4b — Shift Templates** | Template CRUD, assignment, per-date override, resolution order | **Complete** — below |
-| **M4c — Pay Rules** | `pay_rules` editor, statutory-floor validation | Not started |
+| **M4c — Pay Rules** | `pay_rules` editor, statutory-floor validation | **Complete** — below |
 
 **`RecomputeRange` moves to M5, alongside the compute engine it exists to drive.** There is
 nothing to recompute before something computes — M4's original "Done when" line below (a
@@ -864,6 +864,103 @@ department-assignment/override/resolve, the byte-identical 404 pair, and the act
   real regression; native `npm test` never reproduced it. Different from M4a's
   `node_modules`-drift gotcha (that one was deterministic and fixed by `npm install`); this
   one is worth knowing about if a future `make test` run flakes on an unrelated file.
+
+## M4c — Pay Rules
+
+Effective-dated `pay_rules` versions, statutory-floor validation, and the sysadmin-gated
+CRUD — the third and final slice of the configuration spine. **M4c completes M4.**
+
+- `pay_rules`/`pay_rule_day_rates` — one version per `effective_from` (`unique`), three
+  scalar rates (`overtime_ordinary_bp`/`overtime_premium_bp`/`night_diff_bp`) plus five
+  `day_type`-keyed rows (`worked_bp`/`worked_rest_bp`/`unworked_bp`, one per
+  `App\Domain\Pay\DayType` case, `Ordinary` included — a pay rule prices every kind of day,
+  not just the non-ordinary ones a holiday marks). See `02-data-model.md`.
+- `config('hris.pay_floors')` — the DOLE statutory-minimum matrix, the same numbers M1's
+  premium-pay unit test encodes, now the boundary every write is validated against.
+  `App\Domain\Pay\StatutoryFloor::violations()` is pure and framework-agnostic: it takes
+  both matrices as arguments and returns every violating cell, never throwing itself — the
+  caller (`App\Actions\PayRules\CreatePayRule`) turns a non-empty result into
+  `App\Exceptions\Domain\PayRateBelowFloor` (`422 pay_rate_below_floor`) before its
+  transaction ever opens.
+- **No `OfficeScope` at all — a different authority model than M4a/M4b.** A pay rule is a
+  company singleton, not a per-office resource, so there is nothing to scope by and nothing
+  to enumerate. Every pay-rule `FormRequest` gates directly on `is_system_admin`, the same
+  one-line idiom M2's onboarding endpoints use; a non-admin gets the plain `403 forbidden`
+  a subject-less actor check produces, never the 404-not-403 discipline holidays/schedules
+  use. See `05-rbac.md`.
+- `POST/GET /admin/pay-rules`, `GET/DELETE /admin/pay-rules/{payRule}` — deliberately **no
+  `PATCH`**. Versions are immutable by omission: a rate correction is always a new version,
+  read alongside every earlier one, never an edit in place. `PATCH` on an existing id gets
+  Laravel's own `405 method_not_allowed`, because the route simply isn't declared for that
+  verb. See `03-api.md`.
+- `App\Exceptions\Domain\PayRuleExists` (`409 pay_rule_exists`) — the duplicate-
+  `effective_from` guard is the `unique` constraint itself, not an `exists()` pre-check:
+  unlike `CreateHoliday`, there is no parent office row to `lockForUpdate()` first, so
+  `CreatePayRule` attempts the insert and translates the resulting
+  `UniqueConstraintViolationException`, which is race-safe as well as covering the
+  sequential-duplicate case identically.
+- The frontend `/admin/pay-rules` screen — a **matrix editor**, not a calendar (unlike
+  `/office/holidays`/`/office/schedules`, which it otherwise mirrors structurally): no
+  office picker, since a pay rule prices every office the same way. "Currently effective"
+  is computed client-side (the version with the greatest `effective_from <= today`) from
+  the plain list, never trusted to arrive pre-sorted for that purpose. The New-version
+  dialog shows a client-side floor hint per cell (`PAY_FLOOR_PERCENT`, mirroring
+  `config('hris.pay_floors')` as percentages) purely as a courtesy — the server is the
+  actual authority, and a `422 pay_rate_below_floor`'s `details.violations` is what the
+  screen renders against the offending cells after the fact.
+- `CompanySeeder` seeds one default version, effective `2026-01-01`, every cell at exactly
+  the statutory floor, `created_by` the seeded System Admin — so M5 has a version to read
+  and `/admin/pay-rules` is non-empty on a fresh `make dev`.
+- Every create/delete is logged the same way M4a/M4b's tables are: `PayRule`'s own
+  `LogsActivity` trait (log name `pay_rule`), the `PayRule` itself as the uuid-morph
+  subject, causer resolved automatically from the authenticated guard.
+
+**Done when:** a System Admin creates a 2026 version with regular-holiday-worked at 250%
+(above the 200% floor) — accepted and logged; the same at 150% — refused `422
+pay_rate_below_floor`, naming exactly that cell; a duplicate `effective_from` — `409
+pay_rule_exists`; a non-admin — `403 forbidden`; the version is immutable, no `PATCH`
+route at all. **No pay is computed** — the version is the third and final input M5's
+compute engine will read (alongside M4a's `holidays` and M4b's schedule tables) to stamp a
+worked date's `rule_version_id`.
+
+**Status: complete.** **407 backend tests** (1,335 assertions — the two tables' schema,
+`StatutoryFloor`'s own cell-by-cell unit suite, and the create/list/show/delete endpoints'
+coverage including the below-floor/duplicate/immutable/non-admin refusals; M4b's own docs
+recorded 382, but `main` had grown past that by the time this branch forked, so 407 is
+this run's real total, not a precise "+25 for M4c" delta), **19 arch tests** (unchanged
+from M4a/M4b — `pay_rules` introduces no new arch-guarded invariant of its own), frontend
+at **297 tests** (M4b recorded 279; `usePayRules` and the `/admin/pay-rules` matrix-editor
+screen make up the difference, the same "real total, not a precise per-milestone delta"
+caveat M4a/M4b's own counts carry). `lint`, `typecheck`, and `build` are green native and
+inside the `make test` containers alike, no flake this run.
+`scripts/e2e-pay-rules.sh` walks the whole surface — floor-valid create, the below-floor
+`422` naming the exact cell, the duplicate `409`, the immutable `405`, the non-admin `403`
+on both GET and POST, and the activity-log row — against the live stack. **M4 — the
+configuration spine — is complete**: holiday calendars (M4a), schedules (M4b), and pay
+rules (M4c) are all real, admin-editable, fully tested configuration; nothing yet reads
+any of it to compute pay — that's M5's `RecomputeRange` and compute engine (below), the
+first and only consumer of all three tables. What the building turned on, for whoever
+picks up M5 next:
+
+- **The one place M4c's authority model genuinely diverges from M4a/M4b, not just a
+  smaller version of the same thing.** `OfficeScope` was reusable across a fourth table
+  family (M4b's own lesson) because every prior M4 resource had an office to scope by,
+  even indirectly; a pay rule has none, so the FormRequest-level `is_system_admin` check
+  isn't a simplification of `OfficeScope` — it's a different authority question ("may this
+  actor touch this kind of thing at all," not "does this actor administer this subject's
+  office") answered the way M2's onboarding endpoints already answered it.
+- **A floor check that never touches the database is what makes "every violation at once"
+  cheap.** `StatutoryFloor::violations()` takes both matrices as plain arrays and returns
+  a `list<FloorViolation>` with zero I/O — the entire below-floor path is checked and
+  fully reported before `CreatePayRule`'s transaction opens, so a proposal with three bad
+  cells gets three named violations in one response, never a fix-one-resubmit-find-the-
+  next loop.
+- **The unique-constraint-catch pattern generalizes a second time.** `HolidayExists`
+  (M4a) needed a row lock first because a holiday has a parent office to lock; `PayRule`
+  has no such parent, so `PayRuleExists` skips straight to "attempt the insert, catch the
+  violation" — proof the pattern's real shape is "let the constraint be the guard,"
+  locking being an optimization for when a cheaper pre-check would otherwise race, not a
+  requirement of the pattern itself.
 
 ## M5 — Requests and approvals
 
