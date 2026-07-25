@@ -531,10 +531,12 @@ time — a void-and-add pair, never an in-place correction.
 
 **The effective ledger is `attendance_logs` minus `attendance_annulments`** — the set of
 punches an inspector-facing raw dump and a pay computation disagree about. Concretely: a
-punch's id has no matching row in `attendance_annulments`. This is defined here because it is
-the single most important thing for whoever builds the M5 compute engine to get right about
-attendance — **M5 must read the effective ledger, not the raw table.** M3.6 itself does
-**not** wire this filter into any read endpoint: `GET /me/attendance` and
+punch's id has no matching row in `attendance_annulments`. This was defined here because it
+was the single most important thing for whoever built the M5 compute engine to get right
+about attendance — **M5 reads the effective ledger, not the raw table**, via
+`App\Domain\Attendance\EffectivePunches::forDate()` (below), M5a's real implementation of
+exactly this query. M3.6 itself does **not** wire this filter into any read endpoint: `GET
+/me/attendance` and
 `GET /employees/{employee}/attendance` (`03-api.md`) are, by design, the raw append-only
 ledger — "the record you'd show a DOLE inspector" includes an annulled punch, because it
 still happened and was still recorded. An approved void is provable today only by its
@@ -800,8 +802,8 @@ be deleted (`422 template_in_use`) rather than leaving a dangling reference or a
 
 **`App\Domain\Schedule\ScheduleResolver` is the one place "what is this employee scheduled
 to work on this date" is answered**, for a single `(employee, date)` pair — a pure read, no
-transaction, no writes: the single interface M5's compute engine will call. It walks, in
-order, and returns the first hit:
+transaction, no writes: the single interface M5's compute engine calls (`ComputeDailySummary`,
+above). It walks, in order, and returns the first hit:
 
 1. **`schedule_overrides`** for that exact `(employee_id, date)` — `source: "override"`.
 2. **The employee's own `schedule_assignments` row** with the latest `effective_from` on or
@@ -893,8 +895,8 @@ duplicate identically.
 
 **Resolution is effective-dated, the same shape as `employment_records`':** the version
 that applies to a given worked date is the one with the greatest `effective_from` on or
-before that date. Nothing resolves this yet — M5's compute engine is the first and only
-reader; no pay is computed by anything M4c ships.
+before that date. Nothing resolved this at the time M4c shipped — M5a's `ComputeDailySummary`
+is now the first and only reader (see the compute-engine section below).
 
 **`created_by` is nullable and `on delete set null`**, matching `schedule_assignments`/
 `schedule_overrides` — a version created by a since-deleted user's account is not
@@ -907,6 +909,150 @@ automatically from the authenticated guard, `logOnlyDirty()` on the five logged 
 (`effective_from`, the three scalar rates, and `note`) (`pay_rule_day_rates` rows are not
 separately logged — they are created once,
 atomically, with their parent and never edited).
+
+---
+
+## Daily attendance summaries and lines: the compute engine's priced output *(M5a)*
+
+```sql
+create table daily_attendance_summaries (
+  id                 uuid primary key default uuidv7(),
+  employee_id        uuid not null references employees(id) on delete cascade,
+  date               date not null,
+  day_type           text not null,
+  is_rest_day        boolean not null,
+  scheduled_minutes  integer not null,
+  is_art82_exempt    boolean not null,
+  rule_version_id    uuid references pay_rules(id) on delete restrict,   -- nullable
+  worked_minutes     integer not null,
+  late_minutes       integer not null,
+  undertime_minutes  integer not null,
+  status             text not null default 'pending',
+  is_incomplete      boolean not null default false,
+  computed_at        timestamptz,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  check (day_type in ('ordinary','special_working','special_non_working',
+                       'regular_holiday','double_regular_holiday')),
+  check (status in ('pending','computed','disputed','locked')),
+  check (scheduled_minutes >= 0 and worked_minutes >= 0
+         and late_minutes >= 0 and undertime_minutes >= 0),
+  unique (employee_id, date)
+);
+
+create table daily_summary_lines (
+  id          uuid primary key default uuidv7(),
+  summary_id  uuid not null references daily_attendance_summaries(id) on delete cascade,
+  kind        text not null,
+  minutes     integer not null,
+  applied_bp  integer not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+
+  check (kind in ('regular_day','regular_night','overtime_day','overtime_night',
+                  'holiday_unworked')),
+  check (minutes > 0 and applied_bp >= 0),
+  unique (summary_id, kind)
+);
+```
+
+**One row per employee-day (`unique(employee_id, date)`), and every value on it is a
+snapshot, never a live join.** `day_type`, `is_rest_day`, `scheduled_minutes`,
+`is_art82_exempt` are the business context *as it was resolved on the date being
+computed*, not as it reads today — so a summary keeps answering "what was true about this
+day" correctly even after a holiday is added retroactively, a schedule changes, or an
+employee is promoted out of Art. 82 exemption next month. `status` defaults to `pending`
+in the schema, but every row `App\Actions\Compute\ComputeDailySummary` writes is
+`computed`; `disputed`/`locked` are read column values with no writer yet — M3.6's
+adjustment flow and a later cutoff milestone (M6/M7 per the resequencing table below) are
+what will set them.
+
+**The compute pipeline, one piece at a time** (`App\Actions\Compute\ComputeDailySummary`):
+
+1. **Resolve the day's business context**, each from the record effective *on the date
+   being computed*, never from a `current_*` cache: `App\Domain\Employment\EmploymentResolver::on()`
+   (the same effective-dated lookup `employment_records` above defines) supplies
+   `is_art82_exempt` and the office to check for a holiday — falling back to
+   `Employee::current_office_id` and "not exempt" only for a date before the employee's
+   first employment record. `day_type` is `Ordinary` unless an M4a `holidays` row exists
+   for that `(office, date)`. The schedule comes from `App\Domain\Schedule\ScheduleResolver`
+   (M4b). The `pay_rules` version is the greatest `effective_from <= date` (M4c);
+   `App\Support\PayRatesFactory::fromVersion()` turns it into a `PayRates` matrix, or
+   `PayRatesFactory::statutory()` (reading `config('hris.pay_floors')`) stands in when no
+   version has been configured yet for that date.
+2. **Gather the day's effective punches.** `App\Domain\Attendance\EffectivePunches::forDate()`
+   reads the append-only `attendance_logs` ledger for the employee's *shift window* (the
+   local calendar day, or later if the schedule's end minute runs past midnight — the
+   cross-midnight shift case), excludes anything an `attendance_annulments` row has voided,
+   and expresses every surviving punch as minutes from that date's local midnight. This is
+   the one place M3's raw, corrigible ledger and M3.6's annulments both get read together,
+   as the effective truth of what happened — never merged or rewritten, only filtered.
+3. **Price it.** The pure `App\Domain\Compute\DailyComputation::compute()` pairs the
+   punches, nets out the meal break, splits the net total into regular vs. overtime against
+   `scheduledMinutes`, splits each of those into day vs. night, and prices each of the (up
+   to four) non-zero buckets through `App\Domain\Pay\PayMultiplier`, which reads the
+   resolved `PayRates` rather than a hardcoded matrix — the same reconciliation that lets
+   M1's statutory-floor tests and a live `pay_rules` version share one pricing function. An
+   odd punch count is `is_incomplete`: zero worked minutes, no lines, no late/undertime — a
+   guess is never persisted where an adjustment request (M3.6) belongs instead.
+4. **Persist idempotently.** `ComputeDailySummary::execute()` `lockForUpdate()`s the
+   employee row, deletes any existing summary for `(employee_id, date)`, and inserts the
+   fresh one plus its lines in the same transaction — so calling it twice for the same day
+   (two rapid punches each triggering their own compute, or a future manual recompute)
+   yields exactly one summary and never a duplicate line, with no upsert/on-conflict
+   trickery needed. **A line is only ever persisted when a `pay_rules` version was actually
+   configured for that date** — `rule_version_id` is non-null precisely when the summary
+   has lines, and null precisely when it doesn't (no configured version, or the calculator
+   itself produced none: an incomplete day, an unworked rest day, an unworked ordinary/
+   special day, …). This action never attributes a priced line to a rate that wasn't
+   actually in effect.
+
+**No pesos anywhere in either table.** Every minute column (`worked_minutes`,
+`late_minutes`, `undertime_minutes`, `scheduled_minutes`, `daily_summary_lines.minutes`) is
+an integer minute count, and `applied_bp` is an integer basis-point multiplier (`10000` =
+100%) — never a peso amount. This is the invariant `01-architecture.md` states for the
+whole system: the compute engine answers "how many premium-weighted hours," not "how many
+pesos" — turning a priced line into money is a gross-to-net decision this HRIS deliberately
+defers (`00-overview.md`).
+
+**`daily_summary_lines` holds one row per non-zero bucket, not one row per kind
+regardless.** The four worked kinds (`regular_day`/`regular_night`/`overtime_day`/
+`overtime_night`) are peers — a plain on-schedule day entirely in daylight still gets a
+`regular_day` line (its `applied_bp` simply reads 100% for an ordinary day), while a rest
+day nobody was expected to work, or a plain absence, gets no lines at all. `holiday_unworked`
+is the one kind with no `is_overtime`/`is_night` axis: it prices a *paid* holiday (regular
+or double-regular) that a non-exempt employee did not work, at the unworked rate from
+`PayRates::unworked()` — the one case `DailyComputation` prices a day with zero punches.
+
+**`rule_version_id` is `nullable` but `RESTRICT`s, not `SET NULL`, on delete — the M4c
+seam made durable.** A pay-rule version can never be deleted while any summary is stamped
+with it: once a rate has actually priced a real day, retracting it would silently
+re-attribute history to a rate that was never in effect. (`pay_rules` itself has no delete
+guard of its own — `App\Http\Controllers\Admin\PayRules\DeleteController`, `03-api.md` —
+so this FK is the only thing standing between a careless `DELETE` and a corrupted audit
+trail; `scripts/e2e-compute.sh` proves the refusal against the live database.) Nullable
+because a summary can be legitimately priced against the statutory floor with nothing
+persisted for it to reference — see step 4 above.
+
+**The synchronous on-write trigger.** `App\Actions\Attendance\RecordPunch` — the sole
+writer of `attendance_logs` — registers a `DB::afterCommit()` callback that calls
+`ComputeDailySummary::execute()` for the punch's own office-local date, once the
+*outermost* transaction commits (whether that's a direct punch or `RecordPunch` running
+nested inside `ApplyAttendanceAdjustment`/`ApproveRequest`'s transaction for an approved
+add/amend). A compute failure therefore can never roll back an already-durable punch.
+`EmployeeHasNoOffice`/`OfficeHasNoDefaultTemplate` (both raised by `ScheduleResolver`) are
+caught and logged rather than propagated — "no schedule configured for this employee-day
+yet" is an expected pre-M4 state, not a compute bug; anything else still surfaces
+uncaught. There is no batch/range recompute yet — that is M5b's `RecomputeRange`, which
+will need to resolve the one window-overlap case `EffectivePunches`' own doc comment
+already flags: a repeating cross-midnight shift's day-N window and day-N+1's window can
+overlap, which does not arise for M5a's single-occurrence scope.
+
+`DailyAttendanceSummary`'s `Spatie\Activitylog\Traits\LogsActivity` (log name
+`daily_attendance_summary`) logs every field above with `logOnlyDirty()`; `daily_summary_lines`
+rows are not separately logged, the same "created once with its parent, never edited"
+reasoning `pay_rule_day_rates` already uses.
 
 ---
 
@@ -953,3 +1099,9 @@ Stated plainly, since these are the reasons for the constraints above:
 - Two pay-rule versions cannot take effect on the same date, and no scalar or per-day-type
   rate can be negative or below its statutory floor. (`unique(effective_from)` + the
   non-negative `CHECK`s on `pay_rules`/`pay_rule_day_rates`, below, + `StatutoryFloor`.)
+- An employee cannot have two computed summaries for the same date, and a summary cannot
+  carry two lines of the same kind. (`unique(employee_id, date)` on
+  `daily_attendance_summaries`, `unique(summary_id, kind)` on `daily_summary_lines`, above.)
+- A `pay_rules` version that has already priced a real day cannot be deleted out from under
+  it. (`daily_attendance_summaries.rule_version_id` is `ON DELETE RESTRICT`, not `SET
+  NULL` — a domain-meaningful FK, not just a dangling-reference guard.)

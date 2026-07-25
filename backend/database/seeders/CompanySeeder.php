@@ -207,6 +207,24 @@ final class CompanySeeder extends Seeder
         // whatever "today" the e2e or timekeeping's own script runs against.
         $this->seedPunch($miguel, PunchDirection::In, '2026-01-15T00:00:00Z', $actor);
         $this->seedPunch($miguel, PunchDirection::Out, '2026-01-15T09:00:00Z', $actor);
+
+        // M5a: RecordPunch's after-commit hook (Task 6) computes a daily_attendance_summary
+        // synchronously, so every seeded punch above already left one behind — the Jan 15
+        // pair above becomes a `regular_day` line at 10000bp, the statutory ordinary-day
+        // floor. These two additions give the compute engine a second, more interesting
+        // proof point on a fresh `make dev`: Aug 21, 2026 is both a scheduled working Friday
+        // (the standard template's Mon-Fri window, no override touches it) AND the
+        // special-non-working holiday seeded above, so Miguel working it prices at 13000bp
+        // (`App\Domain\Pay\PayMultiplier::forWorkedTime`), not his ordinary 10000bp. Rosa —
+        // the Art. 82-exempt manager onboarded above — punching that SAME holiday shows the
+        // exemption short-circuiting even a holiday premium: her line still prices at
+        // 10000bp. Full 08:00-18:00 Manila (00:00-10:00 UTC), the same shape as the standard
+        // template, so neither punch produces overtime.
+        $this->seedPunch($miguel, PunchDirection::In, '2026-08-21T00:00:00Z', $actor);
+        $this->seedPunch($miguel, PunchDirection::Out, '2026-08-21T10:00:00Z', $actor);
+
+        $this->seedPunch($manilaManager, PunchDirection::In, '2026-08-21T00:00:00Z', $actor);
+        $this->seedPunch($manilaManager, PunchDirection::Out, '2026-08-21T10:00:00Z', $actor);
         $this->onboard(
             employeeNo: 'MNL-0003',
             organization: $org,

@@ -257,7 +257,8 @@ that local date; keys are `YYYY-MM-DD` strings, punches within a day ordered by 
 
 This is the **raw** ledger: because `direction` is explicit, the view labels "in / out" with
 **no pairing and no business-day logic** — a night shift's out-punch at 06:00 appears on its
-own local calendar date, honestly, and turning punches into paid hours is M5's job. Flagged
+own local calendar date, honestly, and turning punches into priced hours is the compute
+engine's job (M5a, below). Flagged
 punches appear here exactly as recorded. The employee-scoped variant reuses `EmployeeScope`
 and the 404-not-403 rule unchanged — an HR admin sees their office's punches, a manager
 their reports', and an out-of-scope subject `404`s.
@@ -265,8 +266,43 @@ their reports', and an out-of-scope subject `404`s.
 **These two reads stay raw even after M3.6.** An approved `void`/`amend` never changes what
 either endpoint returns — the annulled row is still a real, once-true punch, and this is the
 ledger you'd show an inspector. The **effective ledger** (`02-data-model.md`) that excludes
-an annulled punch is a query, not an endpoint, until M5's compute engine is the thing that
-needs to read it.
+an annulled punch is a query, not an endpoint — `App\Domain\Attendance\EffectivePunches`,
+read by M5a's compute engine below, not by either endpoint here.
+
+### Reading the computed month *(M5a)*
+
+```
+GET /api/v1/me/attendance/summary?month=YYYY-MM        # auth:sanctum — own computed days only
+  → { data: [ { date, day_type, is_rest_day, scheduled_minutes, is_art82_exempt,
+                worked_minutes, late_minutes, undertime_minutes, status, is_incomplete,
+                rule_version_id,
+                lines: [ { kind, minutes, applied_bp }, … ] }, … ] }   # ordered by date
+  → 400 validation_failed   # month missing, or not YYYY-MM
+  → 422 not_an_employee     # caller has no linked employee record — same rule as /me/attendance
+```
+
+**Self-scoped only** — there is deliberately no `{employee}`-parameterized variant the way
+`GET /employees/{employee}/attendance` has one: taking a target-employee id here would be
+an enumeration hole, so this endpoint answers "my own computed month" and nothing else. One
+entry per `daily_attendance_summaries` row the caller's own employee has for the requested
+month (`02-data-model.md`), `lines` sorted deterministically by `kind` so two reads of the
+same day never differ in ordering alone. A day the compute engine has not priced yet — no
+punches at all, or a date the synchronous on-write trigger hasn't reached (`02-data-model.md`'s
+"synchronous on-write trigger") — is simply absent from the array; this endpoint never
+invents a zero-value row for a day nothing has computed.
+
+**Every minute and basis-point value here is exactly what `02-data-model.md` says is
+stored: integer minutes, integer basis points, never a peso.** `rule_version_id` is the
+`pay_rules` version (`03-api.md`'s pay-rules section above) that priced the day's lines —
+null on a day with no lines (no configured version yet, an incomplete day, an unworked rest
+day, …), per the same rule the schema section states.
+
+This is the **only** read M5a adds; there is no write endpoint here. `ComputeDailySummary`
+runs exclusively from the synchronous on-punch trigger (`02-data-model.md`) — a manual,
+on-demand recompute is M5b's `RecomputeRange`, not this milestone. `scripts/e2e-compute.sh`
+proves an ordinary day pricing at the statutory floor, a special-non-working holiday
+pricing at 130%, and an Art. 82-exempt employee's lines all pricing at 100% even on that
+same holiday, against the live stack.
 
 ## Attendance adjustments *(M3.6)*
 
@@ -759,12 +795,12 @@ you). See `05-rbac.md`.
 ## What is not here yet
 
 Leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`); their
-endpoints land with them. Holidays (M4a), schedules (M4b), and pay rules (M4c, above) have
-all shipped — **M4, the configuration spine, is complete** — but nothing yet *reads* any
-of them to compute pay; that's M5's compute engine, which consumes M4a's `holidays` and
-M4b's schedule tables alongside M4c's `pay_rules`. Leave and overtime requests reuse the
-`requests` spine M3.6 built above, but their own detail tables and endpoints are not built
-yet.
+endpoints land with them. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the
+configuration spine; M5a's compute engine (above) now reads all three to price a day —
+**M5a is complete**. Leave and overtime requests reuse the `requests` spine M3.6 built
+above, but their own detail tables and endpoints are not built yet. Nothing yet
+*writes* a summary on demand — a manual, range-driven recompute is M5b's `RecomputeRange`,
+next.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

@@ -405,11 +405,14 @@ multiplier. Building it against seeded stubs M4 then reshapes would mean buildin
 system's highest-stakes code twice.
 
 **The resequencing table above is the authority for milestone order.** The detailed
-sections below (`## M5` onward) still carry their *pre-resequencing* titles and content —
-"Requests and approvals," "Cutoffs," and so on. Each is renumbered and re-specced through
-its own brainstorm when it is reached (as M3 was here); until then, read the table for
-order and the sections below for the substance of each unit of work, not their heading
-number.
+sections below are now renumbered to match it: `## M5 — Compute engine` is real,
+brainstormed, and complete content, built for this slot from the start; `## M6` through
+`## M9` (Requests and approvals, Cutoffs, Admin portal, Containerization) carry their
+*pre-resequencing* headings' numbers corrected, but still their *pre-resequencing*
+content — each is re-specced through its own brainstorm when it is reached (as M3 and M5
+both were), the same way M3.6 and M3.5 were pulled forward and specced early. Until a
+section is reached, read it for the substance of that unit of work, not for a promise that
+its content is final.
 
 ## M3.6 — Attendance adjustments & the request/approval subsystem
 
@@ -923,14 +926,17 @@ route at all. **No pay is computed** — the version is the third and final inpu
 compute engine will read (alongside M4a's `holidays` and M4b's schedule tables) to stamp a
 worked date's `rule_version_id`.
 
-**One seam for M5 to close.** `DELETE /admin/pay-rules/{payRule}` is unrestricted today
-because nothing reads `pay_rules` yet — a hard delete cascades its day-rates and leaves only
-the `activity_log` `deleted` event. Immutability is airtight against *edits* (no `PATCH`,
-no update action), but not against deletion. When M5 adds
-`daily_attendance_summaries.rule_version_id → pay_rules(id)`, a *consumed* version must not
-be deletable: M5 introduces `ON DELETE RESTRICT` (or soft-deletes versions) so a stamped
-snapshot can never be orphaned. Recorded here so it is designed in, not discovered at
-compute time.
+**One seam for M5 to close — closed in M5a.** `DELETE /admin/pay-rules/{payRule}` was
+unrestricted at the time this was written, because nothing read `pay_rules` yet. M5a's
+`daily_attendance_summaries.rule_version_id → pay_rules(id)` FK is `ON DELETE RESTRICT`
+(`02-data-model.md`), exactly as anticipated here: a *consumed* version can no longer be
+deleted once any summary is stamped with it — `DeleteController` itself still issues a
+plain, unconditional `$payRule->delete()`, so the refusal is the database's constraint,
+not new application code. `scripts/e2e-compute.sh` proves the refusal live. (The FK
+violation is not yet mapped to a friendly domain error — it surfaces as the closed
+envelope's generic `500 internal_error` catch-all rather than a `409`/`422`-shaped
+refusal; a nicer status is a small polish item for whoever revisits `DeleteController`
+next, not a correctness gap.)
 
 **Status: complete.** **407 backend tests** (1,335 assertions — the two tables' schema,
 `StatutoryFloor`'s own cell-by-cell unit suite, and the create/list/show/delete endpoints'
@@ -971,7 +977,109 @@ picks up M5 next:
   locking being an optimization for when a cheaper pre-check would otherwise race, not a
   requirement of the pattern itself.
 
-## M5 — Requests and approvals
+## M5 — Compute engine
+
+Turns M3's punches — read through M3.6's annulments, never the raw ledger alone — into
+priced daily summaries, reading M4a's `holidays`, M4b's schedule tables, and M4c's
+`pay_rules`: the first and only consumer of all three. Ships in two slices: **M5a (below)
+is complete**; M5b (`RecomputeRange`) is next.
+
+### M5a — `ComputeDailySummary` and the read-only `/me/attendance/summary`
+
+- `daily_attendance_summaries` (one row per employee-day, `unique(employee_id, date)`,
+  snapshotting `day_type`/`is_rest_day`/`scheduled_minutes`/`is_art82_exempt` as resolved
+  *on that date*) plus `daily_summary_lines` (one row per non-zero priced bucket —
+  `regular_day`/`regular_night`/`overtime_day`/`overtime_night`/`holiday_unworked`,
+  `unique(summary_id, kind)`). Every value is integer minutes or integer basis points —
+  **no pesos anywhere**. See `02-data-model.md`.
+- `App\Domain\Attendance\EffectivePunches::forDate()` — the effective-ledger read M3.6's
+  own roadmap entry deferred: an employee's punches for one *shift window* (the calendar
+  day, or later if the schedule's end minute runs past midnight), with anything an
+  `attendance_annulments` row voided excluded, expressed as minutes from that date's local
+  midnight (so a post-midnight out-punch on a night shift reads as e.g. `1800`, not
+  wrapped down to `360`).
+- `App\Domain\Compute\DailyComputation` — the pure calculator (no DB, no config): pairs
+  the punches (an odd count is `is_incomplete`, never a guess), nets out the meal break,
+  slices the net total into regular vs. overtime against the resolved schedule, splits
+  each of those chronologically into day vs. night, and prices each of the up to four
+  resulting non-zero buckets.
+- `App\Domain\Pay\PayRates` + `App\Support\PayRatesFactory` — the M4c reconciliation:
+  `PayRates::statutory()` (from `config('hris.pay_floors')`, the same numbers M1's premium
+  matrix tested) and `PayRates::fromVersion()` (from a real `pay_rules` version) both feed
+  the *same* `App\Domain\Pay\PayMultiplier`, so a live `pay_rules` version and the
+  statutory floor are priced through one function, never two.
+- `App\Actions\Compute\ComputeDailySummary` — resolves the day's business context
+  (employment record effective *on the date*, day type from the holiday calendar,
+  schedule from `ScheduleResolver`, the effective `pay_rules` version), hands it to
+  `DailyComputation`, and idempotently persists the result: `lockForUpdate()`s the
+  employee row, deletes any existing summary for that day, inserts the fresh one — so
+  computing the same day twice yields exactly one summary, never a duplicate.
+- **The synchronous on-write trigger**, not a queued job: `RecordPunch` (the sole writer
+  of `attendance_logs`) and `ApplyAttendanceAdjustment` (M3.6's adjustment applier) each
+  register a `DB::afterCommit()` callback that recomputes the affected day the moment the
+  *outermost* transaction commits — a direct punch, or an approved add/void/amend running
+  nested inside `ApproveRequest`'s transaction. "No schedule configured yet" is caught and
+  logged as the expected pre-M4 state it is; anything else still propagates.
+- `GET /me/attendance/summary?month=YYYY-MM` — self-scoped (no `{employee}` variant; that
+  would be an enumeration hole), the caller's own computed month, ordered by date, lines
+  sorted by kind. `422 not_an_employee` mirrors `/me/attendance`'s own rule. See
+  `03-api.md`.
+- **`rule_version_id`'s FK is `RESTRICT`, not `SET NULL`, on delete** — the seam M4c's own
+  roadmap entry (above) flagged in advance is now closed: a `pay_rules` version that has
+  actually priced a real day can never be deleted out from under it.
+- The frontend's `/me/attendance` gains a computed layer, additive to the raw punch
+  calendar it already had (M3.5): a compact in-cell indicator (`DaySummaryIndicator`) and a
+  full breakdown in a day-detail panel below the calendar (`DaySummaryDetail`), showing
+  each priced line next to that day's actual punch times — never a peso, never inventing a
+  number for a day nothing has computed yet.
+- `CompanySeeder` gives Miguel Santos (MNL-0002) a punched ordinary day (2026-01-15,
+  priced at 100%) and both Miguel and Rosa Bautista (MNL-0001, the seeded Art. 82-exempt
+  manager) a punched Aug 21 — the seeded special-non-working holiday — so Miguel prices at
+  130% and Rosa's exemption still collapses hers to 100%, on a fresh `make dev`.
+
+**Done when:** an ordinary punched 8-hour day prices as one `regular_day` line at 480
+minutes, 10000bp (100%, the statutory floor), stamped with the effective `rule_version_id`
+(`ComputeDailySummaryTest`); the same shape worked on Aug 21 (special-non-working) prices
+at 13000bp (130%) instead; a night shift's hours inside the night window price at the
+compounded night-differential rate (`DailyComputationTest`); an Art. 82-exempt employee's
+lines all price at 10000bp regardless of overtime or holiday; an odd punch count computes
+to zero worked minutes, no lines, `is_incomplete`; recomputing the same day twice is
+byte-identical; deleting a stamped `pay_rules` version is refused by the database's own
+`RESTRICT`. **No pesos stored anywhere.** `scripts/e2e-compute.sh` proves the 100%/130%/
+Art.-82/idempotent/`RESTRICT` chain against the live stack.
+
+**Status: complete.** **457 backend tests** (1,580 assertions — `DailyComputation`'s own
+exhaustive bp-matrix unit suite, `ComputeDailySummary`'s context-resolution and
+idempotent-persistence feature tests, the on-write-trigger integration test, and
+`ListMySummaryController`'s scoping/validation tests, on top of everything M0-M4c already
+covered), of which **19 are arch tests** (unchanged since M4c — M5a's new action/domain
+classes are covered by the same general-purpose rules, not a new arch-guarded invariant of
+their own). Frontend at **313 tests** (M4c recorded 297; `useMyAttendanceSummary`,
+`DaySummaryIndicator`, `DaySummaryDetail`, and the `/me/attendance` computed-layer
+integration tests make up the difference). `lint`, `typecheck`, and `build` are green
+native and inside the `make test` containers alike. `scripts/e2e-compute.sh` walks the
+full read side of the pipeline — the 100% ordinary day, the 130% holiday, the Art.
+82-exempt employee's flat 100%, a live direct-recompute idempotency check, and the
+`RESTRICT` refusal via `psql` — against the live stack.
+
+**M5b (`RecomputeRange`) is next**, and carries the deferred items this slice's own code
+already flags rather than solving silently:
+
+- **The consecutive-night-shift window-overlap case.** `EffectivePunches::forDate()`'s own
+  doc comment records it: a *repeating* cross-midnight shift's day-N window (which runs
+  past local midnight) and day-N+1's window can overlap, so a punch inside that overlap —
+  or one timestamped exactly on the boundary — is claimable by both dates. M5a's scope
+  (recomputing one day at a time, from a single trigger) never exercises this; whoever
+  drives `EffectivePunches` across a *range* has to resolve it, e.g. by bounding a day's
+  window start at the previous day's resolved window end, or by treating a consumed punch
+  as spent.
+- **A real recompute surface.** M5a's only writer of `daily_attendance_summaries` is the
+  synchronous on-punch trigger; there is no batch or on-demand recompute yet. M5b's
+  `RecomputeRange` is that surface — driven by a config change (a new `pay_rules` version,
+  an edited holiday or schedule) needing to reprice a range of already-computed days,
+  queued rather than synchronous given the range it may need to cover.
+
+## M6 — Requests and approvals
 
 - Leave types configurable per office: paid/unpaid, requires attachment, deducts from
   balance, convertible to cash, max carryover. Seeded with the PH statutory set — SIL
@@ -998,7 +1106,7 @@ picks up M5 next:
 recomputes to the correct breakdown — and the original punch row is byte-identical to
 what it was before. `scripts/e2e-leave-and-ot.sh` proves the leave and OT paths.
 
-## M6 — Cutoffs, locking, and payroll export
+## M7 — Cutoffs, locking, and payroll export
 
 The milestone that makes the number defensible.
 
@@ -1020,7 +1128,7 @@ rather than silently succeeding; the export reconciles line-for-line against the
 view; and `make restore-drill`-style, a recompute of a closed period returns byte-identical
 numbers.
 
-## M7 — Admin portal and audit
+## M8 — Admin portal and audit
 
 - Organization, office, and department CRUD; the multi-step employee profiler
   (`<Wizard>`); role management; `hr_admin_offices` assignment; activity-log viewer with
@@ -1032,7 +1140,7 @@ numbers.
 **Done when:** a company can be configured from an empty database entirely through the
 UI, and the audit log shows every step of it.
 
-## M8 — Containerization and production
+## M9 — Containerization and production
 
 - `compose.prod.yml`: single FrankenPHP edge, host-routed TLS, no-CORS preserved end to
   end. Production images for API and web.
