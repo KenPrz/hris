@@ -342,8 +342,8 @@ app/
   Actions/
     System/      CheckHealth
                  (M3) Attendance/ RecordPunch, ComputeDailySummary
-                 (M5) Requests/   SubmitRequest, ApproveRequest, RejectRequest
-                 (M6) Cutoffs/    CloseCutoff, ReopenCutoff, ExportPayroll
+                 (M6) Requests/   SubmitRequest, ApproveRequest, RejectRequest
+                 (M7) Cutoffs/    CloseCutoff, ReopenCutoff, ExportPayroll
   Domain/
     System/      HealthStatus
                  (M1) Money, Minutes, BasisPoints, DayType, PayMultiplier,
@@ -508,7 +508,7 @@ The pattern's real payoff:
 
 Concurrency tests need two real connections to prove the locking works. A single-process
 test will pass whether or not `lockForUpdate()` is even there, which makes it worse than
-no test — it's a green check mark asserting nothing. The M6 race between approving a
+no test — it's a green check mark asserting nothing. The M7 race between approving a
 request and closing the cutoff that contains it is the one that must be tested this way.
 
 ## Worked example

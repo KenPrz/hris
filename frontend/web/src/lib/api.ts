@@ -137,6 +137,43 @@ export type AttendanceLog = {
 export type AttendanceMonth = Record<string, AttendanceLog[]>
 
 // ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/DailySummaryResource.php.
+// ---------------------------------------------------------------------------
+
+export type SummaryLineKind =
+  | 'regular_day'
+  | 'regular_night'
+  | 'overtime_day'
+  | 'overtime_night'
+  | 'holiday_unworked'
+
+export type DailySummaryLine = {
+  kind: SummaryLineKind
+  minutes: number
+  applied_bp: number
+}
+
+/**
+ * One priced day. `day_type` reuses `PayRuleDayType` (all five values, including
+ * `ordinary`) rather than `DayTypeTag`'s four-value holiday-only `DayType` — a summary
+ * prices every day an employee can work, ordinary days included, not just holidays.
+ */
+export type DailySummary = {
+  date: string // YYYY-MM-DD
+  day_type: PayRuleDayType
+  is_rest_day: boolean
+  scheduled_minutes: number
+  is_art82_exempt: boolean
+  worked_minutes: number
+  late_minutes: number
+  undertime_minutes: number
+  status: string
+  is_incomplete: boolean
+  rule_version_id: string | null
+  lines: DailySummaryLine[]
+}
+
+// ---------------------------------------------------------------------------
 // Wire type — verified against app/Http/Resources/EmployeeResource.php.
 // ---------------------------------------------------------------------------
 
@@ -323,6 +360,9 @@ export const api = {
     list: () => request<Employee[]>('/employees'),
   },
   myAttendance: (month: string) => request<AttendanceMonth>(`/me/attendance?month=${month}`),
+  attendance: {
+    summary: (month: string) => request<DailySummary[]>(`/me/attendance/summary?month=${month}`),
+  },
   punch: (direction: PunchDirection, idempotencyKey: string) =>
     request<AttendanceLog>('/attendance/punch', {
       method: 'POST',

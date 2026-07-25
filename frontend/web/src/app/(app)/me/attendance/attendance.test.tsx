@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { AttendanceLog, AttendanceMonth } from '@/lib/api'
+import type { AttendanceLog, AttendanceMonth, DailySummary } from '@/lib/api'
 import { addMonths, currentMonth, monthLabel, todayInZone } from '@/lib/date'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import { clearToken, setToken } from '@/lib/session'
@@ -60,18 +60,28 @@ const sessionBody = {
   },
 }
 
-/** Routes GET /me, GET /me/attendance?month=..., and POST /attendance/punch off one mock. */
+/** Routes GET /me, GET /me/attendance?month=..., GET /me/attendance/summary?month=..., and
+ * POST /attendance/punch off one mock. The summary check MUST come before the plain
+ * attendance check — both paths start with `/api/v1/me/attendance`. */
 function stubApi(options: {
   attendanceByMonth?: Record<string, AttendanceMonth>
+  summariesByMonth?: Record<string, DailySummary[]>
   punchResult?: AttendanceLog | (() => AttendanceLog)
 }): ReturnType<typeof vi.fn> {
   const attendanceByMonth = options.attendanceByMonth ?? {}
+  const summariesByMonth = options.summariesByMonth ?? {}
 
   const fn = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
 
     if (url === '/api/v1/me' && method === 'GET') {
       return { ok: true, status: 200, json: async () => sessionBody }
+    }
+
+    if (url.startsWith('/api/v1/me/attendance/summary') && method === 'GET') {
+      const month = new URL(url, 'http://x').searchParams.get('month') ?? ''
+      const data = summariesByMonth[month] ?? []
+      return { ok: true, status: 200, json: async () => ({ data }) }
     }
 
     if (url.startsWith('/api/v1/me/attendance') && method === 'GET') {
@@ -336,5 +346,174 @@ describe('/me/attendance — empty state', () => {
 
     expect(await screen.findByText(/no punches/i)).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+})
+
+describe('/me/attendance — the computed layer', () => {
+  function summaryFor(date: string, overrides: Partial<DailySummary> = {}): DailySummary {
+    return {
+      date,
+      day_type: 'ordinary',
+      is_rest_day: false,
+      scheduled_minutes: 480,
+      is_art82_exempt: false,
+      worked_minutes: 540,
+      late_minutes: 0,
+      undertime_minutes: 0,
+      status: 'final',
+      is_incomplete: false,
+      rule_version_id: 'rv1',
+      lines: [
+        { kind: 'regular_day', minutes: 480, applied_bp: 10000 },
+        { kind: 'overtime_day', minutes: 60, applied_bp: 12500 },
+      ],
+      ...overrides,
+    }
+  }
+
+  it('shows the compact worked total and OT badge IN THE CELL, alongside the still-visible raw punch times', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          // Raw pairing totals 8h (480m) — deliberately DIFFERENT from the computed
+          // worked_minutes below (540m/"9h"), so the two totals can be told apart in the
+          // assertions instead of colliding on the same rendered text.
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    // The raw ledger: DayCell's punch-span text, unmodified.
+    expect(await screen.findByText('08:00–16:00')).toBeInTheDocument()
+
+    // The compact computed indicator, on the same calendar cell: the worked total and the
+    // OT badge (an overtime_* line exists) — additive to the raw punch span above, never a
+    // replacement for it. The full breakdown (line items) does NOT render in the cell.
+    const total = screen.getByText('9h')
+    expect(total).toBeInTheDocument()
+    expect(screen.getByText('OT')).toBeInTheDocument()
+    expect(screen.queryByText('Regular (day)')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overtime (day)')).not.toBeInTheDocument()
+
+    // Both the raw span and the compact indicator live inside the SAME gridcell.
+    const cell = total.closest('[role="gridcell"]')
+    expect(cell).not.toBeNull()
+    expect(cell).toHaveTextContent('08:00–16:00')
+
+    // Both coexist for the same day — the honest ledger stays visible.
+    expect(screen.getByText('08:00–16:00')).toBeInTheDocument()
+  })
+
+  it('shows the premium badge when a line prices above 100% (applied_bp > 10000)', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      // A punch elsewhere in the month so the ledger isn't empty and the calendar (rather
+      // than the EmptyState) renders — the premium badge lives on 2026-05-12's own cell,
+      // which itself has no raw punches, only a computed summary.
+      attendanceByMonth: {
+        '2026-05': { '2026-05-01': [punch({ punched_at: '2026-05-01T08:00:00+08:00' })] },
+      },
+      summariesByMonth: {
+        '2026-05': [
+          summaryFor('2026-05-12', {
+            lines: [{ kind: 'regular_night', minutes: 480, applied_bp: 11000 }],
+          }),
+        ],
+      },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('premium')).toBeInTheDocument()
+  })
+
+  it('renders nothing extra for a day with no computed summary — the raw punches are unaffected', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T17:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [] },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('08:00–17:00')).toBeInTheDocument()
+    expect(screen.queryByText('OT')).not.toBeInTheDocument()
+    expect(screen.queryByText('incomplete')).not.toBeInTheDocument()
+  })
+
+  it('shows a hint in the day-detail panel until a day is selected', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    await screen.findByText('08:00–16:00')
+
+    expect(screen.getByText(/select a day above/i)).toBeInTheDocument()
+    // Nothing from the full breakdown has rendered anywhere yet.
+    expect(screen.queryByText('Regular (day)')).not.toBeInTheDocument()
+  })
+
+  it('clicking a day with a computed summary shows the full breakdown in the day-detail panel, OUTSIDE the gridcell, alongside that day\'s raw punch times', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    await screen.findByText('08:00–16:00')
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details for 2026-05-10' }))
+
+    // The full breakdown — line items DaySummaryDetail alone renders — now shows.
+    const regularLine = await screen.findByText('Regular (day)')
+    const overtimeLine = screen.getByText('Overtime (day)')
+
+    // STRUCTURAL assertion: the breakdown is rendered OUTSIDE any gridcell, so a future
+    // regression that stuffs it back into the clipped calendar cell is caught even though
+    // jsdom can't see the visual clipping itself.
+    expect(regularLine.closest('[role="gridcell"]')).toBeNull()
+    expect(overtimeLine.closest('[role="gridcell"]')).toBeNull()
+
+    // The day-detail panel also shows that day's raw punch times, alongside the breakdown
+    // — the ledger stays visible even off the calendar grid.
+    expect(screen.getByText(/Clock in at 08:00/)).toBeInTheDocument()
+    expect(screen.getByText(/Clock out at 16:00/)).toBeInTheDocument()
+
+    // And the raw ledger in the calendar cell itself is unaffected by the selection.
+    expect(screen.getByText('08:00–16:00')).toBeInTheDocument()
   })
 })

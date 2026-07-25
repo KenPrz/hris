@@ -14,13 +14,14 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
-import type { AttendanceLog, AttendanceMonth, PunchDirection } from '@/lib/api'
+import type { AttendanceLog, AttendanceMonth, DailySummary, PunchDirection } from '@/lib/api'
 import { ApiError } from '@/lib/api'
 import { addMonths, currentMonth, monthLabel, timeInZone, todayInZone } from '@/lib/date'
 import { formatDuration } from '@/lib/duration'
 import { type PunchPairing, pairPunches, sortByPunchedAt } from '@/lib/punches'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import { useMyAttendance } from '@/hooks/useMyAttendance'
+import { useMyAttendanceSummary } from '@/hooks/useMyAttendanceSummary'
 import { usePunch } from '@/hooks/usePunch'
 import { useSession } from '@/hooks/useSession'
 import { AppShell } from '@/components/AppShell'
@@ -32,6 +33,8 @@ import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
 import { DayCell } from '@/components/domain/DayCell'
+import { DaySummaryDetail } from '@/components/domain/DaySummaryDetail'
+import { DaySummaryIndicator } from '@/components/domain/DaySummaryIndicator'
 
 // Month 01–12 only. A shape-only `\d{2}` would accept `2026-99`, which then renders
 // "undefined 2026" and an empty grid instead of falling back to the current month.
@@ -92,6 +95,12 @@ function isMonthEmpty(month: AttendanceMonth): boolean {
   return Object.values(month).every((punches) => punches.length === 0)
 }
 
+/** Keyed by `YYYY-MM-DD` — the computed layer's lookup alongside the raw `AttendanceMonth`
+ * map, so `renderDay` can join a day's computed summary to its raw punches by date. */
+function summaryByDate(summaries: DailySummary[]): Record<string, DailySummary> {
+  return Object.fromEntries(summaries.map((summary) => [summary.date, summary]))
+}
+
 /** Ticks once a second so the hero's clock — and the live "Today" total — stay current. */
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date())
@@ -123,10 +132,19 @@ export default function AttendancePage() {
   const thisMonth = currentMonth(OFFICE_TIME_ZONE)
   const today = todayInZone(OFFICE_TIME_ZONE)
 
+  // The day-detail panel below the calendar — `null` until a day is clicked, so the panel
+  // starts as a hint rather than guessing which day the employee wants to inspect first.
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+
   // Same query key when browsing the current month — TanStack Query dedupes it into one
   // request, so this never doubles the fetch in the common case.
   const heroQuery = useMyAttendance(thisMonth)
   const viewedQuery = useMyAttendance(viewedMonth)
+  // The computed layer for the viewed month — additive to `viewedQuery`'s raw punches,
+  // never a replacement. A day with no summary yet (compute hasn't run, or the day is
+  // outside the employee's own record) simply has no entry in the map, and
+  // `DaySummaryDetail` renders nothing for it — the raw punches still show regardless.
+  const summaryQuery = useMyAttendanceSummary(viewedMonth)
   const punchMutation = usePunch()
 
   const now = useNow()
@@ -135,6 +153,15 @@ export default function AttendancePage() {
   function navigateToMonth(nextMonth: string) {
     router.replace(`${pathname}?month=${nextMonth}`)
   }
+
+  const summariesByDate = summaryByDate(summaryQuery.data ?? [])
+
+  // The day-detail panel's own data — derived from the SAME `viewedQuery`/`summaryQuery`
+  // the calendar reads, so the panel and the cell can never disagree about a selected
+  // day's punches or summary.
+  const selectedDaySummary = selectedDate !== null ? summariesByDate[selectedDate] : undefined
+  const selectedDayPunches =
+    selectedDate !== null ? sortByPunchedAt((viewedQuery.data ?? {})[selectedDate] ?? []) : []
 
   const todaysPunches = sortByPunchedAt(heroQuery.data?.[today] ?? [])
   const lastTodaysPunch = todaysPunches.at(-1) ?? null
@@ -237,19 +264,97 @@ export default function AttendancePage() {
             Nothing recorded for {monthLabel(viewedMonth)} yet.
           </EmptyState>
         ) : (
-          <MonthCalendar
-            month={viewedMonth}
-            timeZone={OFFICE_TIME_ZONE}
-            renderDay={({ date, isToday, inMonth }) => (
-              <DayCell
-                date={date}
-                punches={(viewedQuery.data ?? {})[date] ?? []}
-                timeZone={OFFICE_TIME_ZONE}
-                isToday={isToday}
-                inMonth={inMonth}
-              />
-            )}
-          />
+          <>
+            <MonthCalendar
+              month={viewedMonth}
+              timeZone={OFFICE_TIME_ZONE}
+              renderDay={({ date, isToday, inMonth }) => (
+                // The raw ledger (DayCell) and the computed layer's COMPACT indicator
+                // render stacked in the same cell — additive, never a swap, and both
+                // genuinely fit within the grid's fixed cell height (DayCell no longer
+                // stretches to claim it alone; see DayCell's doc comment). The full
+                // breakdown (DaySummaryDetail) never lives here — it's in the day-detail
+                // panel below, where there's no clip boundary to hide behind. The whole
+                // cell is a button so a day is selectable with mouse or keyboard.
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(date)}
+                  aria-label={`View details for ${date}`}
+                  aria-pressed={date === selectedDate}
+                  className="flex h-full w-full flex-col text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
+                  style={{ gap: 'var(--sp-xxs)', border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }}
+                >
+                  <DayCell
+                    date={date}
+                    punches={(viewedQuery.data ?? {})[date] ?? []}
+                    timeZone={OFFICE_TIME_ZONE}
+                    isToday={isToday}
+                    inMonth={inMonth}
+                  />
+                  <DaySummaryIndicator summary={summariesByDate[date]} />
+                </button>
+              )}
+            />
+
+            <section
+              aria-label="Day detail"
+              style={{
+                background: 'var(--surface-1)',
+                borderRadius: 'var(--radius)',
+                padding: 'var(--sp-lg)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--sp-md)',
+              }}
+            >
+              {selectedDate === null ? (
+                <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+                  Select a day above to see its punches and computed breakdown.
+                </span>
+              ) : (
+                <>
+                  <SectionHeader title={selectedDate} />
+
+                  <div className="flex flex-col" style={{ gap: 'var(--sp-xs)' }}>
+                    <span
+                      style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}
+                    >
+                      Punches
+                    </span>
+                    {selectedDayPunches.length > 0 ? (
+                      <ul className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
+                        {selectedDayPunches.map((selectedPunch) => (
+                          <li
+                            key={selectedPunch.id}
+                            style={{ font: 'var(--t-body)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}
+                          >
+                            {DIRECTION_LABEL[selectedPunch.direction]} at{' '}
+                            {timeInZone(selectedPunch.punched_at, OFFICE_TIME_ZONE)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span
+                        style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-subtle)' }}
+                      >
+                        No punches recorded for this day.
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedDaySummary !== undefined ? (
+                    <DaySummaryDetail summary={selectedDaySummary} />
+                  ) : (
+                    <span
+                      style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-subtle)' }}
+                    >
+                      No computed breakdown for this day yet.
+                    </span>
+                  )}
+                </>
+              )}
+            </section>
+          </>
         )}
       </div>
     </AppShell>

@@ -19,7 +19,7 @@
 #   itself as the uuid-morph subject.
 #
 # One thing this script deliberately does NOT assert via HTTP: reading the activity log.
-# There is no `GET` endpoint for it yet (that's M7's audit-log viewer), so the
+# There is no `GET` endpoint for it yet (that's M8's audit-log viewer), so the
 # causer/subject proof reads the `activity_log` table directly, the same way
 # scripts/e2e-holidays.sh and scripts/e2e-adjustments.sh do.
 #
@@ -171,7 +171,7 @@ echo "7b. hr.manila POST /admin/pay-rules: HTTP $HR_CREATE_STATUS code=$(echo "$
 
 # 8. The activity log names Sofia as the causer of the created version (step 2), with the
 #    version itself as the uuid-morph subject. No HTTP endpoint reads the log yet (that's
-#    M7's audit-log viewer), so this reads `activity_log` directly, the same way
+#    M8's audit-log viewer), so this reads `activity_log` directly, the same way
 #    scripts/e2e-holidays.sh and scripts/e2e-adjustments.sh do.
 ACTIVITY_ROW=$(docker compose -f "$REPO_ROOT/compose.dev.yml" exec -T db \
   psql -U hris -d hris -tAc \

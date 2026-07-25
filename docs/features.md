@@ -255,7 +255,41 @@ office/admin screens; those arrive with the milestones that own their data.
   configuration spine (M4) is complete** — holiday calendars, schedules, and pay rules are
   all in place for that engine to read.
 
+## The compute engine *(M5a)*
+
+- **Every day's punches now turn into a priced total, automatically.** The moment an
+  employee clocks in and out (or HR approves a correction to a missed punch), the system
+  reads that day's schedule, checks whether it was a holiday, and prices exactly how many
+  minutes were worked at exactly what rate — no one has to ask for it, and no one has to
+  wait for a payroll run to see it.
+- **The employee's own attendance screen shows both the punches and what they turned
+  into.** `/me/attendance` already showed the raw clock-in/clock-out times (M3.5); it now
+  also shows, for each day, a compact worked-hours total right in the calendar cell, and a
+  full breakdown — how many minutes were regular time, how many were night differential,
+  how many were overtime, and at what percentage each priced — in a detail panel below the
+  calendar when that day is selected. The raw punches are still right there alongside it;
+  the computed total is additional, never a replacement.
+- **The number is always premium-weighted hours, never a peso.** A regular hour reads
+  100%; work on a special non-working holiday reads 130%; night hours compound on top of
+  whatever the day itself is worth. Turning that percentage into an actual peso amount is a
+  gross-to-net decision this system deliberately defers (see `docs/00-overview.md`) — what
+  the employee sees here is exactly what was worked and at what premium, nothing more.
+- **A manager or field employee who is exempt from overtime law (Art. 82) sees every hour
+  price at a flat 100%** — even a holiday they worked, even hours that would otherwise
+  qualify for overtime or night differential for anyone else. The exemption is not a
+  smaller number tacked on after the fact; the engine simply never applies a premium to
+  their time at all.
+- **A day nobody could finish tallying honestly says so.** Clock in with no matching
+  clock-out, and the day shows zero worked hours and an "incomplete" flag — never a guessed
+  number. Filing an adjustment (M3.6) to add the missing punch is how that day gets a real
+  total.
+- **Not yet in this milestone:** there is no way to ask the system to recompute a day on
+  demand, or to re-price a whole range of days after a config change — every priced day
+  today comes from the automatic trigger on the punch itself. A manual, range-driven
+  recompute is the next slice (M5b).
+
 ---
 
-*(Turning punches into computed pay — the premium-rate engine — follows in a
-later milestone, now that the whole configuration spine exists for it to read.)*
+*(Requests and approvals — leave, overtime pre-authorization, and the state machine that
+routes them — follows in a later milestone, now that the compute engine exists to price
+what they affect.)*

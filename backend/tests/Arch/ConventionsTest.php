@@ -50,6 +50,7 @@ arch('domain value objects are final')
     ->toBeClasses()
     ->ignoring([
         'App\Domain\Pay\DayType',
+        'App\Domain\Pay\SummaryLineKind',
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
@@ -62,6 +63,7 @@ arch('domain value objects are final')
     ->toBeFinal()
     ->ignoring([
         'App\Domain\Pay\DayType',
+        'App\Domain\Pay\SummaryLineKind',
         'App\Domain\Attendance\PunchDirection',
         'App\Domain\Attendance\PunchSource',
         'App\Domain\Attendance\PunchVerification',
