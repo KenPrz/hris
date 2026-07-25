@@ -11,6 +11,7 @@ use App\Exceptions\Domain\OfficeHasNoDefaultTemplate;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The single writer of attendance_logs (arch-guarded). Snapshots the employee's current
@@ -73,9 +74,14 @@ final class RecordPunch
             DB::afterCommit(function () use ($employee, $date): void {
                 try {
                     $this->computeDailySummary->execute($employee, $date);
-                } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate) {
+                } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate $e) {
                     // See the class docblock: no schedule configured for this employee-day
-                    // yet is an expected, non-fatal state, not a compute failure.
+                    // yet is an expected, non-fatal state, not a compute failure. Logged so
+                    // that once M4 config is expected everywhere, a still-unschedulable
+                    // employee is diagnosable rather than silently summary-less.
+                    Log::info('Skipped daily summary compute after punch: no schedule configured.', [
+                        'employee_id' => $employee->id, 'date' => $date, 'reason' => $e::class,
+                    ]);
                 }
             });
 

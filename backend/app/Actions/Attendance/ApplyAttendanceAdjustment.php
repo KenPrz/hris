@@ -15,6 +15,7 @@ use App\Models\AttendanceLog;
 use App\Models\Employee;
 use App\Models\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Applies an approved attendance adjustment to the ledger. Called by ApproveRequest INSIDE
@@ -75,9 +76,12 @@ final class ApplyAttendanceAdjustment
             DB::afterCommit(function () use ($employee, $date): void {
                 try {
                     $this->computeDailySummary->execute($employee, $date);
-                } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate) {
+                } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate $e) {
                     // See RecordPunch's docblock: no schedule configured yet is expected,
-                    // non-fatal, pre-M4 state — not a compute failure.
+                    // non-fatal, pre-M4 state — not a compute failure. Logged for diagnosability.
+                    Log::info('Skipped daily summary compute after adjustment: no schedule configured.', [
+                        'employee_id' => $employee->id, 'date' => $date, 'reason' => $e::class,
+                    ]);
                 }
             });
         }
