@@ -36,6 +36,7 @@ it('prices an ordinary 8h day as 480 regular_day minutes at 100%', function (): 
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -52,23 +53,33 @@ it('prices an ordinary 8h day as 480 regular_day minutes at 100%', function (): 
     expect($out->lines[0]->appliedBp)->toBe(10000);
 });
 
-it('prices a rest-day-worked ordinary day at 130%', function (): void {
+it('prices a rest day worked past 8h as regular_day base + overtime_day at the rest-day OT rate', function (): void {
+    // A REAL rest day: scheduledMinutes 0, scheduledStartMinute null (nothing scheduled),
+    // overtimeThresholdMinutes the statutory 8h floor (480) — not the (zero) scheduled
+    // minutes. 08:00-18:00 (480-1080) = 600m gross, 60m break => 540 net: the first 480
+    // are regular (rest-day BASE, 130%), the remaining 60 are overtime (rest-day OT, 169%).
     $out = DailyComputation::compute(new DailyComputationInput(
-        punches: [480, 1020],
+        punches: [480, 1080],
         dayType: DayType::Ordinary,
         isRestDay: true,
-        scheduledMinutes: 480,
-        scheduledStartMinute: 480,
+        scheduledMinutes: 0,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: null,
         breakMinutes: 60,
         isArt82Exempt: false,
         rates: rates(),
     ));
 
-    expect($out->workedMinutes)->toBe(480);
-    expect($out->lines)->toHaveCount(1);
-    expect($out->lines[0]->kind)->toBe(SummaryLineKind::RegularDay);
-    expect($out->lines[0]->minutes)->toBe(480);
-    expect($out->lines[0]->appliedBp)->toBe(13000);
+    expect($out->workedMinutes)->toBe(540);
+    expect($out->lateMinutes)->toBe(0);
+    expect($out->undertimeMinutes)->toBe(0);
+    expect($out->lines)->toHaveCount(2);
+
+    $byKind = collect($out->lines)->keyBy(fn ($l) => $l->kind->value);
+    expect($byKind['regular_day']->minutes)->toBe(480);
+    expect($byKind['regular_day']->appliedBp)->toBe(13000);
+    expect($byKind['overtime_day']->minutes)->toBe(60);
+    expect($byKind['overtime_day']->appliedBp)->toBe(16900);
 });
 
 it('prices a special working day worked at 100%', function (): void {
@@ -77,6 +88,7 @@ it('prices a special working day worked at 100%', function (): void {
         dayType: DayType::SpecialWorking,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -93,6 +105,7 @@ it('prices a special non-working day worked at 130%', function (): void {
         dayType: DayType::SpecialNonWorking,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -109,6 +122,7 @@ it('prices a regular holiday worked at 200%', function (): void {
         dayType: DayType::RegularHoliday,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -125,6 +139,7 @@ it('prices a double regular holiday worked at 300%', function (): void {
         dayType: DayType::DoubleRegularHoliday,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -143,6 +158,7 @@ it('prices a regular holiday NOT worked as one holiday_unworked line at 100%', f
         dayType: DayType::RegularHoliday,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -163,6 +179,7 @@ it('gives an art82-exempt employee NO holiday_unworked line at all (no premium e
         dayType: DayType::RegularHoliday,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 0,
         isArt82Exempt: true,
@@ -179,7 +196,8 @@ it('is not incomplete on an unworked rest day, and carries no lines', function (
         dayType: DayType::Ordinary,
         isRestDay: true,
         scheduledMinutes: 0,
-        scheduledStartMinute: 0,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: null,
         breakMinutes: 0,
         isArt82Exempt: false,
         rates: rates(),
@@ -198,6 +216,7 @@ it('carries no lines for an absence on an ordinary day (no punches, not a paid h
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -219,6 +238,7 @@ it('prices a night shift entirely within one calendar day at the compounded 110%
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 120,
+        overtimeThresholdMinutes: 120,
         scheduledStartMinute: 1320,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -239,6 +259,7 @@ it('prices a cross-midnight night shift at the compounded 110%', function (): vo
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 1320,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -261,6 +282,7 @@ it('prices work beyond the scheduled day as overtime at +25% ordinary', function
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -278,12 +300,15 @@ it('prices work beyond the scheduled day as overtime at +25% ordinary', function
 });
 
 it('keeps a compressed 10h scheduled day entirely regular, with no overtime line', function (): void {
-    // 08:00 -> 18:00 (480 -> 1080) = 600m worked, scheduled 600.
+    // 08:00 -> 18:00 (480 -> 1080) = 600m worked, scheduled 600. A normal working day
+    // sets overtimeThresholdMinutes == scheduledMinutes, so this proves the decoupled
+    // field behaves exactly as the old single scheduledMinutes boundary did.
     $out = DailyComputation::compute(new DailyComputationInput(
         punches: [480, 1080],
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 600,
+        overtimeThresholdMinutes: 600,
         scheduledStartMinute: 480,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -305,6 +330,7 @@ it('is incomplete on an unpaired punch: zero worked, no lines', function (): voi
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 60,
         isArt82Exempt: false,
@@ -328,6 +354,7 @@ it('collapses every bucket to 100% for an art82-exempt employee, even on a holid
         dayType: DayType::RegularHoliday,
         isRestDay: true,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 1200,
         breakMinutes: 0,
         isArt82Exempt: true,
@@ -357,6 +384,7 @@ it('proves the same holiday-night-OT day is NOT flat 100% without the art82 exem
         dayType: DayType::RegularHoliday,
         isRestDay: true,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 1200,
         breakMinutes: 0,
         isArt82Exempt: false,
@@ -386,6 +414,7 @@ it('populates late and undertime minutes together', function (): void {
         dayType: DayType::Ordinary,
         isRestDay: false,
         scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
         scheduledStartMinute: 480,
         breakMinutes: 0,
         isArt82Exempt: false,

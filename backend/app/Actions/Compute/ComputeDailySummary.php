@@ -39,10 +39,14 @@ use Illuminate\Support\Facades\DB;
  *    none at all) falls back to Employee::current_office_id for the holiday lookup and to
  *    "not exempt" — there is nothing effective-dated to read yet.
  *  - Day type is Ordinary unless a Holiday row exists for that (office, date).
- *  - The schedule comes from ScheduleResolver. A rest day reports null start/break; both
- *    read as 0 here (0 is the correct "nothing scheduled" late-reference and break for an
- *    unworked day, and DailyComputation's own rest-day path never consults them beyond
- *    that).
+ *  - The schedule comes from ScheduleResolver. A rest day reports null start/break: null
+ *    start is passed straight through so DailyComputation charges zero lateness against a
+ *    day nobody was scheduled to start (never a phantom ~8h against minute 0); null break
+ *    reads as 0 here (0 is the correct break for an unworked/rest day). A rest day's
+ *    scheduledMinutes is 0 for undertime/storage purposes, but the regular/overtime
+ *    boundary this action hands DailyComputation is the statutory 8h (480) instead — see
+ *    $overtimeThresholdMinutes below — so a rest day worked still prices its first 8h at
+ *    rest-day base, not overtime.
  *  - The pay_rules version is the greatest effective_from <= date. When one exists, its
  *    id becomes rule_version_id and its rates price every line. When none exists yet for
  *    the date, the statutory floor (PayRatesFactory::statutory()) still lets
@@ -77,12 +81,19 @@ final class ComputeDailySummary
 
         $rates = $payRule !== null ? PayRatesFactory::fromVersion($payRule) : PayRatesFactory::statutory();
 
+        // The regular/overtime boundary is the actual scheduled length on a working day,
+        // but the statutory 8h (480) on a rest day (scheduledMinutes 0) — a rest-day
+        // worker's first 8 hours are still rest-day-worked BASE, not overtime. Zero would
+        // put the boundary at the start of the day and mis-price every worked minute as OT.
+        $overtimeThresholdMinutes = $schedule->scheduledMinutes > 0 ? $schedule->scheduledMinutes : 480;
+
         $computed = DailyComputation::compute(new DailyComputationInput(
             punches: EffectivePunches::forDate($employee, $date),
             dayType: $dayType,
             isRestDay: $schedule->isRestDay,
             scheduledMinutes: $schedule->scheduledMinutes,
-            scheduledStartMinute: $schedule->startMinute ?? 0,
+            overtimeThresholdMinutes: $overtimeThresholdMinutes,
+            scheduledStartMinute: $schedule->startMinute,
             breakMinutes: $schedule->breakMinutes ?? 0,
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,

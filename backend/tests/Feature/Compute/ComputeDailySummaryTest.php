@@ -10,6 +10,7 @@ use App\Domain\Attendance\PunchSource;
 use App\Domain\Pay\DayType;
 use App\Domain\Pay\SummaryLineKind;
 use App\Domain\Schedule\Weekday;
+use App\Models\DailySummaryLine;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\EmploymentRecord;
@@ -253,6 +254,35 @@ it('reads applied_bp from a custom pay_rules version, not a hardcoded constant',
     $line = $summary->lines->first();
     expect($line->kind)->toBe(SummaryLineKind::RegularDay)
         ->and($line->applied_bp)->toBe(25000);
+});
+
+it('prices a rest day worked past 8h at rest-day base + rest-day OT, with zero lateness', function (): void {
+    // Saturday: computeOffice() marks it is_rest, so ScheduleResolver reports
+    // scheduledMinutes 0 / startMinute null for this date — the seam this whole fix is
+    // about. 08:00-18:00 (no schedule-driven break on a rest day) = 600m worked: the
+    // OT threshold is the statutory 8h floor (480), NOT the (zero) scheduled minutes.
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+
+    $date = '2026-08-08'; // Saturday
+    recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
+    recordManualPunch($employee, $office, $date, '18:00', PunchDirection::Out);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    expect($summary->is_rest_day)->toBeTrue()
+        ->and($summary->scheduled_minutes)->toBe(0)
+        ->and($summary->worked_minutes)->toBe(600)
+        ->and($summary->late_minutes)->toBe(0)
+        ->and($summary->undertime_minutes)->toBe(0)
+        ->and($summary->lines)->toHaveCount(2);
+
+    $byKind = $summary->lines->keyBy(fn (DailySummaryLine $l) => $l->kind->value);
+    expect($byKind['regular_day']->minutes)->toBe(480)
+        ->and($byKind['regular_day']->applied_bp)->toBe(13000)
+        ->and($byKind['overtime_day']->minutes)->toBe(120)
+        ->and($byKind['overtime_day']->applied_bp)->toBe(16900);
 });
 
 it('collapses every line to 10000bp for an Art. 82-exempt employee, even with overtime', function (): void {

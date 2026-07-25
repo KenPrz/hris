@@ -77,12 +77,12 @@ final class DailyComputation
         $keptIntervals = self::trimTail($paired->intervals, $breakDeducted);
 
         [$regularDay, $regularNight, $overtimeDay, $overtimeNight] =
-            self::splitBuckets($keptIntervals, $in->scheduledMinutes);
+            self::splitBuckets($keptIntervals, $in->overtimeThresholdMinutes);
 
         $lines = self::buildLines($in, $regularDay, $regularNight, $overtimeDay, $overtimeNight);
 
         $firstPunch = $paired->intervals[0]->startMinute;
-        $late = max(0, $firstPunch - $in->scheduledStartMinute);
+        $late = $in->scheduledStartMinute === null ? 0 : max(0, $firstPunch - $in->scheduledStartMinute);
         $undertime = OvertimeThreshold::undertime($net, Minutes::of($in->scheduledMinutes))->value;
 
         return new ComputedDay(
@@ -201,13 +201,13 @@ final class DailyComputation
 
     /**
      * Walks the (post-break) intervals in chronological order, slicing each at the
-     * point the running total crosses $scheduledMinutes, and prices the day/night split
+     * point the running total crosses $overtimeThreshold, and prices the day/night split
      * of each resulting slice.
      *
      * @param  list<WorkInterval>  $intervals
      * @return array{0: int, 1: int, 2: int, 3: int} regularDay, regularNight, overtimeDay, overtimeNight
      */
-    private static function splitBuckets(array $intervals, int $scheduledMinutes): array
+    private static function splitBuckets(array $intervals, int $overtimeThreshold): array
     {
         $regularDay = 0;
         $regularNight = 0;
@@ -216,7 +216,7 @@ final class DailyComputation
         $runningBefore = 0;
 
         foreach ($intervals as $interval) {
-            [$regularPart, $overtimePart] = self::splitAtBoundary($interval, $runningBefore, $scheduledMinutes);
+            [$regularPart, $overtimePart] = self::splitAtBoundary($interval, $runningBefore, $overtimeThreshold);
 
             if ($regularPart !== null) {
                 $split = NightDiffSplitter::split($regularPart);
@@ -243,19 +243,19 @@ final class DailyComputation
      *
      * @return array{0: ?WorkInterval, 1: ?WorkInterval}
      */
-    private static function splitAtBoundary(WorkInterval $interval, int $runningBefore, int $scheduledMinutes): array
+    private static function splitAtBoundary(WorkInterval $interval, int $runningBefore, int $overtimeThreshold): array
     {
         $runningAfter = $runningBefore + $interval->duration()->value;
 
-        if ($runningAfter <= $scheduledMinutes) {
+        if ($runningAfter <= $overtimeThreshold) {
             return [$interval, null];
         }
 
-        if ($runningBefore >= $scheduledMinutes) {
+        if ($runningBefore >= $overtimeThreshold) {
             return [null, $interval];
         }
 
-        $splitPoint = $interval->startMinute + ($scheduledMinutes - $runningBefore);
+        $splitPoint = $interval->startMinute + ($overtimeThreshold - $runningBefore);
 
         return [
             WorkInterval::of($interval->startMinute, $splitPoint),
