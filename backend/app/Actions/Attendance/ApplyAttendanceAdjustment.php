@@ -30,6 +30,14 @@ use Illuminate\Support\Facades\Log;
  * triggers that one explicitly, for the ANNULLED log's office-local date, also via
  * DB::afterCommit so a compute failure can't roll back a valid annulment (and tolerating
  * the same "no schedule configured yet" non-error as RecordPunch — see its docblock).
+ *
+ * An amend is a void + an add of a DIFFERENT log, and if the corrected punched_at crosses
+ * the office-local date boundary, RecordPunch's trigger only recomputes the NEW date —
+ * nothing recomputes the annulled punch's ORIGINAL date, which would otherwise keep
+ * counting a punch that no longer exists in the effective ledger. So an amend ALSO
+ * recomputes the old date explicitly, exactly like the pure-void path above, skipping the
+ * extra compute only when the two dates are identical (the common same-day amend, where
+ * RecordPunch's own recompute already covers it).
  */
 final class ApplyAttendanceAdjustment
 {
@@ -54,8 +62,7 @@ final class ApplyAttendanceAdjustment
         }
 
         if ($isAdd) {
-            // Recomputes the corrected punch's own day via RecordPunch's own trigger —
-            // nothing further needed for add/amend.
+            // Recomputes the corrected punch's own day via RecordPunch's own trigger.
             $this->recordPunch->execute(new RecordPunchInput(
                 employeeId: $request->employee_id,
                 direction: $detail->direction,
@@ -67,24 +74,50 @@ final class ApplyAttendanceAdjustment
                 geoLat: null,
                 geoLng: null,
             ));
+
+            if ($target !== null) {
+                // Amend: RecordPunch above only recomputed the NEW date. Also recompute
+                // the annulled punch's ORIGINAL office-local date — unless the correction
+                // landed on the same date, in which case RecordPunch's own recompute
+                // already covers it. See the class docblock.
+                $employee = Employee::query()->findOrFail($request->employee_id);
+                $oldDate = $target->punched_at->copy()->setTimezone($target->office->timezone)->format('Y-m-d');
+                $newDate = $detail->punched_at->copy()
+                    ->setTimezone($employee->currentOffice()->firstOrFail()->timezone)
+                    ->format('Y-m-d');
+
+                if ($oldDate !== $newDate) {
+                    $this->scheduleRecompute($employee, $oldDate);
+                }
+            }
         } elseif ($target !== null) {
             // Pure void: the day the annulled punch belonged to needs recomputing, and
             // nothing else in this method will trigger it.
             $employee = Employee::query()->findOrFail($request->employee_id);
             $date = $target->punched_at->copy()->setTimezone($target->office->timezone)->format('Y-m-d');
 
-            DB::afterCommit(function () use ($employee, $date): void {
-                try {
-                    $this->computeDailySummary->execute($employee, $date);
-                } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate $e) {
-                    // See RecordPunch's docblock: no schedule configured yet is expected,
-                    // non-fatal, pre-M4 state — not a compute failure. Logged for diagnosability.
-                    Log::info('Skipped daily summary compute after adjustment: no schedule configured.', [
-                        'employee_id' => $employee->id, 'date' => $date, 'reason' => $e::class,
-                    ]);
-                }
-            });
+            $this->scheduleRecompute($employee, $date);
         }
+    }
+
+    /**
+     * Registers a recompute of (employee, date) to run once the OUTERMOST transaction
+     * commits, so a compute failure can never roll back an already-durable
+     * annulment/punch. Tolerates the same "no schedule configured yet" non-error
+     * RecordPunch does — see its docblock — since M4's config isn't guaranteed yet for
+     * every employee-day this path can reach.
+     */
+    private function scheduleRecompute(Employee $employee, string $date): void
+    {
+        DB::afterCommit(function () use ($employee, $date): void {
+            try {
+                $this->computeDailySummary->execute($employee, $date);
+            } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate $e) {
+                Log::info('Skipped daily summary compute after adjustment: no schedule configured.', [
+                    'employee_id' => $employee->id, 'date' => $date, 'reason' => $e::class,
+                ]);
+            }
+        });
     }
 
     private function assertAnnullable(?string $targetLogId, string $requesterEmployeeId): AttendanceLog

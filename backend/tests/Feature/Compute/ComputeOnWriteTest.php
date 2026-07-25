@@ -203,6 +203,54 @@ it('flips an incomplete day to a computed worked total after an approved add adj
         ->and($after->lines)->toHaveCount(1);
 });
 
+it('recomputes BOTH the old and new date when an amend moves a punch across the date boundary', function (): void {
+    $office = onWriteOffice();
+    $employee = onWriteEmployee($office);
+    onWritePayRule();
+    $approver = User::factory()->create();
+
+    $oldDate = '2026-08-05'; // Wednesday
+    $newDate = '2026-08-06'; // Thursday
+    onWritePunch($employee, $office, $oldDate, '08:00', PunchDirection::In);
+    $outLog = onWritePunch($employee, $office, $oldDate, '16:00', PunchDirection::Out);
+
+    $before = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)->whereDate('date', $oldDate)->first();
+    expect($before)->not->toBeNull()
+        ->and($before->is_incomplete)->toBeFalse()
+        ->and($before->worked_minutes)->toBe(480);
+
+    // Amend the Out punch to a time on the NEXT office-local date — the annulled log's
+    // original date ($oldDate) is left with only the unpaired In punch, and $newDate
+    // gets a lone unpaired Out punch of its own.
+    $request = Request::factory()->for($employee)->create();
+    AttendanceAdjustmentDetail::factory()->for($request)->create([
+        'operation' => AdjustmentOperation::Amend,
+        'target_log_id' => $outLog->id,
+        'direction' => PunchDirection::Out,
+        'punched_at' => Carbon::parse("{$newDate} 00:10", $office->timezone)->utc(),
+    ]);
+
+    app(ApplyAttendanceAdjustment::class)->apply($request, $approver->id);
+
+    $oldAfter = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)->whereDate('date', $oldDate)->first();
+    $newAfter = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)->whereDate('date', $newDate)->first();
+
+    // The old date no longer counts the now-annulled Out punch: only the In punch
+    // remains there, which is unpaired => incomplete, zero worked.
+    expect($oldAfter)->not->toBeNull()
+        ->and($oldAfter->is_incomplete)->toBeTrue()
+        ->and($oldAfter->worked_minutes)->toBe(0);
+
+    // The new date got its own fresh (also incomplete — a lone Out punch) summary via
+    // RecordPunch's own trigger.
+    expect($newAfter)->not->toBeNull()
+        ->and($newAfter->is_incomplete)->toBeTrue()
+        ->and($newAfter->worked_minutes)->toBe(0);
+});
+
 it('recomputes the annulled punch\'s own day after an approved void, back to incomplete', function (): void {
     $office = onWriteOffice();
     $employee = onWriteEmployee($office);
