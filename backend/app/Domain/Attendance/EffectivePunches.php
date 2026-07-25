@@ -67,7 +67,16 @@ final class EffectivePunches
             ->all();
     }
 
-    /** The shift window's length in minutes: the calendar day, or the scheduled end if it runs later. */
+    /**
+     * The shift window's length in minutes: the calendar day, or the scheduled end if it runs later.
+     *
+     * M5b note: when the SAME cross-midnight shift repeats on consecutive days, day N's window
+     * (which runs past midnight) and day N+1's window overlap, so a punch in that overlap — or one
+     * timestamped exactly on a day boundary — is claimable by both dates. That does not arise for a
+     * single-occurrence night shift (M5a's scope), but whoever drives EffectivePunches across a range
+     * in M5b must resolve it (e.g. bound a day's window start at the previous day's resolved window
+     * end, or treat a consumed punch as spent).
+     */
     private static function windowMinutes(Employee $employee, string $date): int
     {
         $schedule = (new ScheduleResolver)->resolve($employee, $date);
