@@ -20,6 +20,7 @@ use App\Http\Controllers\Attendance\Adjustments\ShowController as ShowAdjustment
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
+use App\Http\Controllers\Attendance\ListMySummaryController;
 use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
@@ -68,6 +69,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/employees/{employee}/attendance', ListEmployeeAttendanceController::class);
 
         Route::get('/me/attendance', ListMyAttendanceController::class);
+        Route::get('/me/attendance/summary', ListMySummaryController::class);
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // Any employee may file for their own attendance — deliberately not admin-gated
