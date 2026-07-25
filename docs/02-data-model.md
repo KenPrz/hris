@@ -919,6 +919,7 @@ create table daily_attendance_summaries (
   id                 uuid primary key default uuidv7(),
   employee_id        uuid not null references employees(id) on delete cascade,
   date               date not null,
+  office_id          uuid references offices(id) on delete set null,   -- SNAPSHOT (M5b)
   day_type           text not null,
   is_rest_day        boolean not null,
   scheduled_minutes  integer not null,
@@ -941,6 +942,9 @@ create table daily_attendance_summaries (
   unique (employee_id, date)
 );
 
+create index daily_attendance_summaries_office_id_date
+  on daily_attendance_summaries (office_id, date);   -- M5b: AffectedSummaries::forHoliday/forOffice
+
 create table daily_summary_lines (
   id          uuid primary key default uuidv7(),
   summary_id  uuid not null references daily_attendance_summaries(id) on delete cascade,
@@ -958,7 +962,17 @@ create table daily_summary_lines (
 ```
 
 **One row per employee-day (`unique(employee_id, date)`), and every value on it is a
-snapshot, never a live join.** `day_type`, `is_rest_day`, `scheduled_minutes`,
+snapshot, never a live join.** `office_id` (added M5b) is one more snapshot in that same
+family — the employee's resolved office *on the date being computed*, captured the same
+way `attendance_logs.office_id` snapshots at punch time (`02-data-model.md`'s Attendance
+section, above). It exists so a config-change recompute can find "every existing summary
+for office X" (`App\Domain\Compute\AffectedSummaries::forHoliday`/`forOffice`) without
+joining out to `employment_records` for an effective-dated office lookup on every row — the
+same "keep the hot scoping query a plain `WHERE`" reasoning `employees.current_office_id`
+was built on. Nullable and `on delete set null` (not `cascade`) because a summary is a
+computed historical fact about a worked day, not a child record of the office the way a
+department or a holiday is — deleting an office should not silently delete the pay history
+of everyone who once worked there. `day_type`, `is_rest_day`, `scheduled_minutes`,
 `is_art82_exempt` are the business context *as it was resolved on the date being
 computed*, not as it reads today — so a summary keeps answering "what was true about this
 day" correctly even after a holiday is added retroactively, a schedule changes, or an
@@ -1054,6 +1068,168 @@ overlap, which does not arise for M5a's single-occurrence scope.
 rows are not separately logged, the same "created once with its parent, never edited"
 reasoning `pay_rule_day_rates` already uses.
 
+**`EffectivePunches::forDate()`'s window now tiles across consecutive days instead of
+overlapping — the deferred item M5a's own roadmap entry flagged for M5b.** A *repeating*
+cross-midnight shift's day-N window (which runs past local midnight to catch the
+post-midnight out-punch) used to start at day N's local midnight regardless of what day
+N-1's own window already claimed, so a punch inside `[00:00, day-N-1's scheduled end -
+1440]` was claimable by both `forDate(N-1)` and `forDate(N)` — a real double-claim on a
+genuinely repeating night shift, not merely a theoretical one. `windowStartMinutes()`
+fixes it: it resolves day N-1's schedule and, if that shift ran past midnight
+(`endMinute > 1440`), starts day N's window at `endMinute - 1440` instead of `0` — the
+minutes before that point already belong to day N-1's window. `forDate()` also treats a
+bounded start as *exclusive* (`>` instead of `>=`), so the exact boundary instant — a punch
+timestamped precisely at the previous window's end — is claimed by exactly one of the two
+dates, never both and never neither. A normal (non-repeating, non-cross-midnight, or rest)
+previous day leaves the start at `0`, unchanged from M5a.
+
+---
+
+## Recompute: an audited, queued re-price of existing summaries *(M5b)*
+
+**M5b completes M5.** M5a's only writer of `daily_attendance_summaries` was the
+synchronous on-punch trigger — nothing re-priced a day after the fact. M5b adds the other
+half: a config change (a holiday added/edited/deleted, a new `pay_rules` version, a shift
+template/assignment/override/office-default change) enqueues an audited, queued recompute
+of every summary that change could have affected.
+
+```sql
+create table recompute_runs (
+  id           uuid primary key default uuidv7(),
+  trigger_type text not null,
+  trigger_id   uuid,                                    -- nullable: some triggers name no single row
+  reason       text not null,
+  pair_count   integer not null,
+  batch_id     text,                                    -- Bus::batch's own id, nullable until dispatch
+  status       text not null default 'queued',
+  caused_by    uuid references users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+
+  check (trigger_type in ('holiday', 'pay_rule', 'shift_template', 'schedule_assignment',
+                          'schedule_override', 'office_default')),
+  check (status in ('queued', 'completed', 'failed')),
+  check (pair_count >= 0)
+);
+```
+
+**One row per `RecomputeRange::dispatch()` call, audited the same
+string-column-plus-`CHECK` way every other enum-shaped column in this schema is.**
+`trigger_type` names which of the six config-change kinds fired the run
+(`App\Domain\Compute\RecomputeTrigger`, a plain framework-agnostic enum); `trigger_id` is
+the specific row that changed where one exists (a holiday's id, a pay rule's id) and
+`null` for a trigger with no single natural id (deleting a schedule assignment still names
+the assignment's own id, so in practice every current trigger does supply one, but the
+column stays nullable for a future trigger that might not). `reason` is a human-readable
+sentence naming what changed (`"Holiday {id} created for office {id} on {date}"`), for the
+same "read the trail without joining five tables to reconstruct it" reason
+`CloneHolidays`'s own activity-log summary exists. `pair_count` is the deduped
+`(employee_id, date)` pair count the run dispatched — the size of the batch, captured at
+creation so it survives even if every underlying `RecomputeDay` job is later pruned.
+`batch_id` is Laravel's own `Bus::batch()` id, written back onto the row **after**
+`dispatch()` returns (the id doesn't exist before dispatch), so it can be cross-referenced
+against Laravel's own `job_batches` table for job-level detail this table doesn't
+duplicate. `caused_by` is nullable and `on delete set null` — the same reasoning
+`pay_rules.created_by`/`schedule_assignments.created_by` already use — because a recompute
+triggered by a since-deleted user's edit is not meaningless the way one belonging to a
+deleted office would be.
+
+**`App\Actions\Compute\RecomputeRange::dispatch(pairs, trigger, triggerId, reason,
+causedBy): ?RecomputeRun`** is the one place a `recompute_runs` row is written. It:
+
+1. **Dedups** the incoming `(employee_id, date)` pairs — `collect($pairs)->unique(...)` —
+   so a pair named by more than one resolver (a holiday added the same day a pay rule
+   changes, say) is recomputed exactly once, not once per reason it had.
+2. **Empty pairs is a clean no-op**: `dispatch()` returns `null` and writes nothing at
+   all — a config change with no existing affected summaries (nothing has been computed
+   for that office/date/employee yet) never produces a `recompute_runs` row with
+   `pair_count: 0`, because there is nothing to audit having happened.
+3. Otherwise **creates the `recompute_runs` row `status: 'queued'`**, then dispatches a
+   named `Bus::batch()` of one `App\Jobs\RecomputeDay` per deduped pair, writing the
+   batch's own id back onto the row. The batch's `->then()` callback flips the row to
+   `'completed'` once every job in it finishes; `->catch()` flips it to `'failed'` if any
+   job throws. The row therefore always ends in one of `queued` (still running, or the
+   process crashed before the batch finished) → `completed`/`failed`, never silently stuck
+   claiming success it didn't earn.
+
+**`App\Domain\Compute\AffectedSummaries` resolves a config change to the exact
+`(employee_id, date)` pairs to recompute — existing summaries only.** `forHoliday`,
+`forPayRule`, `forShiftTemplate`, `forEmployee`, and `forOffice` each query
+`daily_attendance_summaries` directly and never fabricate a pair for a day nothing has
+computed yet — there is nothing to recompute until `ComputeDailySummary` has run once for
+that `(employee, date)`. **Over-inclusion is deliberately safe, not merely tolerated**:
+because `ComputeDailySummary::execute()` is itself idempotent (`lockForUpdate()`s the
+employee row, deletes any existing summary for the day, inserts the fresh one), recomputing
+a summary that turns out unaffected by the actual change costs nothing beyond the extra
+job — the reverse, silently skipping a summary that *was* affected, is the actual bug this
+class exists to prevent. `forHoliday`/`forPayRule` narrow by date (the config itself names
+an exact date or a clean `effective_from` lower bound, so narrowing there is exact, not an
+approximation); `forShiftTemplate`/`forEmployee`/`forOffice` recompute every existing
+summary for the affected employees, full stop.
+
+**`App\Jobs\RecomputeDay` is the queued unit of work — `ShouldQueue` + `Batchable` +
+`InteractsWithQueue`, carrying only `$employeeId`/`$date` (ids, never a model)** — a job is
+serialized onto the queue connection, and an id round-trips through that cleanly where a
+full `Employee` model would go stale between dispatch and execution. Its `handle()` is a
+strict no-op over three cases before it ever calls `ComputeDailySummary::execute()`: the
+batch was cancelled (`$this->batch()?->cancelled()`), the employee no longer exists, or —
+the one that matters most — **the existing summary for `(employeeId, date)` is already
+`status: 'locked'`**. A locked period's numbers are frozen (M7's cutoff close); the job
+does not delete it, does not recompute it, does not touch it at all. Both `Batchable` *and*
+`InteractsWithQueue` are required on the class, not just the one `Batchable` needs for its
+own `cancelled()` check — `CallQueuedHandler::ensureSuccessfulBatchJobIsRecorded()` will not
+call `$batch->recordSuccessfulJob()` without both present, and without that call every
+batch containing this job would sit at `pending_jobs > 0` forever, so `RecomputeRange`'s
+`->then()` callback (the thing that ever flips a `recompute_runs` row to `completed`) would
+never fire.
+
+**No `attendance_logs` row is ever mutated by any of this — the append-only ledger stays
+append-only across a recompute exactly the way it stays append-only across an approved
+adjustment (M3.6, above).** `RecomputeDay`/`ComputeDailySummary` only ever read
+`attendance_logs` (via `EffectivePunches::forDate()`) and write
+`daily_attendance_summaries`/`daily_summary_lines`; nothing in the recompute path calls
+`create`/`update`/`delete`/`save` against `AttendanceLog`, so the same arch guard that
+proves `RecordPunch` is the sole writer (above) already covers this by construction rather
+than needing a parallel M5b-specific rule. `scripts/e2e-recompute.sh` proves it live: a
+Manila employee's `attendance_logs` rows — same ids, same order — before and after a
+holiday-triggered recompute of their day.
+
+**Every config-change action that can invalidate an existing summary wires the same
+`DB::afterCommit(() => RecomputeRange::dispatch(...))` shape**, mirroring `RecordPunch`'s
+own on-write trigger (M5a, above) so a recompute-enqueue failure can never roll back an
+already-durable config write:
+
+| Action | Trigger | Resolver |
+| --- | --- | --- |
+| `Holidays\CreateHoliday` / `UpdateHoliday` / `DeleteHoliday` | `holiday` | `forHoliday(officeId, [date])` |
+| `Holidays\CloneHolidays` | `holiday` | `forHoliday(officeId, createdDates)` — `[]` for a brand-new date, so this is a real no-op in practice |
+| `PayRules\CreatePayRule` | `pay_rule` | `forPayRule(effectiveFrom)` |
+| `Schedules\CreateShiftTemplate` / `UpdateShiftTemplate` / `DeleteShiftTemplate` | `shift_template` | `forShiftTemplate(templateId)` |
+| `Schedules\CreateScheduleAssignment` | `schedule_assignment` | `forEmployee`/`forOffice`-shaped, by target |
+| `Office\Schedules\DeleteAssignmentController` (inline — no dedicated Action class; a single unconditional write with no business rule beyond the scope check) | `schedule_assignment` | same, by target |
+| `Schedules\CreateScheduleOverride` / `UpdateScheduleOverride` / `DeleteScheduleOverride` | `schedule_override` | `forEmployee(employeeId)` |
+| `Office\Schedules\SetDefaultTemplateController` (inline — same "no Action class needed" reasoning as the assignment delete) | `office_default` | `forOffice(officeId)` |
+
+**M4's original "Done when" line — HR adds a holiday, affected Manila days flip 100% →
+130%, Cebu is untouched — is only provable end to end as of this milestone**, because it
+needs an engine to turn a `DayType` into a multiplier (M5a) and a trigger that actually
+re-runs that engine over already-computed days (M5b, here). `scripts/e2e-recompute.sh`
+walks exactly this: a seeded ordinary day, an HR-created `special_non_working` holiday, the
+queue drained, the flip to 130%, the audited `recompute_runs` row, and the untouched ledger.
+
+**Forward note for M7.** `RecomputeDay`'s locked-skip
+(`$existing?->status === 'locked'`) is a plain, unlocked `first()` read — correct for M5b,
+where nothing else is racing to lock a summary out from under a recompute. Once M7's
+`CloseCutoff` exists and actually sets `status: 'locked'` on a batch of summaries, that
+close and a `RecomputeDay` racing the same row become a genuine concurrency question:
+`CloseCutoff` will need its own `lockForUpdate()` over the summaries it's closing, and the
+close-vs-recompute race needs the same two-real-Postgres-connections proof
+`ApproveRequestConcurrencyTest` already set the precedent for (M3.6, above) — a
+single-process sequential test would pass whether or not the lock is actually there, which
+`04-backend-conventions.md` already calls out as worse than no test at all. Whoever builds
+`CloseCutoff` should not assume `RecomputeDay`'s plain read is sufficient once a real lock
+exists to race against.
+
 ---
 
 ## What the schema refuses to allow
@@ -1105,3 +1281,10 @@ Stated plainly, since these are the reasons for the constraints above:
 - A `pay_rules` version that has already priced a real day cannot be deleted out from under
   it. (`daily_attendance_summaries.rule_version_id` is `ON DELETE RESTRICT`, not `SET
   NULL` — a domain-meaningful FK, not just a dangling-reference guard.)
+- A `recompute_runs` row cannot claim a `trigger_type`/`status` outside the closed set
+  either enum defines, and cannot claim a negative `pair_count`. (`CHECK`s on
+  `recompute_runs`, above.)
+- A recompute can never write, update, or delete an `attendance_logs` row, no matter how
+  many config changes triggered it — only `daily_attendance_summaries`/
+  `daily_summary_lines` are ever touched. (`RecordPunch` remains the sole writer of
+  `attendance_logs`; the recompute path only reads it via `EffectivePunches::forDate()`.)
