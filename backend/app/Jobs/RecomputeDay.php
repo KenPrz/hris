@@ -10,6 +10,7 @@ use App\Models\Employee;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
 /**
  * Recomputes one employee-day by re-running ComputeDailySummary — the queued unit of
@@ -29,7 +30,12 @@ use Illuminate\Contracts\Queue\ShouldQueue;
  */
 final class RecomputeDay implements ShouldQueue
 {
-    use Batchable, Queueable;
+    // InteractsWithQueue is not just boilerplate: CallQueuedHandler::ensureSuccessfulBatchJobIsRecorded()
+    // requires BOTH Batchable and InteractsWithQueue to be present on the job class before it will call
+    // $batch->recordSuccessfulJob() — Batchable alone (which is all this job needs for the
+    // $this->batch()?->cancelled() check above) silently leaves every batch containing this job stuck
+    // at pendingJobs > 0 forever, so RecomputeRange's Bus::batch(...)->then() would never fire.
+    use Batchable, InteractsWithQueue, Queueable;
 
     public function __construct(
         public readonly string $employeeId,
