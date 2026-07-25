@@ -14,13 +14,14 @@
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
-import type { AttendanceLog, AttendanceMonth, PunchDirection } from '@/lib/api'
+import type { AttendanceLog, AttendanceMonth, DailySummary, PunchDirection } from '@/lib/api'
 import { ApiError } from '@/lib/api'
 import { addMonths, currentMonth, monthLabel, timeInZone, todayInZone } from '@/lib/date'
 import { formatDuration } from '@/lib/duration'
 import { type PunchPairing, pairPunches, sortByPunchedAt } from '@/lib/punches'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import { useMyAttendance } from '@/hooks/useMyAttendance'
+import { useMyAttendanceSummary } from '@/hooks/useMyAttendanceSummary'
 import { usePunch } from '@/hooks/usePunch'
 import { useSession } from '@/hooks/useSession'
 import { AppShell } from '@/components/AppShell'
@@ -32,6 +33,7 @@ import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
 import { DayCell } from '@/components/domain/DayCell'
+import { DaySummaryDetail } from '@/components/domain/DaySummaryDetail'
 
 // Month 01–12 only. A shape-only `\d{2}` would accept `2026-99`, which then renders
 // "undefined 2026" and an empty grid instead of falling back to the current month.
@@ -92,6 +94,12 @@ function isMonthEmpty(month: AttendanceMonth): boolean {
   return Object.values(month).every((punches) => punches.length === 0)
 }
 
+/** Keyed by `YYYY-MM-DD` — the computed layer's lookup alongside the raw `AttendanceMonth`
+ * map, so `renderDay` can join a day's computed summary to its raw punches by date. */
+function summaryByDate(summaries: DailySummary[]): Record<string, DailySummary> {
+  return Object.fromEntries(summaries.map((summary) => [summary.date, summary]))
+}
+
 /** Ticks once a second so the hero's clock — and the live "Today" total — stay current. */
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date())
@@ -127,6 +135,11 @@ export default function AttendancePage() {
   // request, so this never doubles the fetch in the common case.
   const heroQuery = useMyAttendance(thisMonth)
   const viewedQuery = useMyAttendance(viewedMonth)
+  // The computed layer for the viewed month — additive to `viewedQuery`'s raw punches,
+  // never a replacement. A day with no summary yet (compute hasn't run, or the day is
+  // outside the employee's own record) simply has no entry in the map, and
+  // `DaySummaryDetail` renders nothing for it — the raw punches still show regardless.
+  const summaryQuery = useMyAttendanceSummary(viewedMonth)
   const punchMutation = usePunch()
 
   const now = useNow()
@@ -135,6 +148,8 @@ export default function AttendancePage() {
   function navigateToMonth(nextMonth: string) {
     router.replace(`${pathname}?month=${nextMonth}`)
   }
+
+  const summariesByDate = summaryByDate(summaryQuery.data ?? [])
 
   const todaysPunches = sortByPunchedAt(heroQuery.data?.[today] ?? [])
   const lastTodaysPunch = todaysPunches.at(-1) ?? null
@@ -241,13 +256,19 @@ export default function AttendancePage() {
             month={viewedMonth}
             timeZone={OFFICE_TIME_ZONE}
             renderDay={({ date, isToday, inMonth }) => (
-              <DayCell
-                date={date}
-                punches={(viewedQuery.data ?? {})[date] ?? []}
-                timeZone={OFFICE_TIME_ZONE}
-                isToday={isToday}
-                inMonth={inMonth}
-              />
+              // The raw ledger (DayCell) and the computed layer (DaySummaryDetail) render
+              // side by side for the same day — additive, never a swap. DaySummaryDetail
+              // renders nothing when this date has no computed summary yet.
+              <>
+                <DayCell
+                  date={date}
+                  punches={(viewedQuery.data ?? {})[date] ?? []}
+                  timeZone={OFFICE_TIME_ZONE}
+                  isToday={isToday}
+                  inMonth={inMonth}
+                />
+                <DaySummaryDetail summary={summariesByDate[date]} />
+              </>
             )}
           />
         )}

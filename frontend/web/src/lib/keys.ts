@@ -16,6 +16,7 @@ export const keys = {
   attendance: {
     all: () => ['attendance'] as const,
     month: (month: string) => ['attendance', 'month', month] as const,
+    summary: (month: string) => ['attendance', 'summary', month] as const,
   },
   holidays: {
     all: () => ['holidays'] as const,
