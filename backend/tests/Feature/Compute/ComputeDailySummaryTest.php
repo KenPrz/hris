@@ -157,6 +157,20 @@ it('computes an ordinary punched 8h day: one regular_day line at the floor, rule
     $this->assertDatabaseCount('daily_summary_lines', 1);
 });
 
+it('snapshots the resolved office_id on the summary', function (): void {
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+
+    $date = '2026-08-03'; // Monday
+    recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
+    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    expect($summary->office_id)->toBe($office->id);
+});
+
 it('prices a special_non_working holiday (Aug 21) at 13000bp', function (): void {
     $office = computeOffice();
     $employee = computeEmployee($office);

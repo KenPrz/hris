@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Domain\Pay\DayType;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 use Spatie\Activitylog\LogOptions;
@@ -17,7 +18,7 @@ final class DailyAttendanceSummary extends Model
     use HasUuids, LogsActivity;
 
     protected $fillable = [
-        'employee_id', 'date', 'day_type', 'is_rest_day', 'scheduled_minutes',
+        'employee_id', 'date', 'office_id', 'day_type', 'is_rest_day', 'scheduled_minutes',
         'is_art82_exempt', 'rule_version_id', 'worked_minutes', 'late_minutes',
         'undertime_minutes', 'status', 'is_incomplete', 'computed_at',
     ];
@@ -46,11 +47,14 @@ final class DailyAttendanceSummary extends Model
     /** @return HasMany<DailySummaryLine> */
     public function lines(): HasMany { return $this->hasMany(DailySummaryLine::class, 'summary_id'); }
 
+    /** @return BelongsTo<Office, $this> */
+    public function office(): BelongsTo { return $this->belongsTo(Office::class); }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
             ->logOnly([
-                'employee_id', 'date', 'day_type', 'is_rest_day', 'scheduled_minutes',
+                'employee_id', 'date', 'office_id', 'day_type', 'is_rest_day', 'scheduled_minutes',
                 'is_art82_exempt', 'rule_version_id', 'worked_minutes', 'late_minutes',
                 'undertime_minutes', 'status', 'is_incomplete', 'computed_at',
             ])
