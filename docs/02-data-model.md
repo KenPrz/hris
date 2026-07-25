@@ -903,8 +903,9 @@ user's deletion rather than cascading.
 
 `PayRule`'s `Spatie\Activitylog\Traits\LogsActivity` (log name `pay_rule`) logs every
 create/delete with the `PayRule` itself as the uuid-morph subject, causer resolved
-automatically from the authenticated guard, `logOnlyDirty()` on the four scalar/`note`
-columns (`pay_rule_day_rates` rows are not separately logged — they are created once,
+automatically from the authenticated guard, `logOnlyDirty()` on the five logged columns
+(`effective_from`, the three scalar rates, and `note`) (`pay_rule_day_rates` rows are not
+separately logged — they are created once,
 atomically, with their parent and never edited).
 
 ---
