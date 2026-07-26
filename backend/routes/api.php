@@ -21,6 +21,8 @@ use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
 use App\Http\Controllers\Leave\GrantController as GrantLeaveController;
+use App\Http\Controllers\Leave\ListEmployeeLeaveController;
+use App\Http\Controllers\Leave\ListMyLeaveController;
 use App\Http\Controllers\Office\Holidays\CloneController as CloneHolidaysController;
 use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayController;
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
@@ -73,9 +75,11 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/employees', ListEmployeesController::class);
         Route::get('/employees/{employee}', ShowEmployeeController::class);
         Route::get('/employees/{employee}/attendance', ListEmployeeAttendanceController::class);
+        Route::get('/employees/{employee}/leave', ListEmployeeLeaveController::class);
 
         Route::get('/me/attendance', ListMyAttendanceController::class);
         Route::get('/me/attendance/summary', ListMySummaryController::class);
+        Route::get('/me/leave', ListMyLeaveController::class);
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // Any employee may file for their own attendance — deliberately not admin-gated
