@@ -20,6 +20,7 @@ use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
+use App\Http\Controllers\Leave\GrantController as GrantLeaveController;
 use App\Http\Controllers\Office\Holidays\CloneController as CloneHolidaysController;
 use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayController;
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
@@ -167,6 +168,13 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/leave-types', ListLeaveTypesController::class);
             Route::post('/leave-types', CreateLeaveTypeController::class);
             Route::patch('/leave-types/{leaveType}', UpdateLeaveTypeController::class);
+        });
+
+        // HR manual grants — scoped by OfficeScope::administers against the employee's
+        // current office (not EmployeeScope, which would also let a manager grant to
+        // their own direct reports; see GrantController). One credit row per grant.
+        Route::prefix('leave')->group(function (): void {
+            Route::post('/grants', GrantLeaveController::class);
         });
     });
 });
