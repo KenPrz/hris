@@ -44,16 +44,17 @@ them all:
 | --- | --- |
 | `employee.manage` | Create and edit employee records |
 | `employee.pii.edit` | Edit personally-identifiable / sensitive fields |
-| `leave.approve` | Approve a leave request (feature lands M6) |
+| `leave.approve` | Approve a leave request (feature lands M6b-b) |
+| `leave.manage` | Manage leave-type config and manually grant leave (M6b-a) |
 | `schedule.manage` | Manage schedules (M4) |
 | `holiday.manage` | Manage the holiday calendar (M4) |
 | `cutoff.manage` | Open and close cutoff periods (M7) |
 
-Four of these six gate features that do not exist yet. They are seeded now anyway because
+Five of these seven gate features that do not exist yet. They are seeded now anyway because
 the role catalog is the "fully configurable" surface the brief asked for, and naming a
 permission before its endpoint exists is cheaper than a migration per feature — the same
-forward-declaration the schema uses for `offices.geofence_*`. **M2 enforces none of the six
-yet — this is data seeded for M4+ to wire, not a verb any reachable endpoint checks.**
+forward-declaration the schema uses for `offices.geofence_*`. **M2 enforces none of the
+seven yet — this is data seeded for M4+ to wire, not a verb any reachable endpoint checks.**
 `employee.manage` is referenced exactly once in the codebase, in `EmployeePolicy::update()`,
 and no controller calls `update` (or `authorize('update', ...)`) in M2 — the only
 `EmployeePolicy` ability any endpoint exercises is `view`. The admin employee endpoints
@@ -62,9 +63,22 @@ and no controller calls `update` (or `authorize('update', ...)`) in M2 — the o
 check, not a permission check — which is why a non-admin hitting them gets `403`. An HR
 Admin's actual authority in M2 is entirely scope-based: `EmployeeScope` plus
 `EmployeePolicy::view` let them view and list employees within their `hr_admin_offices`, and
-that authority exists whether or not they hold the `HR Admin` role's verbs at all. The six
+that authority exists whether or not they hold the `HR Admin` role's verbs at all. The seven
 verbs become load-bearing only when M4–M8 wire an employee-edit or leave-approval endpoint
 that names one.
+
+**`leave.manage` is the first of these to widen from catalogued to actually reachable
+(M6b-a), and it widens the same way `holiday.manage`/`schedule.manage` already had:
+`RbacSeeder` seeds it onto the `HR Admin` role, and `GET/POST/PATCH /office/leave-types`,
+`PATCH /office/leave-day`, and `POST /leave/grants` all exist and are reachable — but none
+of them calls `can('leave.manage')` or `authorize(...)` against it anywhere in the codebase.
+The actual boundary on every one of those routes is `OfficeScope::administered`/
+`administers`, the same per-office config scope holidays and schedules already use (see
+`02-data-model.md`). `leave.manage` sits in the catalog alongside `holiday.manage` and
+`schedule.manage` for the same reason they do: it names the capability for a future
+role-management UI (M8) to display and assign, but no controller in this codebase branches
+on it today. Treat it as documentation of intent, not as a second, redundant gate behind
+`OfficeScope`.**
 
 ### Scope — `EmployeeScope`
 

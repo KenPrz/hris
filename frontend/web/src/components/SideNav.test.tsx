@@ -69,6 +69,13 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(me?.items).toContainEqual({ href: '/me/requests', label: 'My requests' })
   })
 
+  it('every user\'s Me group includes /me/leave (M6b-a) — filing and checking your own leave balance is universal', () => {
+    const groups = navEntriesFor(buildSession())
+    const me = groups.find((g) => g.key === 'me')
+
+    expect(me?.items).toContainEqual({ href: '/me/leave', label: 'Leave' })
+  })
+
   it('has_reports adds Team', () => {
     const groups = navEntriesFor(buildSession({ has_reports: true }))
 
@@ -93,6 +100,13 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     const office = groups.find((g) => g.key === 'office')
 
     expect(office?.items).toContainEqual({ href: '/office/approvals', label: 'Approvals' })
+  })
+
+  it('an hr_offices user\'s Office group includes /office/leave-types (M6b-a)', () => {
+    const groups = navEntriesFor(buildSession({ hr_offices: ['office-1'] }))
+    const office = groups.find((g) => g.key === 'office')
+
+    expect(office?.items).toContainEqual({ href: '/office/leave-types', label: 'Leave types' })
   })
 
   it('an empty hr_offices does NOT add Office', () => {
@@ -130,11 +144,13 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(byKey.me?.items).toEqual([
       { href: '/me/attendance', label: 'Attendance' },
       { href: '/me/requests', label: 'My requests' },
+      { href: '/me/leave', label: 'Leave' },
     ])
     expect(byKey.team?.items).toEqual([{ href: '/team/approvals', label: 'Approvals' }])
     expect(byKey.office?.items).toEqual([
       { href: '/office/holidays', label: 'Holidays' },
       { href: '/office/schedules', label: 'Schedules' },
+      { href: '/office/leave-types', label: 'Leave types' },
       { href: '/office/approvals', label: 'Approvals' },
     ])
     expect(byKey.admin?.items).toEqual([{ href: '/admin/pay-rules', label: 'Pay rules' }])
@@ -241,6 +257,9 @@ describe('SideNav — rendered', () => {
 
     const schedulesLink = await screen.findByRole('link', { name: 'Schedules' })
     expect(schedulesLink).toHaveAttribute('href', '/office/schedules')
+
+    const leaveTypesLink = await screen.findByRole('link', { name: 'Leave types' })
+    expect(leaveTypesLink).toHaveAttribute('href', '/office/leave-types')
 
     const approvalsLink = await screen.findByRole('link', { name: 'Approvals' })
     expect(approvalsLink).toHaveAttribute('href', '/office/approvals')

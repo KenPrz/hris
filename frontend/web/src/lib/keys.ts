@@ -32,6 +32,11 @@ export const keys = {
     teamApprovals: () => ['requests', 'team-approvals'] as const,
     officeApprovals: () => ['requests', 'office-approvals'] as const,
   },
+  leave: {
+    types: (officeId: string) => ['leave', 'types', officeId] as const,
+    myBalances: () => ['leave', 'my-balances'] as const,
+    employeeBalances: (employeeId: string) => ['leave', 'employee-balances', employeeId] as const,
+  },
   schedules: {
     templates: (officeId: string) => ['schedules', 'templates', officeId] as const,
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,

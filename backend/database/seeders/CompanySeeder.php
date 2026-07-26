@@ -19,6 +19,7 @@ use App\Models\AttendanceLog;
 use App\Models\Department;
 use App\Models\Employee;
 use App\Models\Holiday;
+use App\Models\LeaveType;
 use App\Models\Office;
 use App\Models\Organization;
 use App\Models\PayRule;
@@ -117,6 +118,11 @@ final class CompanySeeder extends Seeder
 
         $cebuShiftTemplate = $this->standardMondayToFridayTemplate($cebu);
         $cebu->update(['default_shift_template_id' => $cebuShiftTemplate->id]);
+
+        // M6b-a: each office's leave-type catalog (the PH statutory set + company VL/SL),
+        // config only — accrual is deferred, so nothing is granted here. See seedLeaveTypes().
+        $this->seedLeaveTypes($manila);
+        $this->seedLeaveTypes($cebu);
 
         $manilaOps = $this->department($manila, 'Operations', 'OPS');
         $manilaPeople = $this->department($manila, 'People & Culture', 'PPL');
@@ -578,6 +584,70 @@ final class CompanySeeder extends Seeder
                 'worked_bp' => $notRestBp,
                 'worked_rest_bp' => $restBp,
                 'unworked_bp' => $floors['unworked'][$dayType->value],
+            ]);
+        }
+    }
+
+    /**
+     * The per-office leave-type catalog: config only, no grants — accrual (and the ledger
+     * rows it would produce) is deferred past M6b-a, so every balance starts empty. Written
+     * directly through `LeaveType::create`, the same as `Holiday::create` above — a leave
+     * type has no cache to keep in sync, so there is no single-writer rule here to honour.
+     *
+     * SIL is the one statutory type that already banks a balance and can be cashed out
+     * (Art. 95). The five event types (Maternity, Paternity, Solo Parent, VAWC, Magna
+     * Carta) are entitlements keyed to an event, not a balance — `deducts_balance: false` —
+     * so M6b-b's ledger never debits them. VL/SL are company benefits (not statutory), given
+     * the same balance shape as SIL so a real company's two most common leave types exist
+     * on a fresh `make dev`.
+     */
+    private function seedLeaveTypes(Office $office): void
+    {
+        LeaveType::create([
+            'office_id' => $office->id,
+            'name' => 'Service Incentive Leave',
+            'code' => 'sil',
+            'is_paid' => true,
+            'deducts_balance' => true,
+            'is_cash_convertible' => true,
+            'max_carryover_minutes' => null,
+            'is_active' => true,
+        ]);
+
+        $eventTypes = [
+            ['name' => 'Maternity Leave', 'code' => 'maternity'],
+            ['name' => 'Paternity Leave', 'code' => 'paternity'],
+            ['name' => 'Solo Parent Leave', 'code' => 'solo_parent'],
+            ['name' => 'VAWC Leave', 'code' => 'vawc'],
+            ['name' => 'Magna Carta Special Leave', 'code' => 'magna_carta'],
+        ];
+        foreach ($eventTypes as $eventType) {
+            LeaveType::create([
+                'office_id' => $office->id,
+                'name' => $eventType['name'],
+                'code' => $eventType['code'],
+                'is_paid' => true,
+                'deducts_balance' => false,
+                'is_cash_convertible' => false,
+                'max_carryover_minutes' => null,
+                'is_active' => true,
+            ]);
+        }
+
+        $companyBalanceTypes = [
+            ['name' => 'Vacation Leave', 'code' => 'vl'],
+            ['name' => 'Sick Leave', 'code' => 'sl'],
+        ];
+        foreach ($companyBalanceTypes as $balanceType) {
+            LeaveType::create([
+                'office_id' => $office->id,
+                'name' => $balanceType['name'],
+                'code' => $balanceType['code'],
+                'is_paid' => true,
+                'deducts_balance' => true,
+                'is_cash_convertible' => false,
+                'max_carryover_minutes' => null,
+                'is_active' => true,
             ]);
         }
     }

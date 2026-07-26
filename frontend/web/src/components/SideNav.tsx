@@ -36,11 +36,13 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
   me: [
     { href: '/me/attendance', label: 'Attendance' },
     { href: '/me/requests', label: 'My requests' },
+    { href: '/me/leave', label: 'Leave' },
   ],
   team: [{ href: '/team/approvals', label: 'Approvals' }],
   office: [
     { href: '/office/holidays', label: 'Holidays' },
     { href: '/office/schedules', label: 'Schedules' },
+    { href: '/office/leave-types', label: 'Leave types' },
     { href: '/office/approvals', label: 'Approvals' },
   ],
   admin: [{ href: '/admin/pay-rules', label: 'Pay rules' }],

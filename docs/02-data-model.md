@@ -1243,6 +1243,135 @@ exists to race against.
 
 ---
 
+## Leave: per-office types, the append-only ledger, and derived balances *(M6b-a)*
+
+**M6b-a is the leave foundation only** — per-office leave-type config, HR's ability to
+manually credit a balance, and reading it back. It deliberately does **not** include an
+employee filing a leave request, the manager→HR two-step approval chain that request will
+need, tenure-based accrual, carryover, cash-out, or the compute engine reading leave
+alongside attendance — all of that is M6b-b and later. See `docs/06-roadmap.md`.
+
+```sql
+alter table offices add column minutes_per_leave_day smallint not null default 480;
+```
+
+**The nominal length of a leave day, per office** — the divisor `App\Domain\Leave\LeaveUnit`
+uses to convert a leave amount an employee actually thinks in (days, half a shift, hours,
+minutes) into the integer minutes every ledger row and balance is stored and summed in.
+Default 480 (8h) so a fresh office needs no configuration to behave sensibly; `PATCH
+/office/leave-day` (`App\Actions\Offices\SetOfficeLeaveDay`) is the only writer, scoped by
+`OfficeScope::administered` the same as every other per-office config write in this
+document.
+
+```sql
+create table leave_types (
+  id                     uuid primary key default uuidv7(),
+  office_id              uuid not null references offices(id) on delete cascade,
+  name                   text not null,
+  code                   text,                          -- slug for a seeded statutory type; null for ad-hoc
+  is_paid                boolean not null default true,
+  requires_attachment    boolean not null default false,
+  deducts_balance        boolean not null default true,  -- false = event entitlement (Maternity etc.)
+  is_cash_convertible    boolean not null default false,
+  max_carryover_minutes  integer,                        -- null = unlimited; the year-end job that reads it is deferred
+  is_active              boolean not null default true,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+
+  check (max_carryover_minutes is null or max_carryover_minutes >= 0),
+  unique (office_id, code)        -- one 'sil' per office; multiple null codes allowed (Postgres treats NULLs distinct)
+);
+```
+
+**`deducts_balance` is the whole balance-vs-event axis.** `true` (SIL, VL, SL) means the
+type holds a balance an employee is granted *into* and later spends *from* — a real number
+that can run out. `false` (Maternity, Paternity, Solo Parent, VAWC, Magna Carta) means an
+entitlement keyed to a qualifying event, never banked, never granted a balance — the ledger
+never credits or debits one, in this milestone or the next. `App\Actions\Leave\GrantLeave`
+enforces this at the write boundary: a manual grant against a `deducts_balance: false` type
+is refused (`App\Exceptions\Domain\LeaveTypeNotGrantable`, `422
+leave_type_not_grantable`) rather than silently crediting a balance the type was never
+supposed to have.
+
+**No delete route.** A retired leave type is set `is_active: false` via `PATCH
+/office/leave-types/{leaveType}`, never removed — the same "archive, never delete" instinct
+M8 states outright for employment records, applied here because a deleted type would orphan
+every `leave_ledger` row that ever referenced it. `CreateLeaveTypeRequest`/`SetLeaveDayRequest`
+follow the same shape-only-validation, `office_id` never `exists:offices,id`, that every
+other office-scoped config write in this document uses — the 404-not-403 discipline needs
+the scope check to happen in the controller, uniformly, or a fabricated office id would 400
+while an out-of-scope real one 404s, reopening the enumeration oracle that discipline exists
+to close.
+
+`CompanySeeder` seeds every office with the full PH statutory + company set on a fresh
+`make dev`: **SIL** (`deducts_balance: true`, cash-convertible — Art. 95), the five event
+types **Maternity / Paternity / Solo Parent / VAWC / Magna Carta** (`deducts_balance:
+false`), and the two company benefits **VL / SL** (`deducts_balance: true`, not statutory,
+given the same balance shape as SIL). None of this seeding grants a single day — every
+balance starts empty; a grant is always a deliberate, logged HR action.
+
+```sql
+create table leave_ledger (
+  id            uuid primary key default uuidv7(),
+  employee_id   uuid not null references employees(id),
+  leave_type_id uuid not null references leave_types(id),
+  entry_type    text not null,                     -- 'credit' | 'debit'
+  minutes       integer not null,
+  reason        text not null,
+  source        text not null,                     -- 'manual_grant' today; taking/accrual widen this in M6b-b+
+  request_id    uuid references requests(id) on delete set null,   -- null until a leave request writes here (M6b-b)
+  created_by    uuid not null references users(id),
+  created_at    timestamptz not null,               -- no updated_at — append-only
+
+  check (entry_type in ('credit','debit')),
+  check (source in ('manual_grant')),
+  check (minutes > 0)
+);
+
+create index leave_ledger_employee_id_leave_type_id_index on leave_ledger (employee_id, leave_type_id);
+```
+
+**The leave bank statement — append-only, exactly the way `attendance_logs` and
+`attendance_annulments` are (M3, M3.6, above).** `App\Actions\Leave\GrantLeave` is the sole
+writer and only ever `create`s; the model manages `created_at` alone (`const UPDATED_AT =
+null`), so an already-persisted row cannot pick up an `updated_at` even by an accidental
+`save()`. **A correction is a second row, never an edit of the first** — re-granting is a
+second credit, and the day M6b-b's leave-taking ships, an over-grant gets fixed by a
+compensating debit row, not by rewriting the original credit.
+
+**Balances are DERIVED, never stored — there is no balance column anywhere in this schema.**
+`App\Domain\Leave\LeaveBalances::forEmployee()` is the one place that turns the ledger into a
+number: `SUM(credit) - SUM(debit)`, grouped by `leave_type_id`, computed fresh on every read.
+The same reasoning POS applied to stock applies here — a mutable running total invites drift
+between the number and the rows that are supposed to explain it; a derived sum cannot drift,
+because it *is* the rows. `request_id` is nullable and unused by M6b-a (every row today has
+`source: 'manual_grant'` and no request); it exists now so M6b-b's leave-taking debit can
+reference the request that produced it without a later migration.
+
+**Reading a balance** (`GET /me/leave`, `GET /employees/{employee}/leave`) merges every
+*active*, *balance-deducting* leave type in the employee's current office against
+`LeaveBalances::forEmployee()` — an absent key means a real zero balance, not that the type
+doesn't exist, since the ledger has no row at all until a first grant. Both routes return the
+identical shape; `GET /me/leave` is the caller's own record, `GET
+/employees/{employee}/leave` is broader (self, direct reports, or HR-office members, via
+`EmployeeScope::visibleTo`, `03-api.md`) — deliberately wider than *granting*
+(`OfficeScope::administers`, HR-only), because a manager may see a direct report's balance
+even though only HR may credit it. Both 404, not 403, on an out-of-scope employee, the same
+discipline every scoped read in this document already keeps.
+
+**Grants are HR-over-the-office, not manager-over-report.** `POST /leave/grants`
+(`App\Http\Controllers\Leave\GrantController`) scopes via `OfficeScope::administers` against
+the **employee's current office** — not `EmployeeScope`, which would also let a manager
+grant into their own direct reports' balances. Every lookup in the grant path (employee,
+leave type) 404s uniformly on failure, so an out-of-scope subject and a nonexistent one stay
+indistinguishable to the caller. `scripts/e2e-leave-foundation.sh` proves the whole path
+live: HR creates an office-scoped leave type, confirms the office's leave day, grants an
+employee 5 days as one 2400-minute credit row, that same employee reads the identical
+balance back decomposed into `{days: 5, hours: 0, minutes: 0}`, and a grant attempted against
+an event type is refused 422 with no row written.
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -1299,3 +1428,11 @@ Stated plainly, since these are the reasons for the constraints above:
   many config changes triggered it — only `daily_attendance_summaries`/
   `daily_summary_lines` are ever touched. (`RecordPunch` remains the sole writer of
   `attendance_logs`; the recompute path only reads it via `EffectivePunches::forDate()`.)
+- Two leave types in the same office cannot share a `code` (multiple ad-hoc types with a
+  null code are fine), and a leave type that does not bank a balance cannot be manually
+  granted into. (`unique(office_id, code)` on `leave_types` + `LeaveTypeNotGrantable`, `422
+  leave_type_not_grantable`.)
+- A `leave_ledger` row can never be edited or deleted, through the API or otherwise, and a
+  balance cannot drift from it because no balance is ever stored — there is no column to
+  drift. (`GrantLeave` only `create`s, no `updated_at` on the model;
+  `LeaveBalances::forEmployee` derives `SUM(credit) - SUM(debit)` fresh on every read.)

@@ -17,11 +17,21 @@ final class Office extends Model
     /** @use HasFactory<OfficeFactory> */
     use HasFactory, HasUuids;
 
+    // Fully unguarded, not $fillable: every write comes from a vetted Action, so there is
+    // no untrusted mass-assignment surface to fence off. Adding a non-empty $fillable here
+    // would flip Eloquent's semantics for the whole model (isFillable() only falls back to
+    // "everything but $guarded" when $fillable is empty) and silently block every OTHER
+    // column — including CompanySeeder's Office::create() and
+    // SetDefaultTemplateController's default_shift_template_id update — so
+    // minutes_per_leave_day relies on $guarded staying empty, not a $fillable entry.
     protected $guarded = [];
 
     protected function casts(): array
     {
-        return ['ip_allowlist' => 'array'];
+        return [
+            'ip_allowlist' => 'array',
+            'minutes_per_leave_day' => 'integer',
+        ];
     }
 
     /** @return BelongsTo<Organization, $this> */
@@ -46,6 +56,12 @@ final class Office extends Model
     public function shiftTemplates(): HasMany
     {
         return $this->hasMany(ShiftTemplate::class);
+    }
+
+    /** @return HasMany<LeaveType, $this> */
+    public function leaveTypes(): HasMany
+    {
+        return $this->hasMany(LeaveType::class);
     }
 
     /** @return BelongsTo<ShiftTemplate, $this> */

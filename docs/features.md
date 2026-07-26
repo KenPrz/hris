@@ -350,6 +350,47 @@ two queues, and the same request card rather than each getting their own.
 
 ---
 
-*(Leave — types, balances, the `leave_ledger`, and the multi-step approval chain it
-introduces — and overtime pre-authorization follow in later milestones, now that the
-approval spine (M6a) and the compute engine (M5) both exist for them to plug into.)*
+## Leave — setup and balances *(M6b-a)*
+
+The foundation the leave *request* (a later milestone) will need before it can exist: a
+per-office catalog of leave types, an HR admin's ability to manually credit an employee's
+balance, and a way for anyone entitled to see it to read it back. **Nothing here lets an
+employee take leave yet** — there is no leave request, no approval, no accrual job; every
+balance moves only because HR deliberately granted it.
+
+- **Leave types, configured per office.** `/office/leave-types` lets HR list, create, and
+  edit the leave types available in the offices they administer — name, whether it's paid,
+  whether it requires a supporting attachment, whether it banks a balance an employee can
+  spend from or is an event entitlement that doesn't (Maternity, Paternity, Solo Parent,
+  VAWC, Magna Carta — tied to a qualifying event, never a number that runs low), whether
+  it's convertible to cash, and a max carryover. A fresh office starts with the Philippine
+  statutory set already seeded, plus company Vacation and Sick Leave — nothing to configure
+  before HR can grant a single day. A type is retired by marking it inactive; there is no
+  delete, the same "archive, never remove" rule the rest of the system's config follows.
+- **HR grants leave manually, logged.** `POST /leave/grants` credits an employee's balance
+  in a leave type — 5 days, say — and every grant is one row in an append-only ledger with
+  a required reason, never a number silently bumped up. A re-grant is a second logged row,
+  not an edit of the first. Granting only works for a type that actually banks a balance:
+  trying to grant into an event entitlement (Maternity and the like) is refused outright —
+  there is no balance there to credit.
+- **Balances, shown in readable days.** `/me/leave` shows every leave type an employee can
+  see a balance for, in both raw minutes and the day/hour/minute breakdown people actually
+  think in — "5 days," not "2400 minutes." A manager or HR admin can read the same breakdown
+  for anyone within their scope (a direct report, or anyone in an office they administer) the
+  same way M2's employee directory already works: an employee outside that scope looks
+  exactly like one that doesn't exist, never a "you're not allowed" that confirms they do.
+  A type nobody has been granted into yet still shows up, at zero — the type existing and a
+  balance existing are two different questions.
+
+**Deliberately not here yet:** an employee filing a leave request, a manager or HR deciding
+one, the two-step manager-then-HR approval chain leave will need (the M6a approval screens
+only know a single decider today), tenure-based accrual, carryover running automatically at
+year-end, cashing out unused leave, and the compute engine reading a leave day at all — a
+day taken as leave prices exactly as any other day would today, because nothing files one
+yet.
+
+---
+
+*(Filing leave, the two-step manager-then-HR approval chain it introduces, and overtime
+pre-authorization follow in later milestones, now that the approval spine (M6a) and this
+leave foundation (M6b-a) both exist for them to plug into.)*
