@@ -39,6 +39,7 @@ use App\Http\Controllers\Office\Schedules\SetDefaultTemplateController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
+use App\Http\Controllers\Office\SetLeaveDayController;
 use App\Http\Controllers\Requests\ApproveController;
 use App\Http\Controllers\Requests\CancelController;
 use App\Http\Controllers\Requests\DownloadAttachmentController;
@@ -156,6 +157,7 @@ Route::prefix('v1')->group(function (): void {
             Route::delete('/schedule-overrides/{override}', DeleteOverrideController::class);
             Route::patch('/default-template', SetDefaultTemplateController::class);
             Route::get('/schedule/resolved', ResolvedScheduleController::class);
+            Route::patch('/leave-day', SetLeaveDayController::class);
         });
     });
 });
