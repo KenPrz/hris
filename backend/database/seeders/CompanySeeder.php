@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Actions\Attendance\RecordPunch;
 use App\Actions\Attendance\RecordPunchInput;
+use App\Actions\Compute\ComputeDailySummary;
 use App\Actions\Employees\CreateEmployee;
 use App\Actions\Employees\CreateEmployeeInput;
 use App\Actions\Employees\ProvisionUser;
@@ -225,6 +226,13 @@ final class CompanySeeder extends Seeder
 
         $this->seedPunch($manilaManager, PunchDirection::In, '2026-08-21T00:00:00Z', $actor);
         $this->seedPunch($manilaManager, PunchDirection::Out, '2026-08-21T10:00:00Z', $actor);
+
+        // A full, deliberately varied CURRENT-month attendance history for Miguel (the
+        // `employee.manila` login) — and the exempt manager on the sample holiday — so
+        // `/me/attendance` and the M5 compute breakdown are populated the moment you log in,
+        // rather than only the fixed Jan/Aug demo dates above. See the method.
+        $this->seedCurrentMonthAttendance($manila, $miguel, $manilaManager, $actor);
+
         $this->onboard(
             employeeNo: 'MNL-0003',
             organization: $org,
@@ -353,6 +361,158 @@ final class CompanySeeder extends Seeder
             direction: $direction,
             source: PunchSource::Manual,
             punchedAt: Carbon::parse($punchedAtUtc),
+            recordedBy: $actorId,
+            ipAddress: null,
+            deviceId: null,
+            geoLat: null,
+            geoLng: null,
+        ));
+    }
+
+    /**
+     * A full, deliberately varied CURRENT-month attendance history for one employee, so
+     * `/me/attendance` and the M5 compute breakdown are worth opening on a fresh `make dev`
+     * (the design choice: a full, varied month, anchored around today). Anchored to the
+     * office's own local "today", never a fixed calendar date, so the data always lands in
+     * the month the calendar opens on. Today itself is left unpunched on purpose — so the
+     * first thing you can do as this employee is click "Clock in" live.
+     *
+     * One day of each shape the compute engine can produce:
+     *   - ordinary days                          → regular_day @ 10000bp (ordinary floor)
+     *   - one overtime day (clock out 21:00)     → regular_day + overtime_day
+     *   - one night shift (22:00–06:00 override) → regular_night (the +10% differential)
+     *   - one rest day worked (no override)      → the rest-day premium (base 8h + rest OT)
+     *   - one special-non-working holiday worked → 13000bp (the exempt manager: flat 10000)
+     *   - one incomplete day (clock in, no out)  → zero worked, is_incomplete
+     *
+     * The night shift's out-punch lands on the NEXT calendar date. RecordPunch only ever
+     * recomputes a punch's OWN office-local date (see its docblock), so the out-punch
+     * computes the next day while the shift's originating date is left at one unpaired
+     * punch — so that date is recomputed explicitly once both punches exist, aimed at the
+     * business day the cross-midnight out-punch actually belongs to.
+     */
+    private function seedCurrentMonthAttendance(Office $office, Employee $employee, Employee $exemptManager, string $actorId): void
+    {
+        $timezone = $office->timezone;
+        $today = Carbon::now($timezone)->startOfDay();
+        $monthStart = $today->copy()->startOfMonth();
+
+        // Weekdays and weekend dates from the 1st through YESTERDAY (today stays open for a
+        // live clock-in).
+        $workdays = [];
+        $restDates = [];
+        for ($d = $monthStart->copy(); $d->lt($today); $d->addDay()) {
+            if ($d->isWeekend()) {
+                $restDates[] = $d->toDateString();
+            } else {
+                $workdays[] = $d->toDateString();
+            }
+        }
+
+        if ($workdays === []) {
+            // The month's first workday hasn't passed yet (run on a 1st/weekend); nothing to
+            // populate. The fixed Aug-21 holiday demo above still gives the engine live data.
+            return;
+        }
+
+        // Assign the special scenarios to the most recent workdays — indexing from the end
+        // is robust to whatever date this runs on; every other workday stays ordinary.
+        $count = count($workdays);
+        $overtimeDate = $workdays[$count - 1];
+        $incompleteDate = $count >= 2 ? $workdays[$count - 2] : null;
+        $nightDate = $count >= 3 ? $workdays[$count - 3] : null;
+        // A worked holiday on an early workday, kept clear of the three special days above.
+        $holidayDate = $count >= 6 ? $workdays[2] : null;
+
+        // The holiday must exist before a punch on it is computed. Direct create (like the
+        // fixed Manila holidays above), not the CreateHoliday action, so no recompute is
+        // dispatched — the punches below price against it synchronously.
+        if ($holidayDate !== null) {
+            Holiday::create([
+                'office_id' => $office->id,
+                'date' => $holidayDate,
+                'day_type' => DayType::SpecialNonWorking,
+                'name' => 'Founding Anniversary (dev sample)',
+            ]);
+        }
+
+        // The night-shift override must exist before the FOLLOWING day's punches are
+        // recorded, so that day's window is bounded and never double-claims the 06:00 out.
+        if ($nightDate !== null) {
+            ScheduleOverride::create([
+                'employee_id' => $employee->id,
+                'date' => $nightDate,
+                'is_rest' => false,
+                'start_minute' => 1320, // 22:00
+                'end_minute' => 1800,   // 06:00 the next day
+                'break_minutes' => 60,
+                'note' => 'Night shift (dev sample): 22:00–06:00',
+                'created_by' => $actorId,
+            ]);
+        }
+
+        // Punch the month in ascending date order.
+        foreach ($workdays as $date) {
+            if ($date === $incompleteDate) {
+                // A missed clock-out: one punch, no pair — the day the engine flags incomplete.
+                $this->seedLocalPunch($employee, PunchDirection::In, $timezone, $date, '08:00', $actorId);
+
+                continue;
+            }
+
+            if ($date === $nightDate) {
+                $this->seedLocalPunch($employee, PunchDirection::In, $timezone, $date, '22:00', $actorId);
+                $this->seedLocalPunch($employee, PunchDirection::Out, $timezone, $date, '06:00', $actorId, addDays: 1);
+
+                continue;
+            }
+
+            // Ordinary, overtime, and the worked holiday share the plain in/out shape: the
+            // later clock-out is what makes the overtime bucket, the holiday's day_type is
+            // what reprices its hours.
+            $out = $date === $overtimeDate ? '21:00' : '18:00';
+            $this->seedLocalPunch($employee, PunchDirection::In, $timezone, $date, '08:00', $actorId);
+            $this->seedLocalPunch($employee, PunchDirection::Out, $timezone, $date, $out, $actorId);
+        }
+
+        // One rest day actually worked — no override, so it stays a rest day and prices at
+        // the rest-day premium — on the most recent weekend date in range.
+        if ($restDates !== []) {
+            $restWorked = end($restDates);
+            $this->seedLocalPunch($employee, PunchDirection::In, $timezone, $restWorked, '08:00', $actorId);
+            $this->seedLocalPunch($employee, PunchDirection::Out, $timezone, $restWorked, '18:00', $actorId);
+        }
+
+        // Recompute the night shift's originating date now that both its punches exist (see
+        // the method docblock) — the same ComputeDailySummary the punch path calls.
+        if ($nightDate !== null) {
+            app(ComputeDailySummary::class)->execute($employee, $nightDate);
+        }
+
+        // The Art. 82-exempt manager works the same sample holiday, so the current month
+        // also shows the exemption live: the premium collapses to a flat 100% for them.
+        if ($holidayDate !== null) {
+            $this->seedLocalPunch($exemptManager, PunchDirection::In, $timezone, $holidayDate, '08:00', $actorId);
+            $this->seedLocalPunch($exemptManager, PunchDirection::Out, $timezone, $holidayDate, '18:00', $actorId);
+        }
+    }
+
+    /**
+     * A punch at a wall-clock time in the office's own timezone, written through RecordPunch
+     * (the one arch-guarded writer), source=manual so it lands `verified` regardless of any
+     * office ip_allowlist — the same shape as seedPunch(), but expressed in local time so
+     * the seed reads as "08:00" rather than a hand-converted UTC offset. `addDays` carries
+     * the out-punch of a cross-midnight shift onto the next calendar day.
+     */
+    private function seedLocalPunch(Employee $employee, PunchDirection $direction, string $timezone, string $date, string $time, string $actorId, int $addDays = 0): AttendanceLog
+    {
+        $instant = Carbon::parse("{$date} {$time}", $timezone)->addDays($addDays);
+
+        return app(RecordPunch::class)->execute(new RecordPunchInput(
+            employeeId: $employee->id,
+            direction: $direction,
+            source: PunchSource::Manual,
+            punchedAt: $instant,
             recordedBy: $actorId,
             ipAddress: null,
             deviceId: null,
@@ -496,5 +656,6 @@ final class CompanySeeder extends Seeder
             ],
         );
         $this->command?->comment('MNL-0005 is a punch-only worker: an employment record, no login.');
+        $this->command?->comment('employee.manila has a full, varied current-month attendance history (overtime, a night shift, a rest day worked, a worked holiday, and one incomplete day) — open /me/attendance to see the M5 breakdown. Today is left unpunched so you can clock in live.');
     }
 }
