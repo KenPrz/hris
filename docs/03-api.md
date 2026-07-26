@@ -304,12 +304,21 @@ proves an ordinary day pricing at the statutory floor, a special-non-working hol
 pricing at 130%, and an Art. 82-exempt employee's lines all pricing at 100% even on that
 same holiday, against the live stack.
 
-## Attendance adjustments *(M3.6)*
+## Attendance adjustments and the requests spine *(M3.6, generalized M6a)*
 
 An employee's own correction, on the shared `requests` spine (`02-data-model.md`):
 `pending → approved | rejected | cancelled`, one detail table per request type (only
 `attendance_adjustment` exists today), a manager or HR approves — never the requester
 themself, however broad their own scope otherwise reaches.
+
+**M6a generalized the read/decision surface off attendance specifically.** M3.6 shipped
+everything under `/attendance/adjustments/*`; M6a moved the read, decide, and queue routes
+to the type-agnostic `/requests/*` and `/team/approvals` / `/office/approvals` below, so a
+future request type (leave, M6b; overtime pre-authorization, M6c) is served by the exact
+same routes with no new endpoints. **Submission stays type-specific** — there is still no
+generic `POST /requests`, only `POST /attendance/adjustments` below — because what a
+submission needs to validate (an `operation`, a `target_log_id`, a `direction`) is
+irreducibly per-type; only the shape *after* a request exists is shared.
 
 ### Submit
 
@@ -355,17 +364,26 @@ reachable through the scoped download endpoint below.
 
 ### Approve / reject / cancel
 
+**M6a moved these three off `/attendance/adjustments/{request}/*` onto the generalized
+`/requests/{request}/*`** — same behavior, same authority rule, same status codes; only the
+URL changed. `{request}` is any request type's id (still only `attendance_adjustment`
+today); the action dispatches its effect by `type` (`RequestEffectFactory` →
+`RequestEffect`), so approving a future leave or overtime request will run through this
+exact same route with a different effect resolved underneath, not a new endpoint.
+
 ```
-POST /api/v1/attendance/adjustments/{request}/approve   # auth:sanctum
+POST /api/v1/requests/{request}/approve   # auth:sanctum
   → 200 { data: <request, state: "approved", decided_by, decided_at> }
   → 404 not_found              # out of the approver's scope, OR the approver IS the requester
   → 409 request_not_pending    # already approved/rejected/cancelled
   → 422 invalid_adjustment_target   # a void/amend target is missing, not the requester's,
                                      #   or already annulled by an earlier approval
+                                     #   (attendance_adjustment's own effect failure — a
+                                     #   future request type's effect fails with its own code)
 ```
 
 ```
-POST /api/v1/attendance/adjustments/{request}/reject
+POST /api/v1/requests/{request}/reject
   { "decision_note": string, REQUIRED }
   → 200 { data: <request, state: "rejected", decision_note> }
   → 404 not_found              # same authority rule as approve
@@ -374,7 +392,7 @@ POST /api/v1/attendance/adjustments/{request}/reject
 ```
 
 ```
-POST /api/v1/attendance/adjustments/{request}/cancel     # requester only
+POST /api/v1/requests/{request}/cancel     # requester only
   → 200 { data: <request, state: "cancelled"> }
   → 404 not_found              # the caller is not the requester (narrower than approve/reject)
   → 409 request_not_pending
@@ -398,34 +416,50 @@ layer would let an out-of-scope prober distinguish "exists but hidden" (`400` on
 body) from "doesn't exist" (`404`), the exact existence leak the 404-not-403 rule exists to
 close. So an out-of-scope reject with an empty body is still `404`, never `400`.
 
-**Approval is transactional with its effect.** `add` → `RecordPunch` (`source: adjustment`,
-`recorded_by` the approver); `void` → `RecordAnnulment`; `amend` → both. All three, plus the
-request's own state write, happen inside one `SELECT ... FOR UPDATE`-locked transaction — if
-the effect throws, nothing commits, including the state transition.
+**Approval is transactional with its effect.** `RequestEffectFactory::for($request->type)`
+resolves the type's `RequestEffect` (today, always `AttendanceAdjustmentEffect`, delegating
+to `ApplyAttendanceAdjustment`) and calls it inside the same lock `add` → `RecordPunch`
+(`source: adjustment`, `recorded_by` the approver); `void` → `RecordAnnulment`; `amend` →
+both. The effect call, plus the request's own state write, happen inside one
+`SELECT ... FOR UPDATE`-locked transaction — if the effect throws, nothing commits,
+including the state transition. An unmapped `type` reaching this factory is a programming
+error (a request type shipped with no effect wired), never a silent no-op approve.
 
-### List mine, the approval queue, show, and the attachment
+### List mine, the two approval queues, show, and the attachment
 
 ```
-GET /api/v1/attendance/adjustments            # auth:sanctum — the caller's own, any state
+GET /api/v1/requests            # auth:sanctum — the caller's own, any state
   → { data: [ <request>, … ] }
   → 422 not_an_employee
+```
 
-GET /api/v1/attendance/adjustments/pending    # auth:sanctum — the approval queue
+**The single combined pending queue is gone — replaced by two scope-based views**, both
+type-agnostic (a future leave or overtime request appears here automatically, with no
+per-type wiring):
+
+```
+GET /api/v1/team/approvals     # auth:sanctum — the caller's DIRECT REPORTS' pending requests
+GET /api/v1/office/approvals   # auth:sanctum — the caller's HR-administered offices' pending requests
   → { data: [ <request>, … ] }   # in-scope-minus-self, state=pending only
 ```
 
-The pending queue is exactly the set `RequestAuthority::canDecide` would accept one request
-at a time: every pending request whose requester is visible to the caller under
-`EmployeeScope`, excluding the caller's own. (Registered *before* the `{request}` show route
-below — otherwise `/pending` would bind as a `{request}` uuid lookup and 404 via route-model
-binding instead of ever reaching this controller.)
+Each is a `Builder`-returning view (`App\Domain\Requests\ApprovalQueues`) over the same
+pending set `RequestAuthority::canDecide` would accept one request at a time —
+`directReportsOf` filters to `employee_id IN (current_reports_to_id = me)`, `hrOfficesOf` to
+`employee_id IN (current_office_id IN my hr_admin_offices)` — both excluding the caller's
+own requests, and both silently empty for an actor with no employee record (a
+system-admin-only account has no org-chart position and administers no office, so gets **no
+queue at all** — not an error, just two empty arrays). A manager with no HR office sees only
+`/team/approvals` populated; an HR admin with no reports sees only `/office/approvals`; a
+manager who is ALSO their office's HR admin sees the same pending request on both, since the
+two are independent views over one set, not a partition of it.
 
 ```
-GET /api/v1/attendance/adjustments/{request}            # auth:sanctum
+GET /api/v1/requests/{request}            # auth:sanctum
   → 200 { data: <request> }
   → 404 not_found   # neither the requester nor an authorized approver
 
-GET /api/v1/attendance/adjustments/{request}/attachment # auth:sanctum
+GET /api/v1/requests/{request}/attachment # auth:sanctum
   → 200 <file stream>
   → 404 not_found   # unauthorized viewer, OR the request has no attachment at all
 ```
@@ -437,6 +471,14 @@ everyone else gets the identical `404` whether the request doesn't exist, belong
 stranger, or exists but has no file. The attachment is a **private, app-mediated stream**
 (`Media::toResponse()`), never a public or presigned RustFS URL — RustFS itself is only
 reachable from inside the container network (`02-data-model.md`).
+
+**M6a shipped:** per-type effect dispatch, the two scoped queues above, the route
+generalization onto `/requests/*`, and the full correction-filing vertical in the browser
+(`/me/attendance`'s file-a-correction form, `/me/requests`, `/team/approvals`,
+`/office/approvals`) — proven end to end by `scripts/e2e-requests.sh` against the live
+stack. The state machine is still M3.6's single step, `pending → approved | rejected |
+cancelled` — the multi-step `draft → submitted → manager_approved → hr_approved → approved`
+machine leave will need is deferred to M6b (`06-roadmap.md`).
 
 ## Office — holidays *(M4a)*
 

@@ -123,7 +123,9 @@ describe('/me/requests', () => {
 
     renderPage()
 
-    await screen.findByText('My requests')
+    // Not `findByText` — the SideNav (M6a) now also links to `/me/requests` as "My
+    // requests", so the plain text is ambiguous; the page's own title is the `h1`.
+    await screen.findByRole('heading', { name: 'My requests' })
   })
 
   it('shows an empty state when there are no requests', async () => {

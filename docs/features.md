@@ -143,8 +143,8 @@ before any of it was wired to a button.
 Everything above through M3.6 existed as an API only. This milestone gives it a real
 screen — the sign-in page and the attendance screen — built in IBM's Carbon design
 language. The office and admin screens it lacked have since arrived with the milestones
-that own their data (holidays, schedules, and pay rules, all M4). Still absent: a screen
-for filing an attendance correction, and a roster of employees.
+that own their data (holidays, schedules, and pay rules, all M4; filing and approving a
+correction, M6a, below). Still absent: a roster of employees.
 
 - **Signing in, for real.** A work email and password on a single sign-in page; a wrong
   password and an unknown email look identical, so the page itself can't be used to guess
@@ -314,8 +314,42 @@ for filing an attendance correction, and a roster of employees.
   both the moment it's punched (M5a) and every time afterward that the configuration
   pricing it changes (M5b).
 
+## Filing and approving requests *(M6a)*
+
+Correcting your own attendance (M3.6) has existed as an API since before M5; this is the
+milestone that gives it a screen, and generalizes the approval machinery underneath it so
+leave and overtime pre-authorization (later milestones) plug into the same spine, the same
+two queues, and the same request card rather than each getting their own.
+
+- **Filing a correction, from the attendance screen you already use.** A form off
+  `/me/attendance` files an add, void, or amend — the same three operations M3.6 always
+  supported — with a required note and an optional supporting file, without leaving the
+  calendar you're looking at the missing or wrong punch on.
+- **My requests.** `/me/requests` lists every request you've ever filed, its current
+  status, and — once decided — the outcome. A request still pending can be withdrawn from
+  here at any time before someone acts on it.
+- **Two approval queues, not one.** `/team/approvals` is a manager's queue — every pending
+  request from someone who reports to them, and nothing else. `/office/approvals` is an HR
+  admin's — every pending request from someone in an office they administer. The two are
+  independent: a request from someone who is both your direct report and in an office you
+  HR-administer shows up on both, not once; approving it on either one decides it, and it
+  drops off both immediately. Both queues use the same card and the same decide action —
+  approve, or reject with a required reason — because a manager and an HR admin are
+  deciding the identical thing, just reached through a different relationship to the
+  requester.
+- **Still one decision, not two.** Filing, then one authorized approver deciding, is the
+  whole flow today — there is no separate "manager approves, then HR approves" hand-off
+  yet. That two-step chain is coming with leave (a future milestone), which is the first
+  request type that actually needs it; attendance corrections don't, so M6a didn't build
+  a second step nobody was using.
+- **A system admin with no direct reports and no HR-administered office sees neither
+  queue.** That's deliberate, not an oversight: the two queues are scoped by an actual
+  relationship to the requester (org chart, or office administration), and "is a system
+  admin" isn't one — a sysadmin who also happens to manage people or administer an office
+  sees the same queues anyone in that position would.
+
 ---
 
-*(Requests and approvals — leave, overtime pre-authorization, and the state machine that
-routes them — follows in a later milestone, now that the compute engine exists to price
-what they affect.)*
+*(Leave — types, balances, the `leave_ledger`, and the multi-step approval chain it
+introduces — and overtime pre-authorization follow in later milestones, now that the
+approval spine (M6a) and the compute engine (M5) both exist for them to plug into.)*
