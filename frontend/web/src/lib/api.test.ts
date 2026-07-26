@@ -160,3 +160,65 @@ describe('api.punch', () => {
     expect(headers['Idempotency-Key']).toBe('my-idempotency-key')
   })
 })
+
+describe('api.adjustments.submit', () => {
+  it('sends a FormData body with NO Content-Type header, so the browser sets the multipart boundary', async () => {
+    const fetchMock = stubFetch(201, {
+      data: {
+        id: 'r1',
+        type: 'attendance_adjustment',
+        state: 'pending',
+        note: 'Missed punch',
+        employee_id: 'e1',
+        detail: { operation: 'void', target_log_id: 'log-1', direction: null, punched_at: null },
+        decided_by: null,
+        decided_at: null,
+        decision_note: null,
+        has_attachment: false,
+      },
+    })
+
+    await api.adjustments.submit({ operation: 'void', target_log_id: 'log-1', note: 'Missed punch' })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/attendance/adjustments')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+
+    // A `Content-Type: multipart/form-data` here would ship without the boundary the
+    // browser generates for the body it's actually sending — the server could never parse
+    // it. `Accept`/`Authorization` are fine; `Content-Type` specifically must be absent so
+    // `fetch` computes it (with boundary) from the FormData body itself.
+    const headers = init.headers as Record<string, string>
+    expect('Content-Type' in headers).toBe(false)
+  })
+})
+
+describe('api.requests.reject', () => {
+  it('POSTs { decision_note } as JSON to /requests/{id}/reject', async () => {
+    const fetchMock = stubFetch(200, {
+      data: {
+        id: 'some-id',
+        type: 'attendance_adjustment',
+        state: 'rejected',
+        note: 'Missed punch',
+        employee_id: 'e1',
+        detail: null,
+        decided_by: 'u1',
+        decided_at: '2026-07-26T09:00:00Z',
+        decision_note: 'a reason',
+        has_attachment: false,
+      },
+    })
+
+    await api.requests.reject('some-id', 'a reason')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/requests/some-id/reject')
+    expect(init.method).toBe('POST')
+
+    const headers = init.headers as Record<string, string>
+    expect(headers['Content-Type']).toBe('application/json')
+    expect(init.body).toBe(JSON.stringify({ decision_note: 'a reason' }))
+  })
+})
