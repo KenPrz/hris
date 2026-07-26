@@ -235,6 +235,27 @@ describe('/office/leave-types — create a leave type', () => {
       )
     })
   })
+
+  it('a non-numeric "Max carryover (minutes)" blocks submit instead of silently saving null', () => {
+    stubSession()
+    stubLeaveTypes({ data: [] })
+    const mutate = stubSaveLeaveType()
+    stubSetLeaveDay()
+    stubEmployees()
+    stubGrantLeave()
+
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New leave type' }))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Emergency Leave' } })
+    fireEvent.change(screen.getByLabelText('Max carryover (minutes)'), { target: { value: 'abc' } })
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(mutate).not.toHaveBeenCalled()
+  })
 })
 
 describe('/office/leave-types — leave day', () => {
@@ -324,5 +345,57 @@ describe('/office/leave-types — grant form', () => {
     await waitFor(() => {
       expect(screen.getByText('Leave granted.')).toBeInTheDocument()
     })
+  })
+})
+
+describe('/office/leave-types — grant form resets on office switch', () => {
+  it("switching the office remounts the grant form with the NEW office's first employee/leave-type — no stale cross-office ids survive the switch", async () => {
+    stubSession({ hr_offices: ['o1', 'o2'] })
+
+    // /employees is one shared, non-office-scoped list (see useEmployees's own doc
+    // comment) — a stale id from the previous office is still a *valid* id, just for the
+    // wrong office, so this is the exact condition that let a stale selection slip past
+    // `hasInvalidInput` before the fix.
+    mockedUseLeaveTypes.mockImplementation(
+      (officeId) =>
+        ({
+          data:
+            officeId === 'o1'
+              ? [leaveType({ id: 'lt-o1', name: 'O1 Leave' })]
+              : officeId === 'o2'
+                ? [leaveType({ id: 'lt-o2', name: 'O2 Leave' })]
+                : [],
+          isLoading: false,
+          isError: false,
+        }) as unknown as ReturnType<typeof useLeaveTypes>,
+    )
+    stubSaveLeaveType()
+    stubSetLeaveDay()
+    mockedUseEmployees.mockReturnValue({
+      data: [
+        employee({ id: 'e-o1', employee_no: 'E-O1', current_office_id: 'o1' }),
+        employee({ id: 'e-o2', employee_no: 'E-O2', current_office_id: 'o2' }),
+      ],
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useEmployees>)
+
+    const mutate = vi.fn()
+    stubGrantLeave({ mutate: mutate as unknown as ReturnType<typeof useGrantLeave>['mutate'] })
+
+    renderPage()
+
+    // Defaults to o1 (the session's first hr_offices entry) — switch to o2.
+    fireEvent.click(screen.getByLabelText('Office'))
+    fireEvent.click(await screen.findByRole('option', { name: 'o2' }))
+
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Post-switch grant' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Grant leave' }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      { employee_id: 'e-o2', leave_type_id: 'lt-o2', amount: 1, unit: 'day', reason: 'Post-switch grant' },
+      expect.anything(),
+    )
   })
 })

@@ -131,8 +131,16 @@ function LeaveTypeForm({ initial, submitting, submitError, onCancel, onSubmit }:
     initial.max_carryover_minutes !== null ? String(initial.max_carryover_minutes) : '',
   )
 
+  // Same guard as `leave-day-minutes` and `grant-amount`: a non-numeric entry must block
+  // submit, not silently fall through `Number('abc')` → `NaN` → serialized as `null` (which
+  // would read as "no carryover cap" — a materially different, wrong value).
+  const maxCarryoverValue = maxCarryover.trim() === '' ? null : Number(maxCarryover)
+  const hasInvalidCarryover = maxCarryoverValue !== null && Number.isNaN(maxCarryoverValue)
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
+    if (hasInvalidCarryover) return
+
     onSubmit({
       name,
       code: code.trim() === '' ? null : code,
@@ -140,7 +148,7 @@ function LeaveTypeForm({ initial, submitting, submitError, onCancel, onSubmit }:
       requires_attachment: requiresAttachment,
       deducts_balance: deductsBalance,
       is_cash_convertible: isCashConvertible,
-      max_carryover_minutes: maxCarryover.trim() === '' ? null : Number(maxCarryover),
+      max_carryover_minutes: maxCarryoverValue,
       is_active: isActive,
     })
   }
@@ -178,6 +186,7 @@ function LeaveTypeForm({ initial, submitting, submitError, onCancel, onSubmit }:
         label="Max carryover (minutes)"
         value={maxCarryover}
         onChange={setMaxCarryover}
+        error={hasInvalidCarryover ? 'Enter a whole number of minutes, or leave it blank.' : undefined}
       />
 
       {submitError ? (
@@ -187,7 +196,11 @@ function LeaveTypeForm({ initial, submitting, submitError, onCancel, onSubmit }:
       ) : null}
 
       <div className="flex" style={{ gap: 'var(--sp-sm)' }}>
-        <Button type="submit" loading={submitting} disabled={submitting || name.trim().length === 0}>
+        <Button
+          type="submit"
+          loading={submitting}
+          disabled={submitting || name.trim().length === 0 || hasInvalidCarryover}
+        >
           Save
         </Button>
         <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
@@ -465,7 +478,13 @@ export default function LeaveTypesPage() {
                 {grantSucceeded ? <InlineNotification kind="success" title="Leave granted." /> : null}
 
                 <GrantForm
-                  key={grantFormKey}
+                  // Keyed on officeId too, not just grantFormKey — /employees and this
+                  // office's leave types are looked up by id, and a stale id from the
+                  // PREVIOUS office is still a *valid* id (just for the wrong office), so
+                  // hasInvalidInput can't catch it. Remounting on officeId change is what
+                  // guarantees the fresh employee/leave-type selection actually belongs to
+                  // the office now showing, instead of echoing the switch-away office's ids.
+                  key={`${officeId}-${grantFormKey}`}
                   employeeOptions={officeEmployees.map((employee) => ({ value: employee.id, label: employee.employee_no }))}
                   leaveTypeOptions={leaveTypes.map((leaveType) => ({ value: leaveType.id, label: leaveType.name }))}
                   submitting={grantMutation.isPending}
