@@ -1199,8 +1199,10 @@ after. What the building turned on, for whoever picks up M6 next:
 The first slice of the old single "M6 — Requests and approvals" milestone: turn M3.6's
 attendance-only approval into a reusable, **still single-step** request spine with two
 scope-based approval queues, and give it its first full browser UI — proven end to end with
-attendance adjustments, the only request type that exists yet. Slicing: **M6a spine → M6b
-leave → M6c overtime pre-auth** — see `docs/superpowers/specs/2026-07-26-m6a-approval-spine-design.md`.
+attendance adjustments, the only request type that exists yet. Slicing: **M6a spine → M6b-a
+leave foundation → M6b-b leave requests → M6c overtime pre-auth** — see
+`docs/superpowers/specs/2026-07-26-m6a-approval-spine-design.md`. (M6b split into two slices
+once M6b-a began — see M6b-a's own section, below, for why.)
 
 - **Per-type effect dispatch.** `ApproveRequest` no longer hardcodes
   `ApplyAttendanceAdjustment` — it resolves a `RequestEffect` by `RequestType` through
@@ -1232,9 +1234,10 @@ leave → M6c overtime pre-auth** — see `docs/superpowers/specs/2026-07-26-m6a
   approved`, the `requires_hr_step` flag, and that whole vocabulary do **not** exist yet.
   M6a kept M3.6's single step, `pending → approved | rejected | cancelled` — one authorized
   approver decides, full stop. Leave is the first type that actually needs a second hop
-  (manager, then HR), so the machine widens with M6b, not before it's needed.
+  (manager, then HR), so the machine widens with M6b-b, not before it's needed.
   `requests.state`'s CHECK constraint is unchanged; no migration landed in M6a.
-- Leave types, `leave_ledger`, balances → **M6b**, below.
+- Leave types, `leave_ledger`, derived balances, manual grants → **M6b-a**, below (done).
+- The leave request itself and the two-hop machine → **M6b-b**, below (next).
 - Overtime pre-authorization and the `min(actual, approved)` compute integration → **M6c**.
 
 **Done when:** an employee forgets to clock out, the day shows zero hours and
@@ -1246,25 +1249,88 @@ what they were before — `scripts/e2e-requests.sh` proves exactly this, live. *
 tests (22 of them Arch) + 359 frontend tests**, all green, `lint`/`typecheck`/`build` clean
 native and inside `make test`'s containers alike.
 
-## M6b — Leave *(next)*
+## M6b-a — The leave foundation *(done)*
 
-- Leave types configurable per office: paid/unpaid, requires attachment, deducts from
-  balance, convertible to cash, max carryover. Seeded with the PH statutory set — SIL
-  (5 days after one year, Art. 95), Maternity 105 days (RA 11210), Paternity 7 days
-  (RA 8187), Solo Parent 7 days (RA 11861), VAWC 10 days (RA 9262), Magna Carta special
-  leave (RA 9710) — plus company VL/SL.
-- `leave_ledger`: every credit and debit is a row with a reason. Balances are derived,
-  never stored as a mutable number, for the same reason POS made stock a ledger.
-- **The multi-step machine M6a deferred.** `draft → submitted → manager_approved →
-  hr_approved → approved`, `rejected`/`cancelled` terminal, a per-type `requires_hr_step`
-  flag deciding whether the second hop exists at all — leave is the type that needs it,
-  so it lands here rather than being speculatively built into M6a. `RequestEffect` and the
-  two scoped queues are unchanged; leave plugs in as a new `RequestType` and a new effect,
-  the same shape M6a's design proved out.
+The first slice of the old single "M6b — Leave" milestone: the config and ledger a leave
+*request* (M6b-b, below) will need before it can exist — per-office leave types, the
+minutes-per-leave-day conversion, an append-only ledger, derived balances, and HR's ability
+to manually grant into one. Nothing here files a request, approves one, or debits a balance
+by taking leave — that's the whole reason it's a separate slice, the same way M6a split the
+approval spine from the leave type it exists to serve.
+
+- **Leave types, configurable per office.** Paid/unpaid, requires attachment, deducts from
+  balance vs. an event entitlement that doesn't (`deducts_balance`), convertible to cash,
+  max carryover — `GET/POST /office/leave-types`, `PATCH /office/leave-types/{leaveType}`,
+  `OfficeScope`-scoped the same as holidays and schedules. No delete route: a retired type
+  is `is_active: false`, never removed. `CompanySeeder` seeds every office with the PH
+  statutory set — SIL (Art. 95, cash-convertible), Maternity (RA 11210), Paternity
+  (RA 8187), Solo Parent (RA 11861), VAWC (RA 9262), Magna Carta (RA 9710) — plus company
+  VL/SL, with every balance starting empty.
+- **`offices.minutes_per_leave_day`** (default 480), `PATCH /office/leave-day`, and
+  `App\Domain\Leave\LeaveUnit` converting a request's day/half-shift/hour/minute amount
+  into the integer minutes everything downstream stores.
+- **`leave_ledger`: every credit is a row with a reason, append-only, exactly the way
+  `attendance_logs` is.** Balances are derived (`App\Domain\Leave\LeaveBalances`), never
+  stored as a mutable number, for the same reason POS made stock a ledger — a number that
+  can drift from its own history is the bug, not a feature.
+- **`POST /leave/grants`: HR manually crediting a balance.** One logged credit row per
+  grant, scoped `OfficeScope::administers` against the employee's *current office* (not
+  `EmployeeScope`, which would also let a manager grant into their own reports) — HR-only,
+  by design. Granting an event type (`deducts_balance: false`) is refused, `422
+  leave_type_not_grantable`, not a silent no-op.
+- **Balance reads**, self (`GET /me/leave`) and overseen (`GET
+  /employees/{employee}/leave`, `EmployeeScope`), both returning raw minutes and a readable
+  `{days, hours, minutes}` decomposition, 404-not-403 on an out-of-scope employee.
+- **`leave.manage`** seeded onto `HR Admin` (`05-rbac.md`) — cataloged the same way
+  `holiday.manage`/`schedule.manage` are; the actual boundary enforced by every route above
+  is `OfficeScope`, not a `can()` check.
+- Frontend: `/office/leave-types` (HR config), `/me/leave` (balances, readable decomposition),
+  an HR grant form, nav wiring — no new UI shell, `<Tag>`/`<StatTile>`/`<EmptyState>` reused
+  from the M4/M6a work already in place.
+
+**Explicitly deferred, not solved silently:**
+
+- **Taking leave.** There is no way for an employee to file a leave request yet — that's
+  M6b-b, below. M6b-a's grant is HR pushing minutes onto a balance, never an employee
+  pulling from one.
+- **The multi-step machine.** `draft → submitted → manager_approved → hr_approved →
+  approved`, the `requires_hr_step` flag, and that whole vocabulary do **not** exist yet —
+  M6a's single-step `pending → approved | rejected | cancelled` has nothing to widen until
+  M6b-b's leave request actually needs the second hop. `requests.state`'s `CHECK` constraint
+  is unchanged; no migration landed in M6b-a.
+- **Accrual, carryover, and cash-out.** The schema supports all three (`max_carryover_minutes`,
+  `is_cash_convertible`) but no job reads them yet — every balance moves only by a manual
+  HR grant.
+- **Compute integration.** The engine does not read `leave_ledger` at all; a day taken as
+  leave prices exactly as it did before this milestone, because nothing files one yet.
+
+**Done when:** HR configures a per-office leave type, confirms the office's leave day,
+manually grants an employee 5 days as one 2400-minute credit row, that employee reads the
+identical balance back decomposed into `{days: 5, hours: 0, minutes: 0}`, and a grant
+attempted against an event type is refused 422 with nothing written —
+`scripts/e2e-leave-foundation.sh` proves exactly this, live. **551 backend tests (22 of
+them Arch) + 389 frontend tests**, all green, `lint`/`typecheck`/`build` clean native and
+inside `make test`'s containers alike.
+
+## M6b-b — Leave requests and the two-hop approval machine *(next)*
+
+The second slice: an employee actually files a leave request against a type from M6b-a's
+catalog, and the approval machine widens for the first time since M6a, because leave is the
+first request type that genuinely needs a second hop.
+
+- **The multi-step machine.** `draft → submitted → manager_approved → hr_approved →
+  approved`, `rejected`/`cancelled` terminal, a per-type `requires_hr_step` flag deciding
+  whether the second hop exists at all — leave is the type that needs it, so it lands here
+  rather than being speculatively built into M6a or M6b-a. `RequestEffect` and the two
+  scoped queues (`/team/approvals`, `/office/approvals`) are unchanged; leave plugs in as a
+  new `RequestType` and a new effect, the same shape M6a's design proved out.
+- **Filing debits nothing until fully approved** — the ledger only ever gains a debit row
+  once the chain reaches `approved`, never on `submitted` or `manager_approved`, so a
+  rejected-at-HR request never touched the balance it would have spent.
 - A `leave_request` reuses `<RequestCard>` and both approval queues — no new UI shell, only
   a new type-specific submission form (mirroring the M6a correction form) and a new
-  detail table, the same "submission stays type-specific, everything after doesn't"
-  split M6a established.
+  detail table, the same "submission stays type-specific, everything after doesn't" split
+  M6a established.
 
 **Done when:** an employee requests SIL, their manager approves the first step, HR approves
 the second, the leave ledger debits the balance, and the compute engine reads it alongside
@@ -1276,7 +1342,7 @@ live.
 - Overtime pre-authorization. The engine pays `min(actual_worked, approved)` and surfaces
   the remainder as **unpaid excess time** — visible, never silently converted to money.
 - A new `RequestType` and `RequestEffect`, same spine, same queues, same card — the
-  pattern M6a proved and M6b will have exercised a second time by then.
+  pattern M6a proved and M6b-b will have exercised a second time by then.
 
 **Done when:** an employee's pre-authorized overtime caps what the engine pays for a day
 that ran long, and the excess shows up as unpaid time rather than vanishing or silently
