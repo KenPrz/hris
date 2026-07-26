@@ -18,11 +18,16 @@ use Laravel\Sanctum\Sanctum;
 uses(RefreshDatabase::class);
 
 /*
-| The read side of the requests spine: my-requests, the approval queue
-| (in-scope-minus-self, pending only), a scoped show, and the private
-| attachment stream. Visibility is identical for show and download: the
-| requester, or an approver for whom RequestAuthority::canDecide() is true;
-| anyone else gets 404, never a 403 that would confirm the request exists.
+| The read side of the requests spine: my-requests, a scoped show, and the
+| private attachment stream. Visibility is identical for show and download:
+| the requester, or an approver for whom RequestAuthority::canDecide() is
+| true; anyone else gets 404, never a 403 that would confirm the request
+| exists.
+|
+| The old combined approval queue (in-scope-minus-self, pending only) that
+| used to live here moved to the two scope-filtered queues in
+| tests/Feature/Requests/ApprovalQueuesTest.php (M6a) — /team/approvals and
+| /office/approvals replaced the single /attendance/adjustments/pending route.
 |
 | Helper names are prefixed `readAdjustments*` to avoid colliding with the
 | same-shaped, differently-named helpers other Attendance test files declare
@@ -86,35 +91,6 @@ it('422s the my-requests read for a caller with no employee record', function ()
     $this->getJson('/api/v1/attendance/adjustments')
         ->assertStatus(422)
         ->assertJsonPath('error.code', 'not_an_employee');
-});
-
-// --- ListPending --------------------------------------------------------
-
-it('lists pending requests the caller may decide, excluding own and out-of-scope', function (): void {
-    $office = readAdjustmentsOffice();
-    [$managerUser, $manager] = readAdjustmentsEmployee($office);
-    [, $report] = readAdjustmentsEmployee($office, ['current_reports_to_id' => $manager->id]);
-
-    $visible = readAdjustmentsPendingRequest($report);
-    $ownRequest = readAdjustmentsPendingRequest($manager);   // must be excluded: own
-
-    $otherOffice = readAdjustmentsOffice();
-    [, $unrelated] = readAdjustmentsEmployee($otherOffice);
-    $outOfScope = readAdjustmentsPendingRequest($unrelated); // must be excluded: out of scope
-
-    $decided = readAdjustmentsPendingRequest($report);
-    $decided->update(['state' => RequestState::Approved]);   // must be excluded: not pending
-
-    Sanctum::actingAs($managerUser);
-
-    $response = $this->getJson('/api/v1/attendance/adjustments/pending')->assertOk();
-
-    $ids = array_column($response->json('data'), 'id');
-
-    expect($ids)->toBe([$visible->id])
-        ->not->toContain($ownRequest->id)
-        ->not->toContain($outOfScope->id)
-        ->not->toContain($decided->id);
 });
 
 // --- Show -----------------------------------------------------------------

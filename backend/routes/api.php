@@ -14,7 +14,6 @@ use App\Http\Controllers\Attendance\Adjustments\ApproveController as ApproveAdju
 use App\Http\Controllers\Attendance\Adjustments\CancelController as CancelAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\DownloadAttachmentController;
 use App\Http\Controllers\Attendance\Adjustments\ListMineController as ListMineAdjustmentsController;
-use App\Http\Controllers\Attendance\Adjustments\ListPendingController as ListPendingAdjustmentsController;
 use App\Http\Controllers\Attendance\Adjustments\RejectController as RejectAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\ShowController as ShowAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
@@ -46,6 +45,8 @@ use App\Http\Controllers\Office\Schedules\SetDefaultTemplateController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
+use App\Http\Controllers\Requests\OfficeApprovalsController;
+use App\Http\Controllers\Requests\TeamApprovalsController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
 
@@ -78,10 +79,13 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
         Route::get('/attendance/adjustments', ListMineAdjustmentsController::class);
 
-        // /pending must be registered before the {request} show route below, or "pending"
-        // is captured as a {request} route-model-binding id (a UUID column, so it would
-        // 404 via ModelNotFoundException rather than ever reaching ListPendingController).
-        Route::get('/attendance/adjustments/pending', ListPendingAdjustmentsController::class);
+        // The two scope-filtered approval queues — a manager's direct reports and an HR
+        // admin's office members — replace the old single combined
+        // /attendance/adjustments/pending queue. Both are VIEWS over the same pending set
+        // RequestAuthority::canDecide would accept; see ApprovalQueues. Not type-specific:
+        // any request type appears here, not just attendance adjustments.
+        Route::get('/team/approvals', TeamApprovalsController::class);
+        Route::get('/office/approvals', OfficeApprovalsController::class);
 
         // Transitions on the shared requests spine. Any authorized approver or the
         // requester themself may act — authority is enforced inside the actions

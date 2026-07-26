@@ -39,7 +39,11 @@ arch('the domain layer is framework-agnostic')
     // facades from the domain layer; it was never meant to bar the ORM from the one class
     // whose contract is "hand back a constrained query." See
     // docs/superpowers/specs/2026-07-23-m2-schema-auth-rbac-design.md.
-    ->ignoring(['App\Domain\Scope\EmployeeScope', 'App\Domain\Scope\OfficeScope']);
+    //
+    // ApprovalQueues (M6a) is the same shape one level up: two named queries that hand
+    // back a constrained Request Builder rather than a boolean, exactly like EmployeeScope
+    // does for Employee. Same carve-out, same reasoning.
+    ->ignoring(['App\Domain\Scope\EmployeeScope', 'App\Domain\Scope\OfficeScope', 'App\Domain\Requests\ApprovalQueues']);
 
 arch('the domain layer never reads configuration')
     ->expect('App\Domain')
