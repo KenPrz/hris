@@ -220,7 +220,13 @@ interface GrantFormProps {
 
 /** HR crediting one employee's balance. Fully self-contained field state, remounted (via a
  * `key` on the caller) after a successful grant so the next one starts from a clean slate
- * rather than echoing the last submission. */
+ * rather than echoing the last submission.
+ *
+ * `leaveTypeOptions` must already be filtered to grantable types (`is_active &&
+ * deducts_balance`) by the caller — see `LeaveTypesPage`'s `grantableLeaveTypes`. An event
+ * type (`deducts_balance: false`) 422s as `leave_type_not_grantable` on submit, and a grant
+ * against an inactive type would never show up on `/me/leave`, so neither belongs in this
+ * dropdown at all. */
 function GrantForm({ employeeOptions, leaveTypeOptions, submitting, onSubmit }: GrantFormProps) {
   const [employeeId, setEmployeeId] = useState(employeeOptions[0]?.value ?? '')
   const [leaveTypeId, setLeaveTypeId] = useState(leaveTypeOptions[0]?.value ?? '')
@@ -228,12 +234,16 @@ function GrantForm({ employeeOptions, leaveTypeOptions, submitting, onSubmit }: 
   const [unit, setUnit] = useState<LeaveUnitName>('day')
   const [reason, setReason] = useState('')
 
+  const hasNoGrantableTypes = leaveTypeOptions.length === 0
+
   const amountValue = Number(amount)
   const hasInvalidInput =
+    hasNoGrantableTypes ||
     employeeId === '' ||
     leaveTypeId === '' ||
     amount.trim() === '' ||
     Number.isNaN(amountValue) ||
+    !Number.isInteger(amountValue) ||
     amountValue <= 0 ||
     reason.trim() === ''
 
@@ -245,6 +255,13 @@ function GrantForm({ employeeOptions, leaveTypeOptions, submitting, onSubmit }: 
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: 'var(--sp-md)' }}>
+      {hasNoGrantableTypes ? (
+        <InlineNotification kind="info" title="No grantable leave types.">
+          Every leave type in this office either doesn&rsquo;t bank a balance or is inactive.
+          Add or activate a balance-deducting type above before granting.
+        </InlineNotification>
+      ) : null}
+
       <Select
         id="grant-employee"
         label="Employee"
@@ -338,6 +355,10 @@ export default function LeaveTypesPage() {
   // — filter the shared list to this office client-side, same as /office/schedules does
   // for its assignment target picker.
   const officeEmployees = employees.filter((employee) => employee.current_office_id === officeId)
+  // The grant form only ever offers types that can actually be credited: an event type
+  // (`deducts_balance: false`, e.g. Maternity/Paternity) 422s as `leave_type_not_grantable`
+  // on submit, and a grant against an inactive type would never surface on `/me/leave`.
+  const grantableLeaveTypes = leaveTypes.filter((leaveType) => leaveType.is_active && leaveType.deducts_balance)
 
   function closeDialog(): void {
     setDialogState({ mode: 'closed' })
@@ -486,7 +507,7 @@ export default function LeaveTypesPage() {
                   // the office now showing, instead of echoing the switch-away office's ids.
                   key={`${officeId}-${grantFormKey}`}
                   employeeOptions={officeEmployees.map((employee) => ({ value: employee.id, label: employee.employee_no }))}
-                  leaveTypeOptions={leaveTypes.map((leaveType) => ({ value: leaveType.id, label: leaveType.name }))}
+                  leaveTypeOptions={grantableLeaveTypes.map((leaveType) => ({ value: leaveType.id, label: leaveType.name }))}
                   submitting={grantMutation.isPending}
                   onSubmit={handleGrantSubmit}
                 />

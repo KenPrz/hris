@@ -64,8 +64,7 @@ export default function MyLeavePage() {
           </InlineNotification>
         ) : balances.length === 0 ? (
           <EmptyState title="No leave balances to show">
-            Nothing is configured for your office yet, or your account isn&rsquo;t linked to an
-            employee record.
+            Nothing is configured for your office yet.
           </EmptyState>
         ) : (
           <ul className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>

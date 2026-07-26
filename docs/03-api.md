@@ -314,7 +314,7 @@ themself, however broad their own scope otherwise reaches.
 **M6a generalized the read/decision surface off attendance specifically.** M3.6 shipped
 everything under `/attendance/adjustments/*`; M6a moved the read, decide, and queue routes
 to the type-agnostic `/requests/*` and `/team/approvals` / `/office/approvals` below, so a
-future request type (leave, M6b; overtime pre-authorization, M6c) is served by the exact
+future request type (leave, M6b-b; overtime pre-authorization, M6c) is served by the exact
 same routes with no new endpoints. **Submission stays type-specific** — there is still no
 generic `POST /requests`, only `POST /attendance/adjustments` below — because what a
 submission needs to validate (an `operation`, a `target_log_id`, a `direction`) is
@@ -478,7 +478,7 @@ generalization onto `/requests/*`, and the full correction-filing vertical in th
 `/office/approvals`) — proven end to end by `scripts/e2e-requests.sh` against the live
 stack. The state machine is still M3.6's single step, `pending → approved | rejected |
 cancelled` — the multi-step `draft → submitted → manager_approved → hr_approved → approved`
-machine leave will need is deferred to M6b (`06-roadmap.md`).
+machine leave will need is deferred to M6b-b (`06-roadmap.md`).
 
 ## Office — holidays *(M4a)*
 
@@ -794,6 +794,131 @@ automatically from the authenticated guard. `scripts/e2e-pay-rules.sh` proves th
 surface — floor-valid create, the below-floor `422`, the duplicate `409`, the immutable
 `405`, the non-admin `403`, and the activity-log row — against the live stack.
 
+## Leave — foundation *(M6b-a)*
+
+Leave-type config per office, the office-wide day-length divisor, HR manual grants, and a
+derived balance read — the pieces a leave *request* will need without there being a leave
+request yet. Everything a balance is built from lives in `leave_ledger`
+(`02-data-model.md`): an append-only row per grant or deduction, integer minutes, never a
+stored running total. **There is no self-service leave request in this milestone** — an
+employee cannot yet file for their own leave the way they can an attendance adjustment; that
+multi-step `draft → submitted → manager_approved → hr_approved → approved` machine is
+M6b-b, reusing the `requests` spine above once it exists.
+
+### Leave-type config
+
+Gated by the same `App\Domain\Scope\OfficeScope` as holidays and schedules (M4a/M4b,
+above) — the identical 404-not-403 discipline: every `FormRequest` here validates an
+office/leave-type id as shape only (`uuid`), never `exists:`, so a fabricated id and an
+out-of-scope real one are byte-identical `404`s.
+
+```
+GET /api/v1/office/leave-types?office=<uuid>     # auth:sanctum — HR Admin/System Admin, scoped
+  → { data: [ { id, office_id, name, code, is_paid, requires_attachment, deducts_balance,
+                is_cash_convertible, max_carryover_minutes, is_active }, … ] }   # name-ordered
+  → 400 validation_failed     # office not a uuid
+  → 404 not_found             # office is out of the caller's scope, or doesn't exist
+```
+
+```
+POST /api/v1/office/leave-types                  # auth:sanctum — HR Admin/System Admin, scoped
+  { "office_id": "0199…", "name": "Vacation Leave", "code": "VL" | null,
+    "is_paid": true, "requires_attachment": false, "deducts_balance": true,
+    "is_cash_convertible": true, "max_carryover_minutes": 4800 | null,
+    "is_active": true }                            # OPTIONAL — defaults true
+  → 201 { data: { id, office_id, name, code, is_paid, requires_attachment, deducts_balance,
+                  is_cash_convertible, max_carryover_minutes, is_active } }
+  → 400 validation_failed     # bad shape
+  → 404 not_found             # office_id is out of the caller's scope, or doesn't exist
+```
+
+```
+PATCH /api/v1/office/leave-types/{leaveType}     # auth:sanctum — HR Admin/System Admin, scoped
+  { "name": "Vacation Leave", "code": "VL" | null, "is_paid": true,
+    "requires_attachment": false, "deducts_balance": true, "is_cash_convertible": true,
+    "max_carryover_minutes": 4800 | null, "is_active": false }   # is_active OPTIONAL,
+                                                                 #   defaults to the current value
+  → 200 { data: { id, office_id, name, code, is_paid, requires_attachment, deducts_balance,
+                  is_cash_convertible, max_carryover_minutes, is_active } }
+  → 400 validation_failed
+  → 404 not_found     # {leaveType}'s office is out of the caller's scope, or {leaveType} doesn't exist
+```
+
+**There is no `office_id` in the update body** — a type's office is fixed at creation, the
+same way a holiday's `date` is — and **there is no `DELETE` route at all**: a type is
+retired via `PATCH is_active: false`, never removed, so a historical grant against it never
+points at a vanished row.
+
+### The leave day
+
+```
+PATCH /api/v1/office/leave-day                    # auth:sanctum — HR Admin/System Admin, scoped
+  { "office_id": "0199…", "minutes_per_leave_day": 480 }
+  → 200 { data: { id, minutes_per_leave_day } }    # id is the office's own id
+  → 400 validation_failed     # minutes_per_leave_day missing or < 1
+  → 404 not_found             # office_id is out of the caller's scope, or doesn't exist
+```
+
+`minutes_per_leave_day` is the divisor `LeaveUnit::toMinutes` uses to turn a `'day'` or
+`'half_shift'` grant amount into stored minutes (below) — write-and-echo-back only, like
+`/office/default-template` (M4b): there is no `GET` for the office's current value.
+
+### HR manual grants
+
+```
+POST /api/v1/leave/grants                         # auth:sanctum — HR Admin/System Admin, scoped
+  { "employee_id": "0199…", "leave_type_id": "0199…", "amount": 5,
+    "unit": "day" | "half_shift" | "hour" | "minute", "reason": "Approved by manager" }
+  → 201 { data: { id, employee_id, leave_type_id, entry_type: "credit", minutes, reason,
+                  source: "manual_grant", created_by, created_at } }
+  → 400 validation_failed          # bad shape, amount not a positive integer, or unit outside the four values
+  → 404 not_found                  # employee_id/leave_type_id out of the caller's scope, or don't exist
+  → 422 leave_type_not_grantable    # leave_type_id has deducts_balance: false; details: { leave_type_id }
+```
+
+One `leave_ledger` credit row per call — grants are never edited, only ever re-credited
+with a second row. **Scoped by `OfficeScope::administers` against the employee's current
+office, not `EmployeeScope`** — deliberately narrower than the balance reads below: a
+manager may *view* a direct report's balance, but only HR may credit one, so a manager
+hitting this endpoint for their own report gets the same `404` as for a stranger.
+`amount`/`unit` are converted to minutes by `LeaveUnit::toMinutes` against the office's
+`minutes_per_leave_day` before the row is written — the client sends what an HR admin
+typed, never pre-converted minutes. `leave_type_not_grantable` fires for an **event** type
+(`deducts_balance: false` — Maternity, Paternity, and the like): an event type is recorded,
+not banked, so there is no balance for a manual grant to credit; the scope `404` always
+runs first, so this is only ever reachable for a type in an office the caller already
+administers.
+
+### Balances — derived, never stored
+
+```
+GET /api/v1/me/leave                              # auth:sanctum — the caller's own balances
+  → { data: [ { leave_type: { id, office_id, name, code, is_paid, requires_attachment,
+                               deducts_balance, is_cash_convertible, max_carryover_minutes,
+                               is_active },
+                balance_minutes, balance_readable: { days, hours, minutes } }, … ] }
+  → 422 not_an_employee    # the caller has no linked employee record
+```
+
+```
+GET /api/v1/employees/{employee}/leave            # auth:sanctum + EmployeeScope, scoped
+  → { data: [ <same balance row shape as above>, … ] }
+  → 404 not_found          # {employee} is out of the caller's scope, or doesn't exist
+```
+
+One row per **active, balance-deducting** leave type in the employee's current office
+(name-ordered) — an inactive or event type never appears here at all, and a type with no
+`leave_ledger` rows yet still appears with `balance_minutes: 0` (an absent ledger entry
+means zero, never "the type doesn't exist"). `balance_minutes` is summed fresh from
+`leave_ledger` on every call — there is no stored balance column to go stale.
+`balance_readable` is `App\Domain\Leave\LeaveUnit::readable()`'s day/hour/minute
+decomposition of that same total against the office's `minutes_per_leave_day`; a client
+renders it directly and never re-derives it from `balance_minutes` itself. The
+employee-scoped variant is a **broader** read than granting above — `EmployeeScope`, not
+`OfficeScope::administers` — so a manager can see a direct report's balance even though
+only HR may credit it; both routes share the 404-not-403 discipline, an out-of-scope
+subject indistinguishable from a nonexistent one.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -823,9 +948,10 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 409 | `pay_rule_exists` | Creating a pay-rule version whose `effective_from` matches one that already exists. |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
-| 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, or submit/list their own adjustments. |
+| 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, submit/list their own adjustments, or read their own leave balances. |
 | 422 | `cannot_punch_self` | An HR/admin using the manual entry endpoint to record their *own* punch (separation of duties). |
 | 422 | `invalid_adjustment_target` | Approving a `void`/`amend` whose target punch is missing, belongs to someone else, or was already annulled by an earlier approval. |
+| 422 | `leave_type_not_grantable` | Manually granting into a leave type whose `deducts_balance` is `false` — an event type banks no balance to credit (`details.leave_type_id`). |
 | 422 | `pay_rate_below_floor` | Creating a pay-rule version with one or more cells below `config('hris.pay_floors')` (`details.violations` names every offending cell). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
@@ -836,13 +962,15 @@ you). See `05-rbac.md`.
 
 ## What is not here yet
 
-Leave, cutoffs, and payroll export are their own milestones (`06-roadmap.md`); their
-endpoints land with them. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the
-configuration spine; M5a's compute engine (above) now reads all three to price a day —
-**M5a is complete**. Leave and overtime requests reuse the `requests` spine M3.6 built
-above, but their own detail tables and endpoints are not built yet. Nothing yet
-*writes* a summary on demand — a manual, range-driven recompute is M5b's `RecomputeRange`,
-next.
+Cutoffs and payroll export are their own milestones (`06-roadmap.md`); their endpoints land
+with them. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
+spine; M5a's compute engine (above) now reads all three to price a day — **M5a is
+complete**. **M6b-a shipped the leave foundation** — leave-type config, the office leave
+day, HR manual grants, and derived balance reads, all above (`Leave — foundation`) — but a
+leave *request* an employee files themself does not exist yet: that, and overtime
+pre-authorization, still reuse the `requests` spine M3.6 built above, and their own detail
+tables and endpoints land with M6b-b and M6c respectively. Nothing yet *writes* a summary on
+demand — a manual, range-driven recompute is M5b's `RecomputeRange`, next.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

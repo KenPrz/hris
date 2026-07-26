@@ -296,6 +296,64 @@ describe('/office/leave-types — grant form', () => {
     expect(screen.getByRole('button', { name: 'Grant leave' })).not.toBeDisabled()
   })
 
+  it('excludes an event type (deducts_balance false) and an inactive type from the leave-type Select', async () => {
+    stubSession()
+    stubLeaveTypes({
+      data: [
+        leaveType({ id: 'lt-grantable', name: 'Vacation Leave', is_active: true, deducts_balance: true }),
+        leaveType({ id: 'lt-event', name: 'Maternity Leave', is_active: true, deducts_balance: false }),
+        leaveType({ id: 'lt-inactive', name: 'Retired Leave', is_active: false, deducts_balance: true }),
+      ],
+    })
+    stubSaveLeaveType()
+    stubSetLeaveDay()
+    stubEmployees()
+    stubGrantLeave()
+
+    renderPage()
+
+    fireEvent.click(screen.getByLabelText('Leave type'))
+
+    expect(await screen.findByRole('option', { name: 'Vacation Leave' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Maternity Leave' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Retired Leave' })).not.toBeInTheDocument()
+  })
+
+  it('disables the grant submit and shows a note when no leave type in the office is grantable', () => {
+    stubSession()
+    stubLeaveTypes({
+      data: [leaveType({ id: 'lt-event', name: 'Maternity Leave', is_active: true, deducts_balance: false })],
+    })
+    stubSaveLeaveType()
+    stubSetLeaveDay()
+    stubEmployees()
+    stubGrantLeave()
+
+    renderPage()
+
+    expect(screen.getByText(/no grantable leave types/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Grant leave' })).toBeDisabled()
+  })
+
+  it('a non-integer amount blocks submit instead of sending a value the backend would 400', () => {
+    stubSession()
+    stubLeaveTypes({ data: [leaveType()] })
+    stubSaveLeaveType()
+    stubSetLeaveDay()
+    stubEmployees()
+    const mutate = stubGrantLeave()
+
+    renderPage()
+
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '5.5' } })
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Approved by manager' } })
+
+    expect(screen.getByRole('button', { name: 'Grant leave' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Grant leave' }))
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
   it('offers all four LeaveUnitName options in the unit select', async () => {
     stubSession()
     stubLeaveTypes({ data: [leaveType()] })

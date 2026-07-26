@@ -106,12 +106,15 @@ describe('/me/leave', () => {
     await screen.findByRole('heading', { name: 'Leave' })
   })
 
-  it('shows an empty state when there are no leave types configured', async () => {
+  it('shows an empty state when there are no leave types configured, without the misleading not-an-employee clause', async () => {
     stubMyLeave({ data: [] })
 
     renderPage()
 
     expect(await screen.findByText(/no leave balances/i)).toBeInTheDocument()
+    // NotAnEmployee is a 422 that renders through the error branch above, never this
+    // empty state — the copy must not imply this case reaches here.
+    expect(screen.queryByText(/employee record/i)).not.toBeInTheDocument()
   })
 
   it('shows an error notification when the balances fail to load', async () => {
