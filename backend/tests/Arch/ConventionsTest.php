@@ -39,7 +39,11 @@ arch('the domain layer is framework-agnostic')
     // facades from the domain layer; it was never meant to bar the ORM from the one class
     // whose contract is "hand back a constrained query." See
     // docs/superpowers/specs/2026-07-23-m2-schema-auth-rbac-design.md.
-    ->ignoring(['App\Domain\Scope\EmployeeScope', 'App\Domain\Scope\OfficeScope']);
+    //
+    // ApprovalQueues (M6a) is the same shape one level up: two named queries that hand
+    // back a constrained Request Builder rather than a boolean, exactly like EmployeeScope
+    // does for Employee. Same carve-out, same reasoning.
+    ->ignoring(['App\Domain\Scope\EmployeeScope', 'App\Domain\Scope\OfficeScope', 'App\Domain\Requests\ApprovalQueues']);
 
 arch('the domain layer never reads configuration')
     ->expect('App\Domain')
@@ -57,6 +61,7 @@ arch('domain value objects are final')
         'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
+        'App\Domain\Requests\RequestEffect',
         'App\Domain\Schedule\Weekday',
         'App\Domain\Schedule\ScheduleSource',
         'App\Domain\Compute\RecomputeTrigger',
@@ -71,6 +76,7 @@ arch('domain value objects are final')
         'App\Domain\Attendance\AdjustmentOperation',
         'App\Domain\Requests\RequestType',
         'App\Domain\Requests\RequestState',
+        'App\Domain\Requests\RequestEffect',
         'App\Domain\Schedule\Weekday',
         'App\Domain\Schedule\ScheduleSource',
         'App\Domain\Compute\RecomputeTrigger',
@@ -207,22 +213,19 @@ test('every Attendance controller references a scope or self check', function ()
     // if neither is found, so a future controller that loads and serializes an
     // AttendanceLog with no scope/self check at all is caught here rather than in review.
     //
-    // The three Task 7 transition controllers (Adjustments/Approve|Reject|CancelController)
-    // are a third, deliberately different shape: they serve a Request, not an AttendanceLog,
-    // and their authorization boundary is RequestAuthority (approve/reject) or
-    // requester-identity (cancel) — enforced inside the row-locked action, not by an
-    // EmployeeScope query or a `user()->employee` read in the controller itself (an
-    // approver need not even have an Employee record: a bare system-admin account can
-    // approve). Neither grep pattern can see that boundary, so they are exempted by name
-    // here rather than papering over the gap with an incidental string match; the
-    // guarantee they'd otherwise assert is instead proven by the 404-vs-409 matrix in
-    // tests/Feature/Attendance/AdjustmentTransitionsTest.php.
-    $exemptTransitionControllers = [
-        'Adjustments/ApproveController.php',
-        'Adjustments/RejectController.php',
-        'Adjustments/CancelController.php',
-    ];
-
+    // The Task 7 transition controllers (Approve|Reject|CancelController) used to live
+    // here as a third, deliberately different shape: they serve a Request, not an
+    // AttendanceLog, and their authorization boundary is RequestAuthority (approve/reject)
+    // or requester-identity (cancel) — enforced inside the row-locked action, not by an
+    // EmployeeScope query or a `user()->employee` read in the controller itself. M6a Task 3
+    // relocated all six read/decision controllers to Http/Controllers/Requests, which this
+    // guard never scans (it's scoped to Http/Controllers/Attendance), so no exemption is
+    // needed any more — removing a name from this list without deleting the file it names
+    // would be caught immediately by "controllers are final single-action classes" failing
+    // to find the class, or by this loop simply never seeing it walk past a file that no
+    // longer exists under Attendance/. The guarantee those three controllers care about is
+    // still proven by the 404-vs-409 matrix in
+    // tests/Feature/Requests/RequestDecisionsTest.php.
     $offenders = [];
 
     $files = (new Finder)
@@ -236,10 +239,6 @@ test('every Attendance controller references a scope or self check', function ()
     ];
 
     foreach ($files as $file) {
-        if (in_array($file->getRelativePathname(), $exemptTransitionControllers, true)) {
-            continue;
-        }
-
         $contents = $file->getContents();
 
         $guarded = false;

@@ -91,7 +91,7 @@ has_attachment=$(echo "$ADD" | jq -r .data.has_attachment) (expect pending / tru
 
 # 3. Miguel's manager approves it. Manager is in EmployeeScope::visibleTo as Miguel's
 #    reports_to, and is not Miguel himself, so RequestAuthority::canDecide holds.
-APPROVE_ADD=$(curl -sf -X POST "$API/attendance/adjustments/$ADD_ID/approve" -H "$M")
+APPROVE_ADD=$(curl -sf -X POST "$API/requests/$ADD_ID/approve" -H "$M")
 echo "3. manager.manila approved: state=$(echo "$APPROVE_ADD" | jq -r .data.state) \
 decided_by-is-manager=$([ "$(echo "$APPROVE_ADD" | jq -r .data.decided_by)" != null ] && echo yes)"
 [ "$(echo "$APPROVE_ADD" | jq -r .data.state)" = "approved" ] || { echo "FAIL: add adjustment not approved"; exit 1; }
@@ -106,7 +106,7 @@ echo "4. GET /me/attendance?month=$MONTH on ${MONTH}-05: $(echo "$READ_ADD" | jq
 
 # 5. The attachment downloads for the manager who just approved it (200, real PDF bytes)…
 STATUS_MGR=$(curl -s -o /tmp/hris-e2e-download.pdf -w "%{http_code}" \
-  "$API/attendance/adjustments/$ADD_ID/attachment" -H "$M")
+  "$API/requests/$ADD_ID/attachment" -H "$M")
 echo "5. manager.manila downloads the attachment: HTTP $STATUS_MGR (expect 200)"
 [ "$STATUS_MGR" = "200" ] || { echo "FAIL: authorized download did not return 200"; exit 1; }
 head -c 8 /tmp/hris-e2e-download.pdf | grep -q '%PDF' || { echo "FAIL: downloaded content is not the PDF we uploaded"; exit 1; }
@@ -115,7 +115,7 @@ rm -f /tmp/hris-e2e-download.pdf
 # 6. …and refuses an unrelated peer with no authority over Miguel's requests — 404, never
 #    a 403 that would confirm the request exists.
 STATUS_OTHER=$(curl -s -o /dev/null -w "%{http_code}" \
-  "$API/attendance/adjustments/$ADD_ID/attachment" -H "$O")
+  "$API/requests/$ADD_ID/attachment" -H "$O")
 echo "6. andrea.manila (unrelated) downloads the same attachment: HTTP $STATUS_OTHER (expect 404)"
 [ "$STATUS_OTHER" = "404" ] || { echo "FAIL: unrelated download was not refused with 404"; exit 1; }
 
@@ -134,7 +134,7 @@ echo "8. filed void adjustment: id=$VOID_ID state=$(echo "$VOID" | jq -r .data.s
 [ "$(echo "$VOID" | jq -r .data.state)" = "pending" ] || { echo "FAIL: void adjustment not pending"; exit 1; }
 
 # 9. HR (not Miguel's manager this time — the OTHER kind of authorized approver) approves it.
-APPROVE_VOID=$(curl -sf -X POST "$API/attendance/adjustments/$VOID_ID/approve" -H "$H")
+APPROVE_VOID=$(curl -sf -X POST "$API/requests/$VOID_ID/approve" -H "$H")
 echo "9. hr.manila approved the void: state=$(echo "$APPROVE_VOID" | jq -r .data.state) (expect approved)"
 [ "$(echo "$APPROVE_VOID" | jq -r .data.state)" = "approved" ] || { echo "FAIL: void adjustment not approved"; exit 1; }
 
@@ -158,7 +158,7 @@ echo "    attendance_annulments rows for that punch: $(echo "$ANNULMENT_COUNT" |
 SELF=$(curl -sf -X POST "$API/attendance/adjustments" -H "$E" -H "$J" \
   -d "{\"operation\":\"add\",\"note\":\"Self-approval refusal check.\",\"direction\":\"out\",\"punched_at\":\"${MONTH}-06T18:00:00+08:00\"}")
 SELF_ID=$(echo "$SELF" | jq -r .data.id)
-STATUS_SELF=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/attendance/adjustments/$SELF_ID/approve" -H "$E")
+STATUS_SELF=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/requests/$SELF_ID/approve" -H "$E")
 echo "11. Miguel attempts to approve his own request $SELF_ID: HTTP $STATUS_SELF (expect 404)"
 [ "$STATUS_SELF" = "404" ] || { echo "FAIL: self-approval was not refused with 404"; exit 1; }
 

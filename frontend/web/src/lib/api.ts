@@ -343,6 +343,44 @@ export type ResolvedDay = {
 /** Keyed by YYYY-MM-DD, one entry per day of the requested month. */
 export type ResolvedMonth = Record<string, ResolvedDay>
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/RequestResource.php and
+// app/Http/Controllers/Attendance/SubmitController.php.
+// ---------------------------------------------------------------------------
+
+export type RequestState = 'pending' | 'approved' | 'rejected' | 'cancelled'
+export type RequestType = 'attendance_adjustment'
+export type AdjustmentOperation = 'add' | 'void' | 'amend'
+
+export type RequestDetail = {
+  operation: AdjustmentOperation
+  target_log_id: string | null
+  direction: PunchDirection | null
+  punched_at: string | null // ISO8601
+}
+
+export type RequestRecord = {
+  id: string
+  type: RequestType
+  state: RequestState
+  note: string
+  employee_id: string
+  detail: RequestDetail | null
+  decided_by: string | null
+  decided_at: string | null
+  decision_note: string | null
+  has_attachment: boolean
+}
+
+export type CorrectionInput = {
+  operation: AdjustmentOperation
+  note: string
+  target_log_id?: string
+  direction?: PunchDirection
+  punched_at?: string // ISO8601
+  attachment?: File | null
+}
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -465,5 +503,34 @@ export const api = {
   resolvedSchedule: {
     get: (employee: string, month: string) =>
       request<ResolvedMonth>(`/office/schedule/resolved?employee=${employee}&month=${month}`),
+  },
+  requests: {
+    mine: () => request<RequestRecord[]>('/requests'),
+    get: (id: string) => request<RequestRecord>(`/requests/${id}`),
+    teamApprovals: () => request<RequestRecord[]>('/team/approvals'),
+    officeApprovals: () => request<RequestRecord[]>('/office/approvals'),
+    approve: (id: string) => request<RequestRecord>(`/requests/${id}/approve`, { method: 'POST' }),
+    reject: (id: string, decision_note: string) =>
+      request<RequestRecord>(`/requests/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision_note }),
+      }),
+    cancel: (id: string) => request<RequestRecord>(`/requests/${id}/cancel`, { method: 'POST' }),
+  },
+  adjustments: {
+    // Multipart: build FormData and DO NOT set Content-Type — the browser must set the
+    // multipart boundary itself. `request` only adds Accept + Authorization, so a FormData
+    // body passes through with the right content type. Matches SubmitController's fields.
+    submit: (input: CorrectionInput) => {
+      const form = new FormData()
+      form.set('operation', input.operation)
+      form.set('note', input.note)
+      if (input.target_log_id !== undefined) form.set('target_log_id', input.target_log_id)
+      if (input.direction !== undefined) form.set('direction', input.direction)
+      if (input.punched_at !== undefined) form.set('punched_at', input.punched_at)
+      if (input.attachment) form.set('attachment', input.attachment)
+      return request<RequestRecord>('/attendance/adjustments', { method: 'POST', body: form })
+    },
   },
 }

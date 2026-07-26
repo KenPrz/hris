@@ -25,6 +25,13 @@ export const keys = {
   payRules: {
     all: () => ['pay-rules'] as const,
   },
+  requests: {
+    all: () => ['requests'] as const,
+    mine: () => ['requests', 'mine'] as const,
+    detail: (id: string) => ['requests', 'detail', id] as const,
+    teamApprovals: () => ['requests', 'team-approvals'] as const,
+    officeApprovals: () => ['requests', 'office-approvals'] as const,
+  },
   schedules: {
     templates: (officeId: string) => ['schedules', 'templates', officeId] as const,
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,

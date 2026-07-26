@@ -18,16 +18,21 @@ use Laravel\Sanctum\Sanctum;
 uses(RefreshDatabase::class);
 
 /*
-| The read side of the requests spine: my-requests, the approval queue
-| (in-scope-minus-self, pending only), a scoped show, and the private
-| attachment stream. Visibility is identical for show and download: the
-| requester, or an approver for whom RequestAuthority::canDecide() is true;
-| anyone else gets 404, never a 403 that would confirm the request exists.
+| The read side of the requests spine: my-requests, a scoped show, and the
+| private attachment stream. Visibility is identical for show and download:
+| the requester, or an approver for whom RequestAuthority::canDecide() is
+| true; anyone else gets 404, never a 403 that would confirm the request
+| exists.
+|
+| The old combined approval queue (in-scope-minus-self, pending only) that
+| used to live here moved to the two scope-filtered queues in
+| tests/Feature/Requests/ApprovalQueuesTest.php (M6a) — /team/approvals and
+| /office/approvals replaced the single /attendance/adjustments/pending route.
 |
 | Helper names are prefixed `readAdjustments*` to avoid colliding with the
 | same-shaped, differently-named helpers other Attendance test files declare
 | as globals in the same process (officeForAdjustments(), employeeWithUser(),
-| pendingAddRequest() in AdjustmentTransitionsTest.php).
+| pendingAddRequest() in RequestDecisionsTest.php).
 */
 
 function readAdjustmentsOffice(): Office
@@ -70,7 +75,7 @@ it('lists only the caller\'s own requests, in any state', function (): void {
 
     Sanctum::actingAs($meUser);
 
-    $response = $this->getJson('/api/v1/attendance/adjustments')->assertOk();
+    $response = $this->getJson('/api/v1/requests')->assertOk();
 
     $ids = array_column($response->json('data'), 'id');
 
@@ -83,38 +88,9 @@ it('lists only the caller\'s own requests, in any state', function (): void {
 it('422s the my-requests read for a caller with no employee record', function (): void {
     Sanctum::actingAs(User::factory()->create());
 
-    $this->getJson('/api/v1/attendance/adjustments')
+    $this->getJson('/api/v1/requests')
         ->assertStatus(422)
         ->assertJsonPath('error.code', 'not_an_employee');
-});
-
-// --- ListPending --------------------------------------------------------
-
-it('lists pending requests the caller may decide, excluding own and out-of-scope', function (): void {
-    $office = readAdjustmentsOffice();
-    [$managerUser, $manager] = readAdjustmentsEmployee($office);
-    [, $report] = readAdjustmentsEmployee($office, ['current_reports_to_id' => $manager->id]);
-
-    $visible = readAdjustmentsPendingRequest($report);
-    $ownRequest = readAdjustmentsPendingRequest($manager);   // must be excluded: own
-
-    $otherOffice = readAdjustmentsOffice();
-    [, $unrelated] = readAdjustmentsEmployee($otherOffice);
-    $outOfScope = readAdjustmentsPendingRequest($unrelated); // must be excluded: out of scope
-
-    $decided = readAdjustmentsPendingRequest($report);
-    $decided->update(['state' => RequestState::Approved]);   // must be excluded: not pending
-
-    Sanctum::actingAs($managerUser);
-
-    $response = $this->getJson('/api/v1/attendance/adjustments/pending')->assertOk();
-
-    $ids = array_column($response->json('data'), 'id');
-
-    expect($ids)->toBe([$visible->id])
-        ->not->toContain($ownRequest->id)
-        ->not->toContain($outOfScope->id)
-        ->not->toContain($decided->id);
 });
 
 // --- Show -----------------------------------------------------------------
@@ -126,7 +102,7 @@ it('shows a request to the requester', function (): void {
 
     Sanctum::actingAs($requesterUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertOk()
         ->assertJsonPath('data.id', $request->id)
         ->assertJsonPath('data.employee_id', $requester->id);
@@ -140,7 +116,7 @@ it('shows a request to an authorized approver', function (): void {
 
     Sanctum::actingAs($managerUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertOk()
         ->assertJsonPath('data.id', $request->id);
 });
@@ -155,7 +131,7 @@ it('404s a request show for an unrelated employee — existence must not leak', 
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });
@@ -175,7 +151,7 @@ it('downloads the attachment for the requester', function (): void {
 
     Sanctum::actingAs($requesterUser);
 
-    $response = $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $response = $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertOk();
 
     expect($response->headers->get('Content-Type'))->toContain('pdf')
@@ -196,7 +172,7 @@ it('downloads the attachment for an authorized approver', function (): void {
 
     Sanctum::actingAs($managerUser);
 
-    $response = $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $response = $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertOk();
 
     expect($response->streamedContent())->toBe($content);
@@ -217,7 +193,7 @@ it('404s the attachment download for an unrelated employee — never leaks the f
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });
@@ -231,7 +207,7 @@ it('404s the attachment download when the request has no attachment', function (
 
     Sanctum::actingAs($requesterUser);
 
-    $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });

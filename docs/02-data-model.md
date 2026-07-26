@@ -607,7 +607,7 @@ implements `HasMedia`/`InteractsWithMedia` with a single `attachment` media coll
 `config('media-library.disk_name')` is `attachments`; `config('filesystems.disks.attachments')`
 points at `ATTACHMENTS_S3_*` env vars (endpoint, key, secret, bucket, path-style addressing
 — RustFS/MinIO need path-style, not vhost-style). There is no public URL generation and no
-direct object link anywhere in the API: `GET /attendance/adjustments/{request}/attachment`
+direct object link anywhere in the API: `GET /requests/{request}/attachment`
 streams the file through the app after the same visibility check as the request's `show`
 route (`03-api.md`), so RustFS itself is never reachable from outside the container network.
 Feature tests use `Storage::fake('attachments')`; only `scripts/e2e-adjustments.sh` exercises

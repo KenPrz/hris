@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/Button'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
+import { CorrectionForm } from '@/components/domain/CorrectionForm'
 import { DayCell } from '@/components/domain/DayCell'
 import { DaySummaryDetail } from '@/components/domain/DaySummaryDetail'
 import { DaySummaryIndicator } from '@/components/domain/DaySummaryIndicator'
@@ -135,6 +136,12 @@ export default function AttendancePage() {
   // The day-detail panel below the calendar — `null` until a day is clicked, so the panel
   // starts as a hint rather than guessing which day the employee wants to inspect first.
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  // The "Request correction" affordance in that panel: `correctionFormOpen` reveals
+  // `CorrectionForm`; `correctionSubmitted` flips on once it calls back via `onDone`, to
+  // show a one-time success notice. Both reset whenever a different day is selected, so
+  // neither a stale draft nor a stale success notice leaks onto the next day inspected.
+  const [correctionFormOpen, setCorrectionFormOpen] = useState(false)
+  const [correctionSubmitted, setCorrectionSubmitted] = useState(false)
 
   // Same query key when browsing the current month — TanStack Query dedupes it into one
   // request, so this never doubles the fetch in the common case.
@@ -152,6 +159,17 @@ export default function AttendancePage() {
 
   function navigateToMonth(nextMonth: string) {
     router.replace(`${pathname}?month=${nextMonth}`)
+  }
+
+  function selectDate(nextDate: string): void {
+    setSelectedDate(nextDate)
+    setCorrectionFormOpen(false)
+    setCorrectionSubmitted(false)
+  }
+
+  function closeAndToast(): void {
+    setCorrectionFormOpen(false)
+    setCorrectionSubmitted(true)
   }
 
   const summariesByDate = summaryByDate(summaryQuery.data ?? [])
@@ -278,7 +296,7 @@ export default function AttendancePage() {
                 // cell is a button so a day is selectable with mouse or keyboard.
                 <button
                   type="button"
-                  onClick={() => setSelectedDate(date)}
+                  onClick={() => selectDate(date)}
                   aria-label={`View details for ${date}`}
                   aria-pressed={date === selectedDate}
                   className="flex h-full w-full flex-col text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
@@ -350,6 +368,29 @@ export default function AttendancePage() {
                     >
                       No computed breakdown for this day yet.
                     </span>
+                  )}
+
+                  {correctionSubmitted ? (
+                    <InlineNotification kind="success" title="Correction submitted.">
+                      It&rsquo;s pending approval — check &ldquo;My requests&rdquo; for its status.
+                    </InlineNotification>
+                  ) : null}
+
+                  {correctionFormOpen ? (
+                    <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+                      <CorrectionForm date={selectedDate} punches={selectedDayPunches} onDone={closeAndToast} />
+                      <div>
+                        <Button variant="ghost" onClick={() => setCorrectionFormOpen(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <Button variant="secondary" onClick={() => setCorrectionFormOpen(true)}>
+                        Request correction
+                      </Button>
+                    </div>
                   )}
                 </>
               )}

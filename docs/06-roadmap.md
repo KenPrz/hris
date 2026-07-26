@@ -1194,7 +1194,59 @@ after. What the building turned on, for whoever picks up M6 next:
   would pass whether or not a lock exists, which is worse than no test. Flagged here, in
   `02-data-model.md`, and repeated at M7's own section below so it isn't missed twice.
 
-## M6 — Requests and approvals
+## M6a — The approval spine *(done)*
+
+The first slice of the old single "M6 — Requests and approvals" milestone: turn M3.6's
+attendance-only approval into a reusable, **still single-step** request spine with two
+scope-based approval queues, and give it its first full browser UI — proven end to end with
+attendance adjustments, the only request type that exists yet. Slicing: **M6a spine → M6b
+leave → M6c overtime pre-auth** — see `docs/superpowers/specs/2026-07-26-m6a-approval-spine-design.md`.
+
+- **Per-type effect dispatch.** `ApproveRequest` no longer hardcodes
+  `ApplyAttendanceAdjustment` — it resolves a `RequestEffect` by `RequestType` through
+  `RequestEffectFactory`, still inside the same row-locked transaction. Adding a request
+  type is now "write an effect and register it in the factory," not "touch the approve
+  action."
+- **Two scope-filtered queues replace the one combined pending list.** `/team/approvals`
+  (an actor's direct reports) and `/office/approvals` (an actor's HR-administered offices)
+  are independent `ApprovalQueues` views over the same `RequestAuthority::canDecide`-shaped
+  set — not a partition of it, so a manager who is also their office's HR admin sees the
+  same pending request on both. Neither is type-specific: a future leave or overtime
+  request appears on both automatically. A system-admin-only account (no employee record)
+  gets neither — no reports, no HR offices, no queue at all, and that's correct, not a bug.
+- **The read/decision surface generalized onto `/requests/*`.** `GET/POST
+  /attendance/adjustments/{request}/*` moved to `GET/POST /requests/{request}/*`; `POST
+  /attendance/adjustments` (submit) stayed where it was — submission is irreducibly
+  type-specific (what fields a correction needs isn't what a leave request needs), so it's
+  the one route this milestone left alone. See `03-api.md`.
+- **The full correction-filing vertical, in the browser, for the first time.** A form off
+  `/me/attendance` to file add/void/amend with a note and optional attachment; `/me/requests`
+  to see every request you've filed and withdraw a pending one; `/team/approvals` and
+  `/office/approvals` sharing one `<RequestCard>` and one optimistic-decide hook
+  (`useDecideRequest`), confined to the queue the way M5's design called for — a short list,
+  a status flip, an obvious rollback on failure.
+
+**Explicitly deferred, not solved silently:**
+
+- **The multi-step machine.** `draft → submitted → manager_approved → hr_approved →
+  approved`, the `requires_hr_step` flag, and that whole vocabulary do **not** exist yet.
+  M6a kept M3.6's single step, `pending → approved | rejected | cancelled` — one authorized
+  approver decides, full stop. Leave is the first type that actually needs a second hop
+  (manager, then HR), so the machine widens with M6b, not before it's needed.
+  `requests.state`'s CHECK constraint is unchanged; no migration landed in M6a.
+- Leave types, `leave_ledger`, balances → **M6b**, below.
+- Overtime pre-authorization and the `min(actual, approved)` compute integration → **M6c**.
+
+**Done when:** an employee forgets to clock out, the day shows zero hours and
+`incomplete`; they file an add adjustment for the missing punch; the request shows up on
+both their manager's `/team/approvals` and their office HR's `/office/approvals`; the
+manager approves it through `/requests/{id}/approve`; the day recomputes synchronously to
+the correct breakdown; and the pre-existing `attendance_logs` rows are byte-identical to
+what they were before — `scripts/e2e-requests.sh` proves exactly this, live. **496 backend
+tests (22 of them Arch) + 359 frontend tests**, all green, `lint`/`typecheck`/`build` clean
+native and inside `make test`'s containers alike.
+
+## M6b — Leave *(next)*
 
 - Leave types configurable per office: paid/unpaid, requires attachment, deducts from
   balance, convertible to cash, max carryover. Seeded with the PH statutory set — SIL
@@ -1203,23 +1255,32 @@ after. What the building turned on, for whoever picks up M6 next:
   leave (RA 9710) — plus company VL/SL.
 - `leave_ledger`: every credit and debit is a row with a reason. Balances are derived,
   never stored as a mutable number, for the same reason POS made stock a ledger.
+- **The multi-step machine M6a deferred.** `draft → submitted → manager_approved →
+  hr_approved → approved`, `rejected`/`cancelled` terminal, a per-type `requires_hr_step`
+  flag deciding whether the second hop exists at all — leave is the type that needs it,
+  so it lands here rather than being speculatively built into M6a. `RequestEffect` and the
+  two scoped queues are unchanged; leave plugs in as a new `RequestType` and a new effect,
+  the same shape M6a's design proved out.
+- A `leave_request` reuses `<RequestCard>` and both approval queues — no new UI shell, only
+  a new type-specific submission form (mirroring the M6a correction form) and a new
+  detail table, the same "submission stays type-specific, everything after doesn't"
+  split M6a established.
+
+**Done when:** an employee requests SIL, their manager approves the first step, HR approves
+the second, the leave ledger debits the balance, and the compute engine reads it alongside
+attendance the way an approved adjustment already does. `scripts/e2e-leave.sh` proves it
+live.
+
+## M6c — Overtime pre-authorization
+
 - Overtime pre-authorization. The engine pays `min(actual_worked, approved)` and surfaces
   the remainder as **unpaid excess time** — visible, never silently converted to money.
-- Attendance adjustments. A punch-in with no punch-out computes as **zero paid hours**,
-  flagged `incomplete`; the employee files an adjustment, and an approved adjustment
-  creates a correction row that the engine reads alongside — never over — the original.
-- **One state machine, three request types.** `draft → submitted → manager_approved →
-  hr_approved → approved`, with `rejected` and `cancelled` terminal. A per-type
-  `requires_hr_step` flag decides whether step two exists. One `SubmitRequest`,
-  `ApproveRequest`, `RejectRequest`; one `<RequestCard>`; one approval queue.
-- Optimistic updates, confined to the approval queue — short list, status flip, obvious
-  rollback. Everywhere else invalidates by key prefix.
-- `/team/approvals` for managers, `/office/approvals` for HR.
+- A new `RequestType` and `RequestEffect`, same spine, same queues, same card — the
+  pattern M6a proved and M6b will have exercised a second time by then.
 
-**Done when:** an employee forgets to clock out, the day shows zero hours and
-`incomplete`, they file an adjustment, their manager approves, HR approves, the day
-recomputes to the correct breakdown — and the original punch row is byte-identical to
-what it was before. `scripts/e2e-leave-and-ot.sh` proves the leave and OT paths.
+**Done when:** an employee's pre-authorized overtime caps what the engine pays for a day
+that ran long, and the excess shows up as unpaid time rather than vanishing or silently
+being paid anyway. `scripts/e2e-leave-and-ot.sh` proves the leave and OT paths together.
 
 ## M7 — Cutoffs, locking, and payroll export
 

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Controllers\Attendance\Adjustments;
+namespace App\Http\Controllers\Requests;
 
 use App\Actions\Requests\CancelRequest;
 use App\Http\Resources\RequestResource;
@@ -12,7 +12,7 @@ use Illuminate\Http\Request as HttpRequest;
 
 // Cancel has no body to validate, so there is no FormRequest — only requester-identity
 // (checked inside CancelRequest against the row-locked request; 404 if the actor is not
-// the requester) matters. Same arch-test exemption reasoning as ApproveController.
+// the requester) matters. Same reasoning as ApproveController about which test proves it.
 final class CancelController
 {
     // $http is the plain HTTP request (aliased so it doesn't collide with the bound

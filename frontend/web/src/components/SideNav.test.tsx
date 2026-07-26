@@ -62,16 +62,37 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(groups.map((g) => g.key)).toEqual(['me'])
   })
 
+  it('every user\'s Me group includes /me/requests — filing and reviewing your own requests is universal', () => {
+    const groups = navEntriesFor(buildSession())
+    const me = groups.find((g) => g.key === 'me')
+
+    expect(me?.items).toContainEqual({ href: '/me/requests', label: 'My requests' })
+  })
+
   it('has_reports adds Team', () => {
     const groups = navEntriesFor(buildSession({ has_reports: true }))
 
     expect(groups.map((g) => g.key)).toEqual(['me', 'team'])
   })
 
+  it('a has_reports user\'s Team group includes /team/approvals', () => {
+    const groups = navEntriesFor(buildSession({ has_reports: true }))
+    const team = groups.find((g) => g.key === 'team')
+
+    expect(team?.items).toContainEqual({ href: '/team/approvals', label: 'Approvals' })
+  })
+
   it('a non-empty hr_offices adds Office', () => {
     const groups = navEntriesFor(buildSession({ hr_offices: ['office-1'] }))
 
     expect(groups.map((g) => g.key)).toEqual(['me', 'office'])
+  })
+
+  it('an hr_offices user\'s Office group includes /office/approvals', () => {
+    const groups = navEntriesFor(buildSession({ hr_offices: ['office-1'] }))
+    const office = groups.find((g) => g.key === 'office')
+
+    expect(office?.items).toContainEqual({ href: '/office/approvals', label: 'Approvals' })
   })
 
   it('an empty hr_offices does NOT add Office', () => {
@@ -100,17 +121,21 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(groups.map((g) => g.key)).toEqual(['me'])
   })
 
-  it('Team resolves to zero items — no shipped route yet', () => {
+  it('a user with every scope sees every ROUTES entry, group by group (M6a: Team and Office both ship an Approvals link)', () => {
     const groups = navEntriesFor(
       buildSession({ is_system_admin: true, has_reports: true, hr_offices: ['office-1'] }),
     )
 
     const byKey = Object.fromEntries(groups.map((g) => [g.key, g]))
-    expect(byKey.me?.items.length).toBeGreaterThan(0)
-    expect(byKey.team?.items).toEqual([])
+    expect(byKey.me?.items).toEqual([
+      { href: '/me/attendance', label: 'Attendance' },
+      { href: '/me/requests', label: 'My requests' },
+    ])
+    expect(byKey.team?.items).toEqual([{ href: '/team/approvals', label: 'Approvals' }])
     expect(byKey.office?.items).toEqual([
       { href: '/office/holidays', label: 'Holidays' },
       { href: '/office/schedules', label: 'Schedules' },
+      { href: '/office/approvals', label: 'Approvals' },
     ])
     expect(byKey.admin?.items).toEqual([{ href: '/admin/pay-rules', label: 'Pay rules' }])
   })
@@ -133,9 +158,24 @@ describe('SideNav — rendered', () => {
     expect(screen.getByText('Me')).toBeInTheDocument()
   })
 
-  it('a manager sees NO empty "Team" heading — the anti-dead-end property', async () => {
+  it('a manager sees a Team group with an Approvals link (M6a)', async () => {
     setToken('sekrit')
     stubFetch(200, sessionBody({ has_reports: true }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    const approvalsLink = await screen.findByRole('link', { name: 'Approvals' })
+    expect(approvalsLink).toHaveAttribute('href', '/team/approvals')
+    expect(screen.getByText('Team')).toBeInTheDocument()
+  })
+
+  it('a plain employee (no reports) sees no Team group at all — the anti-dead-end property', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody())
 
     render(
       <Providers>
@@ -201,6 +241,9 @@ describe('SideNav — rendered', () => {
 
     const schedulesLink = await screen.findByRole('link', { name: 'Schedules' })
     expect(schedulesLink).toHaveAttribute('href', '/office/schedules')
+
+    const approvalsLink = await screen.findByRole('link', { name: 'Approvals' })
+    expect(approvalsLink).toHaveAttribute('href', '/office/approvals')
 
     expect(screen.getByText('Office')).toBeInTheDocument()
   })

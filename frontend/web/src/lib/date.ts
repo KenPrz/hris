@@ -118,3 +118,68 @@ export function timeInZone(iso: string, timeZone: string): string {
     hourCycle: 'h23',
   }).format(new Date(iso))
 }
+
+/** `timeZone`'s UTC offset, in minutes east of UTC, AT `instantMs` — read via `Intl`'s
+ * `longOffset` (`"GMT+08:00"` / `"GMT-05:00"`), never hardcoded. Minutes, not a string,
+ * so `toIsoInZone` can arithmetic on it to correct a DST-boundary guess. */
+function offsetMinutesAt(instantMs: number, timeZone: string): number {
+  const offsetName =
+    new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+      .formatToParts(new Date(instantMs))
+      .find((part) => part.type === 'timeZoneName')?.value ?? 'GMT+00:00'
+
+  const match = /^GMT([+-])(\d{2}):(\d{2})$/.exec(offsetName)
+  if (!match) return 0
+
+  const sign = match[1] === '-' ? -1 : 1
+  return sign * (Number(match[2]) * 60 + Number(match[3]))
+}
+
+/** Minutes east of UTC → `"+08:00"` / `"-04:00"`. */
+function formatOffset(offsetMinutes: number): string {
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  const absMinutes = Math.abs(offsetMinutes)
+  const hh = String(Math.floor(absMinutes / 60)).padStart(2, '0')
+  const mm = String(absMinutes % 60).padStart(2, '0')
+  return `${sign}${hh}:${mm}`
+}
+
+/**
+ * The inverse of `timeInZone`: a `YYYY-MM-DD` date + an `HH:mm` wall-clock time, both
+ * understood as local to `timeZone`, combined into an ISO8601 instant carrying an
+ * EXPLICIT offset — the shape `AttendanceLog.punched_at`'s wire type demands (see
+ * `timeInZone`'s doc comment) and what `CorrectionForm` sends as `CorrectionInput.punched_at`.
+ *
+ * The offset is read from `Intl`'s `longOffset` for `timeZone`, not hardcoded — but a
+ * single lookup isn't enough to be DST-safe: there's no `Date` for "this wall-clock time
+ * in this zone" to hand `Intl` until the offset is already known, so the first lookup has
+ * to guess an instant (the wall-clock digits read AS IF they were UTC). Near a transition
+ * that guess can land on the wrong side of the boundary and return the PRE-transition
+ * offset for a wall-clock time that's actually POST-transition (e.g. 2026-03-08 03:30
+ * America/New_York: the naive guess is 03:30Z, still before that date's 07:00Z
+ * spring-forward, so it reads EST/-05:00 when 03:30 local that day is unambiguously
+ * EDT/-04:00). So: read the offset at the guess, apply it to get a corrected instant, then
+ * re-read the offset AT THAT corrected instant and use that one if it differs. One
+ * re-check is enough — a transition moves the clock by at most a couple of hours, well
+ * within what a single re-derivation resolves. Every office today is fixed Asia/Manila
+ * (+08:00 year-round, no DST, see `lib/timezone.ts`), so this only matters once a
+ * DST-observing office zone exists — but it's correct for one today, not just documented
+ * as a future TODO.
+ */
+export function toIsoInZone(date: string, time: string, timeZone: string): string {
+  const [yearPart, monthPart, dayPart] = date.split('-').map(Number)
+  const [hourPart, minutePart] = time.split(':').map(Number)
+
+  const guessUtcMs = Date.UTC(yearPart, monthPart - 1, dayPart, hourPart, minutePart)
+
+  const firstOffsetMinutes = offsetMinutesAt(guessUtcMs, timeZone)
+  const correctedUtcMs = guessUtcMs - firstOffsetMinutes * 60_000
+  const secondOffsetMinutes = offsetMinutesAt(correctedUtcMs, timeZone)
+
+  // The two disagree exactly when the guess landed on the wrong side of a transition —
+  // the offset AT the corrected instant is the one that actually applies to this
+  // wall-clock time.
+  const offsetMinutes = secondOffsetMinutes !== firstOffsetMinutes ? secondOffsetMinutes : firstOffsetMinutes
+
+  return `${date}T${time}:00${formatOffset(offsetMinutes)}`
+}

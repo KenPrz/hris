@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
 | RecordAnnulment insert would succeed, and the second's would hit the
 | unique(attendance_log_id) constraint as an uncaught QueryException (23505) -> the
 | catch-all -> HTTP 500. The sequential version of this exact scenario (see
-| AdjustmentTransitionsTest, "422s an approval whose target was already annulled...")
+| RequestDecisionsTest, "422s an approval whose target was already annulled...")
 | correctly 422s; only the concurrent race surfaced the wrong status.
 |
 | This file is the genuine two-connection proof, mirroring ApproveRequestConcurrencyTest's
@@ -53,7 +53,7 @@ it('serializes two DIFFERENT void requests targeting the SAME log through the ta
     ]);
 
     // office_id pinned to $office: AttendanceLog::factory()'s default otherwise mints a
-    // brand-new Office via Office::factory(), which — unlike AdjustmentTransitionsTest's
+    // brand-new Office via Office::factory(), which — unlike RequestDecisionsTest's
     // sequential version of this scenario, which runs under RefreshDatabase — would leak a
     // real, uncleaned row here, since this file deliberately commits for real.
     $target = AttendanceLog::factory()->create(['employee_id' => $report->id, 'office_id' => $office->id]);

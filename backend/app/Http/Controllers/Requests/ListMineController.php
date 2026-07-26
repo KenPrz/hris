@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Controllers\Attendance\Adjustments;
+namespace App\Http\Controllers\Requests;
 
 use App\Exceptions\Domain\NotAnEmployee;
 use App\Http\Resources\RequestResource;

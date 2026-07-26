@@ -33,11 +33,15 @@ export type NavGroup = {
  * rendering a heading with nothing underneath.
  */
 const ROUTES: Record<NavGroupKey, NavItem[]> = {
-  me: [{ href: '/me/attendance', label: 'Attendance' }],
-  team: [],
+  me: [
+    { href: '/me/attendance', label: 'Attendance' },
+    { href: '/me/requests', label: 'My requests' },
+  ],
+  team: [{ href: '/team/approvals', label: 'Approvals' }],
   office: [
     { href: '/office/holidays', label: 'Holidays' },
     { href: '/office/schedules', label: 'Schedules' },
+    { href: '/office/approvals', label: 'Approvals' },
   ],
   admin: [{ href: '/admin/pay-rules', label: 'Pay rules' }],
 }

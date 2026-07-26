@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Http\Controllers\Attendance\Adjustments;
+namespace App\Http\Controllers\Requests;
 
 use App\Actions\Requests\RejectRequest;
 use App\Http\Requests\RejectAdjustmentRequest;
@@ -11,7 +11,7 @@ use App\Models\Request;
 use Illuminate\Http\JsonResponse;
 
 // See ApproveController — same authorization boundary (RequestAuthority, inside the
-// action), same arch-test exemption reasoning.
+// action), same reasoning about which test proves it.
 final class RejectController
 {
     // $http is the FormRequest; $request is the route-bound App\Models\Request.
