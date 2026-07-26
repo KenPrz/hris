@@ -344,6 +344,61 @@ export type ResolvedDay = {
 export type ResolvedMonth = Record<string, ResolvedDay>
 
 // ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/LeaveTypeResource.php,
+// LeaveBalanceResource.php, and LeaveLedgerResource.php, and the leave_ledger
+// migration's CHECK constraints (entry_type, source).
+// ---------------------------------------------------------------------------
+
+export type LeaveUnitName = 'day' | 'half_shift' | 'hour' | 'minute'
+
+export type LeaveType = {
+  id: string
+  office_id: string
+  name: string
+  code: string | null
+  is_paid: boolean
+  requires_attachment: boolean
+  deducts_balance: boolean
+  is_cash_convertible: boolean
+  max_carryover_minutes: number | null
+  is_active: boolean
+}
+
+// `office_id` is required to create a type (it belongs to an office) but UpdateLeaveTypeController
+// never reads it from the body — the route-bound type fixes it — so it is optional here rather
+// than a second, near-duplicate input type.
+export type LeaveTypeInput = Omit<LeaveType, 'id' | 'office_id'> & { office_id?: string }
+
+export type LeaveBalance = {
+  leave_type: LeaveType
+  balance_minutes: number
+  balance_readable: { days: number; hours: number; minutes: number }
+}
+
+export type LeaveEntryType = 'credit' | 'debit'
+export type LeaveLedgerSource = 'manual_grant'
+
+export type LeaveLedgerEntry = {
+  id: string
+  employee_id: string
+  leave_type_id: string
+  entry_type: LeaveEntryType
+  minutes: number
+  reason: string
+  source: LeaveLedgerSource
+  created_by: string
+  created_at: string // ISO8601
+}
+
+export type LeaveGrantInput = {
+  employee_id: string
+  leave_type_id: string
+  amount: number
+  unit: LeaveUnitName
+  reason: string
+}
+
+// ---------------------------------------------------------------------------
 // Wire types — verified against app/Http/Resources/RequestResource.php and
 // app/Http/Controllers/Attendance/SubmitController.php.
 // ---------------------------------------------------------------------------
@@ -503,6 +558,35 @@ export const api = {
   resolvedSchedule: {
     get: (employee: string, month: string) =>
       request<ResolvedMonth>(`/office/schedule/resolved?employee=${employee}&month=${month}`),
+  },
+  leave: {
+    types: (office: string) => request<LeaveType[]>(`/office/leave-types?office=${office}`),
+    createType: (body: LeaveTypeInput) =>
+      request<LeaveType>('/office/leave-types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    updateType: (id: string, body: LeaveTypeInput) =>
+      request<LeaveType>(`/office/leave-types/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    setLeaveDay: (office_id: string, minutes_per_leave_day: number) =>
+      request<{ id: string; minutes_per_leave_day: number }>('/office/leave-day', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ office_id, minutes_per_leave_day }),
+      }),
+    myBalances: () => request<LeaveBalance[]>('/me/leave'),
+    employeeBalances: (employeeId: string) => request<LeaveBalance[]>(`/employees/${employeeId}/leave`),
+    grant: (body: LeaveGrantInput) =>
+      request<LeaveLedgerEntry>('/leave/grants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
   },
   requests: {
     mine: () => request<RequestRecord[]>('/requests'),
