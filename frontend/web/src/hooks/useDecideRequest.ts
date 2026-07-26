@@ -6,8 +6,8 @@
  * the version `/me/requests` uses: a decision there is rare enough (an employee mostly
  * only cancels their own pending request) that waiting for the round trip before the list
  * updates is fine. The optimistic decide-and-remove-from-queue mutation a manager/HR
- * admin's approval queue needs is Task 7's `useDecideQueueRequest` — do not extend this
- * one to do that; build a new hook instead.
+ * admin's approval queue needs is `useQueueDecision` below — do not extend this one to
+ * do that; it is a separate hook on purpose.
  *
  * Invalidates `keys.requests.mine()` only, matching queries by key prefix (TanStack's
  * default) — the /me/requests list that changed. It deliberately does NOT touch
@@ -42,6 +42,41 @@ export function useDecideRequest() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.requests.mine() })
+    },
+  })
+}
+
+/**
+ * The ONE optimistic mutation in the frontend — confined to an approver's queue
+ * (`/team/approvals`, `/office/approvals`) per the spec. Approving or rejecting a request
+ * removes its card from `queueKey`'s cached list immediately, before the network round
+ * trip completes: a queue is worked item-by-item, and waiting for the response before the
+ * decided card disappears reads as the click not having done anything.
+ *
+ * `onMutate` cancels any in-flight fetch of `queueKey` (so it can't overwrite the
+ * optimistic write with stale data), snapshots the current list so it can be restored, and
+ * filters the decided id out. `onError` restores that snapshot — a failed decision must
+ * not leave the card looking approved/rejected when it wasn't. `onSettled` invalidates
+ * `queueKey` regardless of outcome, so the list is eventually consistent with the server
+ * either way.
+ */
+export function useQueueDecision(queueKey: readonly unknown[]) {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: (v: { id: string; action: 'approve' } | { id: string; action: 'reject'; note: string }) =>
+      v.action === 'approve' ? api.requests.approve(v.id) : api.requests.reject(v.id, v.note),
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: queueKey })
+      const prev = qc.getQueryData<RequestRecord[]>(queueKey)
+      qc.setQueryData<RequestRecord[]>(queueKey, (old) => (old ?? []).filter((r) => r.id !== v.id))
+      return { prev }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queueKey, ctx.prev)
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queueKey })
     },
   })
 }

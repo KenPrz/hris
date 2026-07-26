@@ -4,7 +4,7 @@
  * The plain (non-optimistic) read side of an approver's queue: a manager's direct
  * reports' pending requests (`GET /team/approvals`) or an HR admin's whole-office queue
  * (`GET /office/approvals`). The optimistic decide-and-remove mutation for these queues
- * is Task 7's `useDecideQueueRequest` — this hook only fetches.
+ * is `useQueueDecision` (in `useDecideRequest.ts`) — this hook only fetches.
  */
 
 import { useQuery } from '@tanstack/react-query'
