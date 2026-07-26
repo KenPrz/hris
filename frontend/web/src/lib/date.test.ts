@@ -149,6 +149,23 @@ describe('toIsoInZone', () => {
     expect(toIsoInZone('2026-07-20', '12:30', 'America/New_York')).toBe('2026-07-20T12:30:00-04:00')
     expect(toIsoInZone('2026-01-20', '12:30', 'America/New_York')).toBe('2026-01-20T12:30:00-05:00')
   })
+
+  it('resolves the POST-transition offset for a wall-clock time on a spring-forward day — not the pre-transition guess', () => {
+    // 2026-03-08 is America/New_York's spring-forward day: clocks jump from 01:59 EST
+    // (-05:00) straight to 03:00 EDT (-04:00) at 07:00Z. 03:30 local that day is
+    // unambiguously EDT. A naive single-lookup implementation guesses the offset from
+    // 2026-03-08T03:30:00Z taken as the instant — still before the 07:00Z transition — so
+    // it wrongly reads -05:00 and returns ...T03:30:00-05:00 (equivalent to 08:30Z, an
+    // hour off from the correct 07:30Z). This is exactly the bug the re-check iteration
+    // in `toIsoInZone` fixes.
+    expect(toIsoInZone('2026-03-08', '03:30', 'America/New_York')).toBe('2026-03-08T03:30:00-04:00')
+  })
+
+  it('resolves the POST-transition offset for a wall-clock time on the fall-back day', () => {
+    // 2026-11-01 is the fall-back day: clocks drop from 01:59 EDT (-04:00) to 01:00 EST
+    // (-05:00) at 06:00Z. 03:30 local is well after the transition and unambiguously EST.
+    expect(toIsoInZone('2026-11-01', '03:30', 'America/New_York')).toBe('2026-11-01T03:30:00-05:00')
+  })
 })
 
 describe('host-timezone independence', () => {
