@@ -6,6 +6,7 @@ use App\Domain\Requests\RequestState;
 use App\Models\Employee;
 use App\Models\Office;
 use App\Models\Request;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 use function Pest\Laravel\actingAs;
@@ -115,4 +116,24 @@ it('lets a user who is both a manager and an HR admin see the same request in bo
 
     expect(collect($teamRes->json('data'))->pluck('id')->all())->toBe([$request->id])
         ->and(collect($officeRes->json('data'))->pluck('id')->all())->toBe([$request->id]);
+});
+
+it('gives a bare actor with no employee record an empty queue in both, never a leak', function (): void {
+    // A managerless employee (current_reports_to_id === null) with a pending request. A
+    // naive null-self query (`where('current_reports_to_id', null)`) compiles to
+    // whereNull(...) in Laravel, which would match exactly this employee — the leak this
+    // test guards against. The actor here has no Employee at all (a bare system-admin-style
+    // account), and per spec must see NEITHER queue populated: no reports, no HR offices,
+    // no scope, no rows — the same "nothing" EmployeeScope::visibleTo() gives that actor.
+    $office = Office::factory()->create();
+    $managerless = Employee::factory()->create(['current_office_id' => $office->id]);
+    Request::factory()->for($managerless, 'employee')->create(['state' => RequestState::Pending]);
+
+    $bareUser = User::factory()->create();
+
+    $teamRes = actingAs($bareUser)->getJson('/api/v1/team/approvals')->assertOk();
+    $officeRes = actingAs($bareUser)->getJson('/api/v1/office/approvals')->assertOk();
+
+    expect($teamRes->json('data'))->toBe([])
+        ->and($officeRes->json('data'))->toBe([]);
 });

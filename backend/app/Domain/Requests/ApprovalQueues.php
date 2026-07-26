@@ -23,6 +23,16 @@ final class ApprovalQueues
     {
         $selfEmployeeId = $user->employee?->id;
 
+        // A bare actor with no Employee record (e.g. a system-admin-only account) has no
+        // org-chart position, so has no reports — never "everyone with no manager set."
+        // Laravel's query builder rewrites where('col', null) to whereNull('col'), which
+        // would otherwise match every managerless employee rather than returning nothing;
+        // short-circuit before that footgun, mirroring EmployeeScope::visibleTo()'s guard
+        // for the same "no self, no scope" case.
+        if ($selfEmployeeId === null) {
+            return self::pending()->whereRaw('1 = 0');
+        }
+
         $reportIds = Employee::query()
             ->where('current_reports_to_id', $selfEmployeeId)
             ->pluck('id');
