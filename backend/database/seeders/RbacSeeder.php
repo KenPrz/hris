@@ -24,6 +24,9 @@ final class RbacSeeder extends Seeder
         'schedule.manage',
         'holiday.manage',
         'cutoff.manage',
+        // Enforcement is via OfficeScope, same as holiday.manage/schedule.manage — this
+        // widens the catalog, not a new code gate.
+        'leave.manage',
     ];
 
     public function run(): void
