@@ -58,6 +58,12 @@ final class Office extends Model
         return $this->hasMany(ShiftTemplate::class);
     }
 
+    /** @return HasMany<LeaveType, $this> */
+    public function leaveTypes(): HasMany
+    {
+        return $this->hasMany(LeaveType::class);
+    }
+
     /** @return BelongsTo<ShiftTemplate, $this> */
     public function defaultShiftTemplate(): BelongsTo
     {
