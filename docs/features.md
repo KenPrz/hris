@@ -142,8 +142,9 @@ before any of it was wired to a button.
 
 Everything above through M3.6 existed as an API only. This milestone gives it a real
 screen — the sign-in page and the attendance screen — built in IBM's Carbon design
-language. There is still no screen for correcting attendance, no roster, and no
-office/admin screens; those arrive with the milestones that own their data.
+language. The office and admin screens it lacked have since arrived with the milestones
+that own their data (holidays, schedules, and pay rules, all M4). Still absent: a screen
+for filing an attendance correction, and a roster of employees.
 
 - **Signing in, for real.** A work email and password on a single sign-in page; a wrong
   password and an unknown email look identical, so the page itself can't be used to guess
@@ -159,8 +160,8 @@ office/admin screens; those arrive with the milestones that own their data.
   punched shows its actual clock-in and clock-out times — not a rolled-up number. A day
   that pairs up cleanly also shows its total for that day; a day with a missing punch or
   an odd number of punches shows exactly what was recorded and no total, rather than
-  guess at one. You can step back a month at a time to see your history, independent of
-  today's clock button.
+  guess at one. You can step back and forward a month at a time to move through your
+  history, independent of today's clock button.
 
 ## Holiday calendars *(M4a)*
 
@@ -184,9 +185,10 @@ office/admin screens; those arrive with the milestones that own their data.
 - **Every change is logged.** Adding, editing, or removing a holiday records who did it and
   when, with the holiday itself as the logged subject — the same audit trail the system will
   one day show HR in full.
-- **Not yet in this milestone:** nothing reads the calendar to change anyone's pay. A
-  holiday marked here is configuration only until the compute engine (a later milestone)
-  exists to turn a special-non-working day into a 130% payout.
+- **Now feeds pay (M5).** When M4a shipped, a holiday here was configuration only. The
+  compute engine (M5) now reads the calendar — a special-non-working day reprices worked
+  hours to 130% — and any edit to the calendar re-runs that pricing automatically for
+  every already-computed day it affects.
 
 ## Shift templates and schedules *(M4b)*
 
@@ -220,10 +222,10 @@ office/admin screens; those arrive with the milestones that own their data.
   trying one that was never created.
 - **Every change is logged** — who built a template, who assigned it, who set an office
   default, who wrote an override — the same audit trail the holiday calendar's changes get.
-- **Not yet in this milestone:** nothing reads a resolved schedule to change anyone's pay.
-  A schedule is configuration and a resolved answer only, until the compute engine (a later
-  milestone) exists to turn "was this person scheduled to work" into an actual computed
-  total.
+- **Now feeds pay (M5).** When M4b shipped, a resolved schedule was configuration and a
+  resolved answer only. The compute engine (M5) now reads it to decide whether a day was
+  worked or rest and how many minutes were scheduled — and any change to a template, an
+  assignment, or an override re-runs that pricing automatically for the days it touches.
 
 ## Pay rules *(M4c)*
 
@@ -249,11 +251,11 @@ office/admin screens; those arrive with the milestones that own their data.
   before you even submit.
 - **Every change is logged** — who set which version and when — the same audit trail the
   holiday calendar and schedules get.
-- **Not yet in this milestone:** nothing reads these rates to change anyone's pay. A pay
-  rule marked here is configuration only until the compute engine (a later milestone)
-  exists to turn a worked day into an actual paycheck line. **With this feature, the
-  configuration spine (M4) is complete** — holiday calendars, schedules, and pay rules are
-  all in place for that engine to read.
+- **Now feeds pay (M5).** When M4c shipped, these rates were configuration only. The
+  compute engine (M5) now reads them to price every worked day, and a new rate version
+  reprices every affected day automatically. **With this feature the configuration spine
+  (M4) was complete** — holiday calendars, schedules, and pay rules all in place for that
+  engine, which M5 delivered.
 
 ## The compute engine *(M5a, M5b)*
 
@@ -266,8 +268,9 @@ office/admin screens; those arrive with the milestones that own their data.
   into.** `/me/attendance` already showed the raw clock-in/clock-out times (M3.5); it now
   also shows, for each day, a compact worked-hours total right in the calendar cell, and a
   full breakdown — how many minutes were regular time, how many were night differential,
-  how many were overtime, and at what percentage each priced — in a detail panel below the
-  calendar when that day is selected. The raw punches are still right there alongside it;
+  how many were overtime, plus the unworked-holiday premium on a paid holiday nobody worked,
+  each at the percentage it priced — in a detail panel below the calendar when that day is
+  selected. The raw punches are still right there alongside it;
   the computed total is additional, never a replacement.
 - **The number is always premium-weighted hours, never a peso.** A regular hour reads
   100%; work on a special non-working holiday reads 130%; night hours compound on top of
