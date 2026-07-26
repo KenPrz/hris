@@ -7,6 +7,7 @@ import {
   monthLabel,
   timeInZone,
   todayInZone,
+  toIsoInZone,
   weekdayIndex,
 } from './date'
 
@@ -131,6 +132,22 @@ describe('timeInZone', () => {
 
   it('pads single-digit hours and minutes to two digits', () => {
     expect(timeInZone('2026-07-20T05:05:00Z', 'UTC')).toBe('05:05')
+  })
+})
+
+describe('toIsoInZone', () => {
+  it('combines a date + HH:mm into an ISO8601 instant with Manila\'s +08:00 offset', () => {
+    expect(toIsoInZone('2026-07-20', '18:00', 'Asia/Manila')).toBe('2026-07-20T18:00:00+08:00')
+  })
+
+  it('round-trips through timeInZone — the pair is inverse to each other', () => {
+    const iso = toIsoInZone('2026-07-20', '09:15', 'Asia/Manila')
+    expect(timeInZone(iso, 'Asia/Manila')).toBe('09:15')
+  })
+
+  it('resolves a different zone\'s own offset, not a hardcoded one', () => {
+    expect(toIsoInZone('2026-07-20', '12:30', 'America/New_York')).toBe('2026-07-20T12:30:00-04:00')
+    expect(toIsoInZone('2026-01-20', '12:30', 'America/New_York')).toBe('2026-01-20T12:30:00-05:00')
   })
 })
 

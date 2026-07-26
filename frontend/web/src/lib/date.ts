@@ -118,3 +118,31 @@ export function timeInZone(iso: string, timeZone: string): string {
     hourCycle: 'h23',
   }).format(new Date(iso))
 }
+
+/**
+ * The inverse of `timeInZone`: a `YYYY-MM-DD` date + an `HH:mm` wall-clock time, both
+ * understood as local to `timeZone`, combined into an ISO8601 instant carrying an
+ * EXPLICIT offset — the shape `AttendanceLog.punched_at`'s wire type demands (see
+ * `timeInZone`'s doc comment) and what `CorrectionForm` sends as `CorrectionInput.punched_at`.
+ *
+ * The offset is read from `Intl`'s `longOffset` for `timeZone` at that instant, not
+ * hardcoded, so a zone with DST resolves correctly — though every office today is fixed
+ * Asia/Manila (+08:00 year-round, see `lib/timezone.ts`). The date+time is first read as
+ * if it were UTC purely to get a `Date` to hand `Intl` for the offset lookup; the digits
+ * themselves are never reinterpreted, only the returned offset is.
+ */
+export function toIsoInZone(date: string, time: string, timeZone: string): string {
+  const [yearPart, monthPart, dayPart] = date.split('-').map(Number)
+  const [hourPart, minutePart] = time.split(':').map(Number)
+
+  const asUtcGuess = new Date(Date.UTC(yearPart, monthPart - 1, dayPart, hourPart, minutePart))
+
+  const offsetName =
+    new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+      .formatToParts(asUtcGuess)
+      .find((part) => part.type === 'timeZoneName')?.value ?? 'GMT+00:00'
+
+  const offset = offsetName.replace('GMT', '') || '+00:00'
+
+  return `${date}T${time}:00${offset}`
+}
