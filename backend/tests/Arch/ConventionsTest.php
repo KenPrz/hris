@@ -226,8 +226,6 @@ test('every Attendance controller references a scope or self check', function ()
     // longer exists under Attendance/. The guarantee those three controllers care about is
     // still proven by the 404-vs-409 matrix in
     // tests/Feature/Requests/RequestDecisionsTest.php.
-    $exemptTransitionControllers = [];
-
     $offenders = [];
 
     $files = (new Finder)
@@ -241,10 +239,6 @@ test('every Attendance controller references a scope or self check', function ()
     ];
 
     foreach ($files as $file) {
-        if (in_array($file->getRelativePathname(), $exemptTransitionControllers, true)) {
-            continue;
-        }
-
         $contents = $file->getContents();
 
         $guarded = false;

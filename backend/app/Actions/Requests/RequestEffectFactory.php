@@ -20,6 +20,7 @@ final class RequestEffectFactory
     {
         return match ($type) {
             RequestType::AttendanceAdjustment => app(AttendanceAdjustmentEffect::class),
+            default => throw new LogicException("No RequestEffect registered for request type {$type->value}."),
         };
     }
 }

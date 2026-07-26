@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Actions\Requests;
 
-use App\Actions\Requests\RequestEffectFactory;
 use App\Domain\Requests\RequestAuthority;
 use App\Domain\Requests\RequestState;
 use App\Exceptions\Domain\RequestNotPending;
