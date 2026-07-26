@@ -84,6 +84,24 @@ it('gathers a cross-midnight night shift into one business day, past 1439', func
     expect(EffectivePunches::forDate($employee, '2026-08-04'))->toBe([1320, 1800]);
 });
 
+it('tiles consecutive same night-shift windows without double-claiming the shared punch', function (): void {
+    $office = Office::factory()->create(['timezone' => 'Asia/Manila']);
+    $template = shiftTemplate($office, start: 1320, end: 1800); // 22:00 -> 06:00 (+1 day), every day
+    $office->update(['default_shift_template_id' => $template->id]);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id, 'current_department_id' => null]);
+
+    punch($employee, $office, '2026-08-04 22:00:00'); // date N, in
+    punch($employee, $office, '2026-08-05 06:00:00'); // date N, out — early on N+1's calendar
+    punch($employee, $office, '2026-08-05 22:00:00'); // date N+1, in
+    punch($employee, $office, '2026-08-06 06:00:00'); // date N+1, out — early on N+2's calendar
+
+    // Each date sees exactly its own two punches. Pre-fix, date N+1's window started at its
+    // own midnight and would ALSO pick up date N's 06:00 out-punch (as minute 360), yielding
+    // a spurious 3-element [360, 1320, 1800] instead of [1320, 1800].
+    expect(EffectivePunches::forDate($employee, '2026-08-04'))->toBe([1320, 1800]);
+    expect(EffectivePunches::forDate($employee, '2026-08-05'))->toBe([1320, 1800]);
+});
+
 it('excludes a punch outside the business-day window and keeps ascending order', function (): void {
     $office = Office::factory()->create(['timezone' => 'Asia/Manila']);
     $template = shiftTemplate($office, start: 480, end: 1020); // 08:00 -> 17:00, plain day shift

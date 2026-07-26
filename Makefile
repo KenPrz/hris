@@ -37,10 +37,14 @@ test-backend: ## Pest, against the compose Postgres
 	# now carries force="true" in phpunit.xml, so it wins over whatever the api
 	# container's own `environment:` block (compose.dev.yml) exports for the dev
 	# server — no need to duplicate those values here as a second source of truth.
+	# memory_limit: the api image ships PHP's stock 128M, but Pest's arch suite parses
+	# every app/ docblock through phpstan/phpdoc-parser, which now exceeds 128M as the
+	# codebase has grown (M5+). Raise it for the test run only. CI is unaffected —
+	# shivammathur/setup-php defaults to -1 (unlimited).
 	$(DEV) exec -T \
 		-e DB_HOST=db \
 		-e DB_PORT=5432 \
-		--user hris api ./vendor/bin/pest
+		--user hris api php -d memory_limit=512M ./vendor/bin/pest
 
 test-web: ## Vitest + typecheck + build
 	$(DEV) exec -T --user node web sh -c 'npm test && npm run typecheck && npm run build'

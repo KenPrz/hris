@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\Schedules;
 
+use App\Actions\Compute\RecomputeRange;
+use App\Domain\Compute\AffectedSummaries;
+use App\Domain\Compute\RecomputeTrigger;
 use App\Models\ShiftTemplate;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +16,11 @@ use Illuminate\Support\Facades\DB;
  * this action trusts its input and only writes. Spatie's LogsActivity on ShiftTemplate
  * records the `created` event itself, with the causer resolved from the authenticated
  * guard automatically.
+ *
+ * After the write commits, enqueues an audited recompute (M5b Task 6) of every EXISTING
+ * summary for an employee on this template. A brand-new template has no assignment
+ * pointing at it yet, so AffectedSummaries::forShiftTemplate returns [] and this is
+ * always a clean no-op here — wired anyway for uniformity with Update/DeleteShiftTemplate.
  */
 final class CreateShiftTemplate
 {
@@ -37,6 +45,15 @@ final class CreateShiftTemplate
                     'break_minutes' => $isRest ? null : $day['break_minutes'],
                 ]);
             }
+
+            DB::afterCommit(function () use ($template): void {
+                RecomputeRange::dispatch(
+                    AffectedSummaries::forShiftTemplate($template->id),
+                    RecomputeTrigger::ShiftTemplate,
+                    $template->id,
+                    "Shift template {$template->id} created for office {$template->office_id}",
+                );
+            });
 
             return $template->load('days');
         });

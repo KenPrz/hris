@@ -981,8 +981,10 @@ picks up M5 next:
 
 Turns M3's punches — read through M3.6's annulments, never the raw ledger alone — into
 priced daily summaries, reading M4a's `holidays`, M4b's schedule tables, and M4c's
-`pay_rules`: the first and only consumer of all three. Ships in two slices: **M5a (below)
-is complete**; M5b (`RecomputeRange`) is next.
+`pay_rules`: the first and only consumer of all three. Shipped in two slices, **both
+complete — M5, the compute engine, is complete**: M5a (below) computes a day from a punch;
+M5b (further below) recomputes a range of already-computed days when the config that
+priced them changes.
 
 ### M5a — `ComputeDailySummary` and the read-only `/me/attendance/summary`
 
@@ -1062,22 +1064,135 @@ full read side of the pipeline — the 100% ordinary day, the 130% holiday, the 
 82-exempt employee's flat 100%, a live direct-recompute idempotency check, and the
 `RESTRICT` refusal via `psql` — against the live stack.
 
-**M5b (`RecomputeRange`) is next**, and carries the deferred items this slice's own code
-already flags rather than solving silently:
+M5a left two items deferred rather than solved silently, both of which M5b (below) closes:
+the consecutive-night-shift window-overlap case `EffectivePunches::forDate()`'s own doc
+comment flagged, and the fact that M5a's only writer of `daily_attendance_summaries` was
+the synchronous on-punch trigger — there was no batch or on-demand recompute yet.
 
-- **The consecutive-night-shift window-overlap case.** `EffectivePunches::forDate()`'s own
-  doc comment records it: a *repeating* cross-midnight shift's day-N window (which runs
-  past local midnight) and day-N+1's window can overlap, so a punch inside that overlap —
-  or one timestamped exactly on the boundary — is claimable by both dates. M5a's scope
-  (recomputing one day at a time, from a single trigger) never exercises this; whoever
-  drives `EffectivePunches` across a *range* has to resolve it, e.g. by bounding a day's
-  window start at the previous day's resolved window end, or by treating a consumed punch
-  as spent.
-- **A real recompute surface.** M5a's only writer of `daily_attendance_summaries` is the
-  synchronous on-punch trigger; there is no batch or on-demand recompute yet. M5b's
-  `RecomputeRange` is that surface — driven by a config change (a new `pay_rules` version,
-  an edited holiday or schedule) needing to reprice a range of already-computed days,
-  queued rather than synchronous given the range it may need to cover.
+### M5b — `RecomputeRange`: an audited, queued recompute of existing summaries
+
+Closes the two items M5a deferred, and with them, **M5 — the compute engine — is
+complete.**
+
+- **The consecutive-night-shift window fix.** `App\Domain\Attendance\EffectivePunches`'s
+  `windowStartMinutes()` now bounds day N's window start at day N-1's resolved window end
+  (when that previous shift ran past midnight) instead of always starting at `0`, and
+  `forDate()` treats a bounded start as exclusive — so a *repeating* cross-midnight shift's
+  consecutive daily windows tile instead of overlapping, and a punch timestamped exactly on
+  the boundary is claimed by exactly one of the two dates, never both, never neither. See
+  `02-data-model.md`.
+- `daily_attendance_summaries.office_id` — a new nullable, `on delete set null` column,
+  snapshotting the employee's resolved office *at compute time*, the same snapshot
+  discipline `attendance_logs.office_id` already uses. Indexed `(office_id, date)`. Exists
+  so a config change can find "every existing summary for office X" without an
+  effective-dated join back through `employment_records` on every row. See
+  `02-data-model.md`.
+- `recompute_runs` — one row per `RecomputeRange::dispatch()` call: `trigger_type` (a
+  `CHECK`-constrained closed set — `holiday`/`pay_rule`/`shift_template`/
+  `schedule_assignment`/`schedule_override`/`office_default` — mirroring
+  `App\Domain\Compute\RecomputeTrigger`), `trigger_id`, a human-readable `reason`,
+  `pair_count`, `batch_id` (Laravel's own `Bus::batch` id, written back after dispatch),
+  `status` (`queued`→`completed`/`failed`), `caused_by`. `Spatie\Activitylog\Traits\LogsActivity`
+  on the model. See `02-data-model.md`.
+- `App\Domain\Compute\AffectedSummaries` — `forHoliday`/`forPayRule`/`forShiftTemplate`/
+  `forEmployee`/`forOffice`, each resolving a config change to the `(employee_id, date)`
+  pairs of **existing** summaries it could affect. Over-inclusion is deliberately safe
+  (`ComputeDailySummary` is idempotent), so these deliberately don't try to narrow to the
+  exact dates a schedule/office change touches — completeness matters, precision doesn't.
+- `App\Actions\Compute\RecomputeRange::dispatch(pairs, trigger, triggerId, reason,
+  causedBy): ?RecomputeRun` — dedups the incoming pairs, no-ops (returns `null`, writes
+  nothing) on an empty set, otherwise creates the `queued` `recompute_runs` row and
+  dispatches a named `Bus::batch()` of `App\Jobs\RecomputeDay` — one job per pair — flipping
+  the row to `completed`/`failed` from the batch's own `->then()`/`->catch()`.
+- `App\Jobs\RecomputeDay` — `ShouldQueue` + `Batchable` + `InteractsWithQueue`, carrying
+  only `$employeeId`/`$date` (never a model, which would go stale between dispatch and
+  execution). A strict no-op over a cancelled batch, a deleted employee, or — the one that
+  matters for M7 — an existing summary already `status: 'locked'`. Otherwise calls
+  `ComputeDailySummary::execute()`, unchanged from M5a.
+- **Every config-change action wires the same `DB::afterCommit(() =>
+  RecomputeRange::dispatch(...))` shape**, mirroring `RecordPunch`'s own on-write trigger:
+  `Holidays\CreateHoliday`/`UpdateHoliday`/`DeleteHoliday`/`CloneHolidays`,
+  `PayRules\CreatePayRule`, `Schedules\CreateShiftTemplate`/`UpdateShiftTemplate`/
+  `DeleteShiftTemplate`, `Schedules\CreateScheduleAssignment` and the inline
+  `DeleteAssignmentController`, `Schedules\CreateScheduleOverride`/`UpdateScheduleOverride`/
+  `DeleteScheduleOverride`, and the inline `SetDefaultTemplateController`. See
+  `02-data-model.md` for the full trigger/resolver table.
+- **The append-only ledger is never touched by any of this.** `RecomputeDay`/
+  `ComputeDailySummary` only ever read `attendance_logs` (via `EffectivePunches`) and write
+  `daily_attendance_summaries`/`daily_summary_lines` — the same arch guard that already
+  proves `RecordPunch` is `attendance_logs`' sole writer covers a recompute by construction.
+  `scripts/e2e-recompute.sh` proves it live.
+
+**Done when:** an HR holiday edit for Manila enqueues an audited recompute
+(`recompute_runs` row + a `Bus::batch` of `RecomputeDay` jobs) that flips exactly the
+affected existing Manila summaries 100% → 130% and leaves Cebu's and every raw
+`attendance_logs` row byte-identical; a new `pay_rules` version re-prices every existing
+summary on/after its effective date; a `locked` summary is skipped; a config change with no
+existing affected summaries is a clean no-op; two consecutive night shifts count each punch
+exactly once. **No `attendance_logs` row is ever mutated.** **This is M4's original
+"Done when" line, only now actually provable end to end** — M4a's own section named it as
+the milestone's eventual proof and explicitly deferred it here.
+
+**Status: complete.** **490 backend tests** (1,693 assertions — `recompute_runs`' schema,
+`AffectedSummaries`' own resolver-by-resolver unit suite, `RecomputeDay`'s locked-skip and
+idempotency coverage, `RecomputeRange`'s dedup/no-op/audited-batch coverage, and every
+config-change action's own recompute-enqueue test, on top of everything M0–M5a already
+covered; M5a's own docs recorded 457, but this is this run's real total, the same
+"real total, not a precise per-milestone delta" caveat every milestone since M4a has
+carried), of which **19 are arch tests** (unchanged since M4c/M5a — M5b's new action/domain/
+job classes are covered by the same general-purpose rules, not a new arch-guarded invariant
+of their own). Frontend **unchanged at 313 tests** — M5b is backend-only, no UI reads
+`recompute_runs` or triggers a manual recompute. `lint`, `typecheck`, and `build` are green
+native and inside the `make test` containers alike.
+`scripts/e2e-recompute.sh` walks the whole surface live: a seeded ordinary day, confirmed
+still `ordinary` immediately after the holiday write (proving the recompute is genuinely
+queued, not synchronous), the queue drained (`php artisan queue:work
+--stop-when-empty`), the flip to `special_non_working`/13000bp, the audited
+`recompute_runs` row (`trigger_type: holiday`, `status: completed`, `pair_count: 1`), and
+the employee's `attendance_logs` rows byte-identical — same ids, same order — before and
+after. What the building turned on, for whoever picks up M6 next:
+
+- **The window-tiling fix is a boundary-exclusivity problem, not a bigger-window
+  problem.** The natural first instinct — widen day N's window to swallow whatever it
+  might otherwise miss — just moves the double-claim to a different boundary. The actual
+  fix is narrower: bound day N's start at day N-1's *resolved* window end (only when that
+  previous shift genuinely ran past midnight) and treat that bound as exclusive, so the
+  exact instant at the boundary belongs to exactly one side. A normal, non-repeating, or
+  rest-day previous day leaves the start at `0`, unchanged from M5a.
+- **Over-inclusion has to be a deliberate design choice you can point to, not just an
+  accident that happens not to break anything.** `AffectedSummaries::forShiftTemplate`/
+  `forOffice`/`forEmployee` recompute every existing summary for the affected employees,
+  full stop — no attempt to narrow to the exact dates a schedule change touches. That's
+  only safe because `ComputeDailySummary` is idempotent by construction (M5a); the
+  docblock says so explicitly rather than leaving a future reader to wonder whether the
+  breadth was intentional.
+- **`RecomputeDay` needs *both* `Batchable` and `InteractsWithQueue`, not just the one the
+  cancellation check obviously needs.** `CallQueuedHandler::ensureSuccessfulBatchJobIsRecorded()`
+  silently declines to call `$batch->recordSuccessfulJob()` unless both traits are present
+  — without it, every batch containing this job sits at `pending_jobs > 0` forever and
+  `RecomputeRange`'s `->then()` callback (the only thing that ever marks a
+  `recompute_runs` row `completed`) never fires. Caught by `RecomputeRangeTest` actually
+  asserting the row flips to `completed`, not just that the batch was dispatched.
+- **A container/native PHP `memory_limit` ceiling, not a test-logic failure, is worth
+  knowing about before assuming `make test`/`./vendor/bin/pest` broke.** Both the native
+  host's stock `php.ini` and the dev image's FrankenPHP default ship `memory_limit=128M`;
+  Pest's Arch-layer docblock scan across the whole (now-larger) `App` namespace exceeds
+  that ceiling deterministically, failing inside `phpstan/phpdoc-parser`/Collision's own
+  error renderer rather than in any actual assertion — a local-environment ceiling, not a
+  regression in this milestone's code (490/490 pass with the ceiling raised), and CI is
+  unaffected: `shivammathur/setup-php`'s runner default is `memory_limit=-1`. **`make
+  test-backend` now runs pest as `php -d memory_limit=512M vendor/bin/pest`**, so the
+  containerized gate works out of the box; a native `./vendor/bin/pest` run relies on the
+  developer's own `php.ini` (most dev machines don't cap at 128M).
+- **`04-backend-conventions.md`'s locked-skip-vs-real-lock distinction is not automatically
+  safe just because a lock will eventually exist.** `RecomputeDay`'s `$existing?->status ===
+  'locked'` check is a plain, unlocked read — correct today because nothing else races to
+  set that status yet. M7's `CloseCutoff` changes that: once it actually
+  `lockForUpdate()`s and locks summary rows, the close and a `RecomputeDay` racing the same
+  row become a genuine concurrency question, needing the same two-real-Postgres-connections
+  proof `ApproveRequestConcurrencyTest` set the precedent for (M3.6) — a single-process test
+  would pass whether or not a lock exists, which is worse than no test. Flagged here, in
+  `02-data-model.md`, and repeated at M7's own section below so it isn't missed twice.
 
 ## M6 — Requests and approvals
 
@@ -1118,6 +1233,15 @@ The milestone that makes the number defensible.
   period; `CloseCutoff` locks the period row first. **This race needs the two-real-
   connections test** `04-backend-conventions.md` demands — a single-process test passes
   whether or not the lock is even there, which makes it worse than no test.
+- **Forward note from M5b, repeated here so it isn't missed twice:** `App\Jobs\RecomputeDay`'s
+  locked-skip (`$existing?->status === 'locked'`) is a plain, unlocked read — safe in M5b
+  only because nothing else races to set that status yet. Once `CloseCutoff` exists and
+  actually locks summary rows, a close racing a `RecomputeDay` over the same row is a real
+  concurrency question: `CloseCutoff` needs its own `lockForUpdate()` over the summaries
+  it's closing, and the close-vs-recompute race needs the same genuine
+  two-Postgres-connections proof `ApproveRequestConcurrencyTest` already set the precedent
+  for (M3.6) — not a same-process sequential test, which would pass regardless of whether
+  the lock exists. See `02-data-model.md`'s M5b section for the full reasoning.
 - `ReopenCutoff` exists, requires a reason, and is loudly audited.
 - Payroll export: per employee per period, the full earnings breakdown — regular, late,
   undertime, OT, night differential, holiday premium, leave with pay — in integer minutes

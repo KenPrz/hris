@@ -255,7 +255,7 @@ office/admin screens; those arrive with the milestones that own their data.
   configuration spine (M4) is complete** — holiday calendars, schedules, and pay rules are
   all in place for that engine to read.
 
-## The compute engine *(M5a)*
+## The compute engine *(M5a, M5b)*
 
 - **Every day's punches now turn into a priced total, automatically.** The moment an
   employee clocks in and out (or HR approves a correction to a missed punch), the system
@@ -283,10 +283,33 @@ office/admin screens; those arrive with the milestones that own their data.
   clock-out, and the day shows zero worked hours and an "incomplete" flag — never a guessed
   number. Filing an adjustment (M3.6) to add the missing punch is how that day gets a real
   total.
-- **Not yet in this milestone:** there is no way to ask the system to recompute a day on
-  demand, or to re-price a whole range of days after a config change — every priced day
-  today comes from the automatic trigger on the punch itself. A manual, range-driven
-  recompute is the next slice (M5b).
+- **A config edit that changes pay automatically refreshes every day it affects — no one
+  has to ask for it, and nothing has to be re-punched.** *(M5b)* Editing a holiday, adding
+  a new pay-rate version, or changing a shift template, an assignment, an override, or an
+  office's default schedule each automatically re-prices every already-computed day that
+  change could have touched. HR doesn't run a "recompute" button and doesn't have to know
+  which days were affected — the system enqueues the recompute itself, the moment the
+  config change is saved.
+- **Nothing about the raw punch record ever changes.** A recompute only ever touches the
+  computed summary — the priced total and its breakdown — never the punch itself. The
+  attendance ledger a labor inspector would be shown stays byte-for-byte the same before
+  and after, no matter how many times a day's price is recalculated.
+- **A closed period is never silently reopened by a recompute.** A day whose pay has
+  already been locked for a closed cutoff (a later milestone) is skipped, not
+  recalculated — a config change never quietly rewrites numbers that have already been
+  finalized.
+- **Every recompute is itself an audited event.** Adding, editing, cloning, or removing a
+  holiday; a new pay-rate version; any shift-template, assignment, override, or
+  office-default change — each one records what triggered the recompute, how many days it
+  affected, and whether it finished successfully, the same audit discipline every other
+  config change in the system already gets.
+- **Two consecutive night shifts are counted correctly, not double-counted.** A punch that
+  falls right at the boundary between one overnight shift's day and the next one's is now
+  attributed to exactly one of the two days, never both — a fix to how a *repeating*
+  overnight schedule is read that this milestone's range-wide recompute exposed. **With
+  this feature, M5 — the compute engine — is complete**: every priced day is now correct
+  both the moment it's punched (M5a) and every time afterward that the configuration
+  pricing it changes (M5b).
 
 ---
 

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\Holidays;
 
+use App\Actions\Compute\RecomputeRange;
+use App\Domain\Compute\AffectedSummaries;
+use App\Domain\Compute\RecomputeTrigger;
 use App\Models\Holiday;
 use DateTimeInterface;
 use Illuminate\Support\Collection;
@@ -77,6 +80,23 @@ final class CloneHolidays
                     'created' => $created->count(),
                 ])
                 ->log('cloned holidays');
+
+            // Every date created above is brand new — by definition nothing existing was
+            // ever computed for it yet, so forHoliday returns [] and RecomputeRange no-ops.
+            // Wired anyway for uniformity (see Holidays' RecomputeRange docblocks) and so a
+            // future change to CloneHolidays that overwrites rather than skips gets audited
+            // recompute coverage for free.
+            $createdDates = $created->map(fn (Holiday $holiday): string => $holiday->date->toDateString())->all();
+
+            DB::afterCommit(function () use ($office, $in, $createdDates): void {
+                RecomputeRange::dispatch(
+                    AffectedSummaries::forHoliday($office->id, $createdDates),
+                    RecomputeTrigger::Holiday,
+                    $office->id,
+                    "Holidays cloned from {$in->fromYear} to {$in->toYear} for office {$office->id}",
+                    $in->causer->id,
+                );
+            });
 
             return $created;
         });

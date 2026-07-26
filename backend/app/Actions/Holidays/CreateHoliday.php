@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\Holidays;
 
+use App\Actions\Compute\RecomputeRange;
+use App\Domain\Compute\AffectedSummaries;
+use App\Domain\Compute\RecomputeTrigger;
 use App\Exceptions\Domain\HolidayExists;
 use App\Models\Holiday;
 use App\Models\Office;
@@ -14,6 +17,11 @@ use Illuminate\Support\Facades\DB;
  * caller administers?) already happened in the controller — this action trusts its input
  * and only writes. Spatie's LogsActivity on Holiday records the `created` event itself,
  * with the causer resolved from the authenticated guard automatically.
+ *
+ * After the write commits, enqueues an audited recompute (M5b Task 6) of every EXISTING
+ * summary on this office+date — a day type just changed, so anything already computed for
+ * it is stale. Registered via DB::afterCommit from inside this transaction, mirroring
+ * RecordPunch: a recompute-enqueue failure can never roll back an already-durable holiday.
  */
 final class CreateHoliday
 {
@@ -35,12 +43,23 @@ final class CreateHoliday
                 throw new HolidayExists($in->officeId, $in->date);
             }
 
-            return Holiday::query()->create([
+            $holiday = Holiday::query()->create([
                 'office_id' => $in->officeId,
                 'date' => $in->date,
                 'day_type' => $in->dayType,
                 'name' => $in->name,
             ]);
+
+            DB::afterCommit(function () use ($holiday): void {
+                RecomputeRange::dispatch(
+                    AffectedSummaries::forHoliday($holiday->office_id, [$holiday->date->toDateString()]),
+                    RecomputeTrigger::Holiday,
+                    $holiday->id,
+                    "Holiday {$holiday->id} created for office {$holiday->office_id} on {$holiday->date->toDateString()}",
+                );
+            });
+
+            return $holiday;
         });
     }
 }

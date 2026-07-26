@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\PayRules;
 
+use App\Actions\Compute\RecomputeRange;
+use App\Domain\Compute\AffectedSummaries;
+use App\Domain\Compute\RecomputeTrigger;
 use App\Domain\Pay\StatutoryFloor;
 use App\Exceptions\Domain\PayRateBelowFloor;
 use App\Exceptions\Domain\PayRuleExists;
@@ -59,6 +62,16 @@ final class CreatePayRule
                     'unworked_bp' => $rate['unworked_bp'],
                 ]);
             }
+
+            DB::afterCommit(function () use ($payRule): void {
+                RecomputeRange::dispatch(
+                    AffectedSummaries::forPayRule($payRule->effective_from->toDateString()),
+                    RecomputeTrigger::PayRule,
+                    $payRule->id,
+                    "Pay rule {$payRule->id} created effective {$payRule->effective_from->toDateString()}",
+                    $payRule->created_by,
+                );
+            });
 
             return $payRule->load('dayRates');
         });
