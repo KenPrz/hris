@@ -25,6 +25,9 @@ use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayContro
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
 use App\Http\Controllers\Office\Holidays\ListController as ListHolidaysController;
 use App\Http\Controllers\Office\Holidays\UpdateController as UpdateHolidayController;
+use App\Http\Controllers\Office\LeaveTypes\CreateController as CreateLeaveTypeController;
+use App\Http\Controllers\Office\LeaveTypes\ListController as ListLeaveTypesController;
+use App\Http\Controllers\Office\LeaveTypes\UpdateController as UpdateLeaveTypeController;
 use App\Http\Controllers\Office\Schedules\CreateAssignmentController;
 use App\Http\Controllers\Office\Schedules\CreateOverrideController;
 use App\Http\Controllers\Office\Schedules\CreateTemplateController;
@@ -158,6 +161,12 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/default-template', SetDefaultTemplateController::class);
             Route::get('/schedule/resolved', ResolvedScheduleController::class);
             Route::patch('/leave-day', SetLeaveDayController::class);
+
+            // Leave-type config — no delete route; a type is retired via PATCH
+            // is_active=false, never removed (M6b-a Task 4).
+            Route::get('/leave-types', ListLeaveTypesController::class);
+            Route::post('/leave-types', CreateLeaveTypeController::class);
+            Route::patch('/leave-types/{leaveType}', UpdateLeaveTypeController::class);
         });
     });
 });
