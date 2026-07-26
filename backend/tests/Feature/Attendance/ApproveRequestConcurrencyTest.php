@@ -16,7 +16,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /*
-| Task 7 review Finding 2: the sequential test in AdjustmentTransitionsTest proves the
+| Task 7 review Finding 2: the sequential test in RequestDecisionsTest proves the
 | PENDING STATE GUARD (a second approval after the first has committed 409s) but never
 | proves the row LOCK itself — a single PHP process calling the endpoint twice in a row
 | never contends for anything, because nothing is held open concurrently. This file is

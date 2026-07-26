@@ -10,12 +10,6 @@ use App\Http\Controllers\Admin\PayRules\CreateController as CreatePayRuleControl
 use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleController;
 use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
 use App\Http\Controllers\Admin\PayRules\ShowController as ShowPayRuleController;
-use App\Http\Controllers\Attendance\Adjustments\ApproveController as ApproveAdjustmentController;
-use App\Http\Controllers\Attendance\Adjustments\CancelController as CancelAdjustmentController;
-use App\Http\Controllers\Attendance\Adjustments\DownloadAttachmentController;
-use App\Http\Controllers\Attendance\Adjustments\ListMineController as ListMineAdjustmentsController;
-use App\Http\Controllers\Attendance\Adjustments\RejectController as RejectAdjustmentController;
-use App\Http\Controllers\Attendance\Adjustments\ShowController as ShowAdjustmentController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
@@ -45,7 +39,13 @@ use App\Http\Controllers\Office\Schedules\SetDefaultTemplateController;
 use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
+use App\Http\Controllers\Requests\ApproveController;
+use App\Http\Controllers\Requests\CancelController;
+use App\Http\Controllers\Requests\DownloadAttachmentController;
+use App\Http\Controllers\Requests\ListMineController;
 use App\Http\Controllers\Requests\OfficeApprovalsController;
+use App\Http\Controllers\Requests\RejectController;
+use App\Http\Controllers\Requests\ShowController;
 use App\Http\Controllers\Requests\TeamApprovalsController;
 use App\Http\Controllers\System\HealthController;
 use Illuminate\Support\Facades\Route;
@@ -75,9 +75,9 @@ Route::prefix('v1')->group(function (): void {
 
         // Any employee may file for their own attendance — deliberately not admin-gated
         // and not behind idempotency middleware (a considered one-off submission, not a
-        // retryable network event).
+        // retryable network event). Submission stays type-specific; the read/decision
+        // surface below is the shared, type-agnostic requests spine.
         Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
-        Route::get('/attendance/adjustments', ListMineAdjustmentsController::class);
 
         // The two scope-filtered approval queues — a manager's direct reports and an HR
         // admin's office members — replace the old single combined
@@ -87,19 +87,25 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/team/approvals', TeamApprovalsController::class);
         Route::get('/office/approvals', OfficeApprovalsController::class);
 
+        // The generic requests resource — list-mine, show, decisions, and the attachment
+        // stream. Not type-specific: any request type (attendance adjustment today, leave
+        // or overtime later) is served here, reached only via submission routes that stay
+        // type-specific (e.g. POST /attendance/adjustments above).
+        Route::get('/requests', ListMineController::class);
+
         // Transitions on the shared requests spine. Any authorized approver or the
         // requester themself may act — authority is enforced inside the actions
         // (RequestAuthority for approve/reject, requester-identity for cancel), not by a
         // route-level gate, so these stay in the plain auth:sanctum group.
-        Route::post('/attendance/adjustments/{request}/approve', ApproveAdjustmentController::class);
-        Route::post('/attendance/adjustments/{request}/reject', RejectAdjustmentController::class);
-        Route::post('/attendance/adjustments/{request}/cancel', CancelAdjustmentController::class);
+        Route::post('/requests/{request}/approve', ApproveController::class);
+        Route::post('/requests/{request}/reject', RejectController::class);
+        Route::post('/requests/{request}/cancel', CancelController::class);
 
         // Show and the attachment stream share one visibility check (requester, or an
         // authorized approver) — see ShowController/DownloadAttachmentController. The
         // attachment route stays a private, app-mediated stream, never a public/object URL.
-        Route::get('/attendance/adjustments/{request}', ShowAdjustmentController::class);
-        Route::get('/attendance/adjustments/{request}/attachment', DownloadAttachmentController::class);
+        Route::get('/requests/{request}', ShowController::class);
+        Route::get('/requests/{request}/attachment', DownloadAttachmentController::class);
 
         // System Admin owns onboarding in M2 — no self-serve employee creation. Each
         // FormRequest's authorize() is the boundary: a non-admin gets 403, not 404,

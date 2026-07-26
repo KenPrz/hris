@@ -75,7 +75,7 @@ it('lets a manager approve their report\'s pending add adjustment', function ():
 
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertOk()
         ->assertJsonPath('data.state', 'approved')
         ->assertJsonPath('data.decided_by', $managerUser->id);
@@ -94,7 +94,7 @@ it('lets an HR admin over the requester\'s office approve', function (): void {
 
     Sanctum::actingAs($hrUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertOk()
         ->assertJsonPath('data.state', 'approved');
 });
@@ -107,7 +107,7 @@ it('lets a system admin approve any pending request', function (): void {
     $admin = User::factory()->create(['is_system_admin' => true]);
     Sanctum::actingAs($admin);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertOk()
         ->assertJsonPath('data.state', 'approved');
 });
@@ -119,7 +119,7 @@ it('404s when the requester tries to approve their own request', function (): vo
 
     Sanctum::actingAs($requesterUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 
@@ -137,7 +137,7 @@ it('404s when an out-of-scope employee tries to approve', function (): void {
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 
@@ -152,7 +152,7 @@ it('lets an authorized approver reject with a decision note', function (): void 
 
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [
+    $this->postJson("/api/v1/requests/{$request->id}/reject", [
         'decision_note' => 'Not enough evidence.',
     ])
         ->assertOk()
@@ -171,7 +171,7 @@ it('400s a reject with no decision_note', function (): void {
 
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [])
+    $this->postJson("/api/v1/requests/{$request->id}/reject", [])
         ->assertStatus(400)
         ->assertJsonPath('error.code', 'validation_failed');
 
@@ -188,7 +188,7 @@ it('404s when an out-of-scope employee tries to reject WITH a valid note — exi
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [
+    $this->postJson("/api/v1/requests/{$request->id}/reject", [
         'decision_note' => 'Not enough evidence.',
     ])
         ->assertStatus(404)
@@ -211,7 +211,7 @@ it('404s (never 400) when an out-of-scope employee rejects with an EMPTY body �
     // authority check, so an out-of-scope prober sending an empty body got 400
     // validation_failed — proof the request exists — instead of the 404 an unauthorized
     // actor must always see, indistinguishable from a nonexistent request.
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [])
+    $this->postJson("/api/v1/requests/{$request->id}/reject", [])
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 
@@ -225,11 +225,11 @@ it('409s a reject of an already-decided (approved) request even with no note', f
     $request = pendingAddRequest($requester);
 
     Sanctum::actingAs($managerUser);
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$request->id}/approve")->assertOk();
 
     // Already approved, and no decision_note in the body: pending-ness (409) still wins
     // over note-validation (400) — the ordering is authority -> pending -> note.
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/reject", [])
+    $this->postJson("/api/v1/requests/{$request->id}/reject", [])
         ->assertStatus(409)
         ->assertJsonPath('error.code', 'request_not_pending');
 });
@@ -241,7 +241,7 @@ it('lets the requester cancel their own pending request', function (): void {
 
     Sanctum::actingAs($requesterUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/cancel")
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
         ->assertOk()
         ->assertJsonPath('data.state', 'cancelled');
 });
@@ -257,7 +257,7 @@ it('404s when someone other than the requester tries to cancel', function (): vo
     // must still 404 — cancellation is requester-only, narrower than approval authority.
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/cancel")
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 
@@ -271,10 +271,10 @@ it('409s a cancel after the request is already approved', function (): void {
     $request = pendingAddRequest($requester);
 
     Sanctum::actingAs($managerUser);
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$request->id}/approve")->assertOk();
 
     Sanctum::actingAs($requesterUser);
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/cancel")
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
         ->assertStatus(409)
         ->assertJsonPath('error.code', 'request_not_pending');
 });
@@ -287,10 +287,10 @@ it('409s a second approval with no double effect — exactly one punch, not two'
 
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$request->id}/approve")->assertOk();
     expect(AttendanceLog::count())->toBe(1);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$request->id}/approve")
         ->assertStatus(409)
         ->assertJsonPath('error.code', 'request_not_pending');
 
@@ -310,11 +310,11 @@ it('422s an approval whose target was already annulled by a prior approval, roll
 
     Sanctum::actingAs($managerUser);
 
-    $this->postJson("/api/v1/attendance/adjustments/{$firstVoid->id}/approve")
+    $this->postJson("/api/v1/requests/{$firstVoid->id}/approve")
         ->assertOk()
         ->assertJsonPath('data.state', 'approved');
 
-    $this->postJson("/api/v1/attendance/adjustments/{$secondVoid->id}/approve")
+    $this->postJson("/api/v1/requests/{$secondVoid->id}/approve")
         ->assertStatus(422)
         ->assertJsonPath('error.code', 'invalid_adjustment_target');
 

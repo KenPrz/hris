@@ -32,7 +32,7 @@ uses(RefreshDatabase::class);
 | Helper names are prefixed `readAdjustments*` to avoid colliding with the
 | same-shaped, differently-named helpers other Attendance test files declare
 | as globals in the same process (officeForAdjustments(), employeeWithUser(),
-| pendingAddRequest() in AdjustmentTransitionsTest.php).
+| pendingAddRequest() in RequestDecisionsTest.php).
 */
 
 function readAdjustmentsOffice(): Office
@@ -75,7 +75,7 @@ it('lists only the caller\'s own requests, in any state', function (): void {
 
     Sanctum::actingAs($meUser);
 
-    $response = $this->getJson('/api/v1/attendance/adjustments')->assertOk();
+    $response = $this->getJson('/api/v1/requests')->assertOk();
 
     $ids = array_column($response->json('data'), 'id');
 
@@ -88,7 +88,7 @@ it('lists only the caller\'s own requests, in any state', function (): void {
 it('422s the my-requests read for a caller with no employee record', function (): void {
     Sanctum::actingAs(User::factory()->create());
 
-    $this->getJson('/api/v1/attendance/adjustments')
+    $this->getJson('/api/v1/requests')
         ->assertStatus(422)
         ->assertJsonPath('error.code', 'not_an_employee');
 });
@@ -102,7 +102,7 @@ it('shows a request to the requester', function (): void {
 
     Sanctum::actingAs($requesterUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertOk()
         ->assertJsonPath('data.id', $request->id)
         ->assertJsonPath('data.employee_id', $requester->id);
@@ -116,7 +116,7 @@ it('shows a request to an authorized approver', function (): void {
 
     Sanctum::actingAs($managerUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertOk()
         ->assertJsonPath('data.id', $request->id);
 });
@@ -131,7 +131,7 @@ it('404s a request show for an unrelated employee — existence must not leak', 
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->getJson("/api/v1/attendance/adjustments/{$request->id}")
+    $this->getJson("/api/v1/requests/{$request->id}")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });
@@ -151,7 +151,7 @@ it('downloads the attachment for the requester', function (): void {
 
     Sanctum::actingAs($requesterUser);
 
-    $response = $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $response = $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertOk();
 
     expect($response->headers->get('Content-Type'))->toContain('pdf')
@@ -172,7 +172,7 @@ it('downloads the attachment for an authorized approver', function (): void {
 
     Sanctum::actingAs($managerUser);
 
-    $response = $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $response = $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertOk();
 
     expect($response->streamedContent())->toBe($content);
@@ -193,7 +193,7 @@ it('404s the attachment download for an unrelated employee — never leaks the f
 
     Sanctum::actingAs($unrelatedUser);
 
-    $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });
@@ -207,7 +207,7 @@ it('404s the attachment download when the request has no attachment', function (
 
     Sanctum::actingAs($requesterUser);
 
-    $this->get("/api/v1/attendance/adjustments/{$request->id}/attachment")
+    $this->get("/api/v1/requests/{$request->id}/attachment")
         ->assertStatus(404)
         ->assertJsonPath('error.code', 'not_found');
 });
