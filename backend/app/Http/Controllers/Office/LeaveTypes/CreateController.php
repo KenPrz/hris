@@ -26,12 +26,17 @@ final class CreateController
         $leaveType = $action->execute(new CreateLeaveTypeInput(
             officeId: $office->id,
             name: $request->string('name')->toString(),
-            code: $request->has('code') ? $request->string('code')->toString() : null,
+            // input(), not string()/integer() behind a has() check: has() is true for an
+            // explicit JSON null, and string()/integer() would then coerce it to '' / 0 —
+            // silently flipping "no code"/"unlimited carryover" into "empty code string"/
+            // "zero carryover". Both fields are already validated nullable|string /
+            // nullable|integer, so input() is either null or the correct type as-is.
+            code: $request->input('code'),
             isPaid: $request->boolean('is_paid'),
             requiresAttachment: $request->boolean('requires_attachment'),
             deductsBalance: $request->boolean('deducts_balance'),
             isCashConvertible: $request->boolean('is_cash_convertible'),
-            maxCarryoverMinutes: $request->has('max_carryover_minutes') ? $request->integer('max_carryover_minutes') : null,
+            maxCarryoverMinutes: $request->input('max_carryover_minutes') !== null ? (int) $request->input('max_carryover_minutes') : null,
             isActive: $request->has('is_active') ? $request->boolean('is_active') : true,
         ));
 

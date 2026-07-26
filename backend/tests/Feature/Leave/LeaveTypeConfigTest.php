@@ -198,6 +198,34 @@ it('400s a negative max_carryover_minutes', function (): void {
         ->assertJsonPath('error.code', 'validation_failed');
 });
 
+it('stores an explicit null code and null max_carryover_minutes as NULL, not \'\' or 0', function (): void {
+    $manila = leaveTypeOffice();
+    $hrUser = leaveHrAdminOf($manila);
+
+    Sanctum::actingAs($hrUser);
+
+    $response = $this->postJson('/api/v1/office/leave-types', [
+        'office_id' => $manila->id,
+        'name' => 'Vacation Leave',
+        'code' => null,
+        'is_paid' => true,
+        'requires_attachment' => false,
+        'deducts_balance' => true,
+        'is_cash_convertible' => false,
+        'max_carryover_minutes' => null,
+    ])->assertCreated();
+
+    $leaveTypeId = $response->json('data.id');
+
+    expect($response->json('data.code'))->toBeNull()
+        ->and($response->json('data.max_carryover_minutes'))->toBeNull();
+
+    $stored = LeaveType::query()->findOrFail($leaveTypeId);
+
+    expect($stored->code)->toBeNull()
+        ->and($stored->max_carryover_minutes)->toBeNull();
+});
+
 // --- Update -----------------------------------------------------------------
 
 it('lets an HR admin update a leave type for an office they administer, and logs it', function (): void {
@@ -298,4 +326,33 @@ it('400s updating a leave type with a negative max_carryover_minutes', function 
     ])
         ->assertStatus(400)
         ->assertJsonPath('error.code', 'validation_failed');
+});
+
+it('stores an explicit null code and null max_carryover_minutes on update as NULL, not \'\' or 0', function (): void {
+    $manila = leaveTypeOffice();
+    $hrUser = leaveHrAdminOf($manila);
+    $leaveType = LeaveType::factory()->for($manila, 'office')->create([
+        'code' => 'VL',
+        'max_carryover_minutes' => 4800,
+    ]);
+
+    Sanctum::actingAs($hrUser);
+
+    $response = $this->patchJson("/api/v1/office/leave-types/{$leaveType->id}", [
+        'name' => 'Vacation Leave',
+        'code' => null,
+        'is_paid' => true,
+        'requires_attachment' => false,
+        'deducts_balance' => true,
+        'is_cash_convertible' => false,
+        'max_carryover_minutes' => null,
+    ])->assertOk();
+
+    expect($response->json('data.code'))->toBeNull()
+        ->and($response->json('data.max_carryover_minutes'))->toBeNull();
+
+    $leaveType->refresh();
+
+    expect($leaveType->code)->toBeNull()
+        ->and($leaveType->max_carryover_minutes)->toBeNull();
 });
