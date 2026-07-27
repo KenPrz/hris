@@ -153,6 +153,15 @@ it('rejects negative minute columns on the summary', function (): void {
     expect(fn () => DailyAttendanceSummary::create($attributes))->toThrow(QueryException::class);
 });
 
+it('rejects a negative unpaid_overtime_minutes on the summary', function (): void {
+    $employee = summaryEmployee();
+
+    $attributes = summaryAttributes($employee, '2026-08-09');
+    $attributes['unpaid_overtime_minutes'] = -1;
+
+    expect(fn () => DailyAttendanceSummary::create($attributes))->toThrow(QueryException::class);
+});
+
 it('rejects a negative applied_bp on a line', function (): void {
     $employee = summaryEmployee();
     $summary = DailyAttendanceSummary::create(summaryAttributes($employee, '2026-08-09'));
