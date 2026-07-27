@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Requests\RequestState;
+use App\Domain\Requests\RequestType;
 use App\Models\Employee;
 use App\Models\Office;
 use App\Models\Request;
@@ -136,4 +137,65 @@ it('gives a bare actor with no employee record an empty queue in both, never a l
 
     expect($teamRes->json('data'))->toBe([])
         ->and($officeRes->json('data'))->toBe([]);
+});
+
+it('routes a two-hop leave request to /team while pending, never to /office', function (): void {
+    // Hop 1 (manager) is awaited: a pending `leave` request belongs in the manager's /team
+    // queue but must NOT show up in the HR /office queue yet — HR's hop hasn't arrived.
+    [$manager, $report] = makeManagerReportStranger();
+    $office = $manager->currentOffice;
+    $hrUser = User::factory()->create();
+    Employee::factory()->for($hrUser)->create(['current_office_id' => $office->id]);
+    $hrUser->hrAdminOffices()->attach($office->id);
+
+    $leave = Request::factory()->for($report, 'employee')->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::Pending,
+    ]);
+
+    $teamRes = actingAs($manager->user)->getJson('/api/v1/team/approvals')->assertOk();
+    $officeRes = actingAs($hrUser)->getJson('/api/v1/office/approvals')->assertOk();
+
+    expect(collect($teamRes->json('data'))->pluck('id')->all())->toContain($leave->id)
+        ->and(collect($officeRes->json('data'))->pluck('id')->all())->not->toContain($leave->id);
+});
+
+it('routes a manager-approved leave request to /office, never back to /team', function (): void {
+    // Hop 2 (HR) is awaited: a `manager_approved` leave request belongs in /office and must
+    // no longer appear in /team — the manager already decided their hop.
+    [$manager, $report] = makeManagerReportStranger();
+    $office = $manager->currentOffice;
+    $hrUser = User::factory()->create();
+    Employee::factory()->for($hrUser)->create(['current_office_id' => $office->id]);
+    $hrUser->hrAdminOffices()->attach($office->id);
+
+    $leave = Request::factory()->for($report, 'employee')->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::ManagerApproved,
+    ]);
+
+    $teamRes = actingAs($manager->user)->getJson('/api/v1/team/approvals')->assertOk();
+    $officeRes = actingAs($hrUser)->getJson('/api/v1/office/approvals')->assertOk();
+
+    expect(collect($teamRes->json('data'))->pluck('id')->all())->not->toContain($leave->id)
+        ->and(collect($officeRes->json('data'))->pluck('id')->all())->toContain($leave->id);
+});
+
+it('keeps a single-hop attendance_adjustment pending request in both queues, unchanged', function (): void {
+    [$manager, $report] = makeManagerReportStranger();
+    $office = $manager->currentOffice;
+    $hrUser = User::factory()->create();
+    Employee::factory()->for($hrUser)->create(['current_office_id' => $office->id]);
+    $hrUser->hrAdminOffices()->attach($office->id);
+
+    $adjustment = Request::factory()->for($report, 'employee')->create([
+        'type' => RequestType::AttendanceAdjustment,
+        'state' => RequestState::Pending,
+    ]);
+
+    $teamRes = actingAs($manager->user)->getJson('/api/v1/team/approvals')->assertOk();
+    $officeRes = actingAs($hrUser)->getJson('/api/v1/office/approvals')->assertOk();
+
+    expect(collect($teamRes->json('data'))->pluck('id')->all())->toContain($adjustment->id)
+        ->and(collect($officeRes->json('data'))->pluck('id')->all())->toContain($adjustment->id);
 });

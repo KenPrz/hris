@@ -10,10 +10,12 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * The two scoped views of the pending queue. Each is a subset of the in-scope-minus-self
- * set RequestAuthority::canDecide accepts — /team by the org chart (direct reports),
- * /office by HR office membership — so leave and overtime appear in them automatically
- * (no type filter). The two queues are VIEWS, not a new authority: canDecide is unchanged.
+ * The two scoped views of the queue awaiting each hat's decision. Each is a subset of the
+ * in-scope-minus-self set RequestAuthority::canDecide accepts — /team by the org chart
+ * (direct reports), /office by HR office membership. /team is state=pending only (the
+ * manager's hop, for both single- and two-hop types); /office is hop-aware — a single-hop
+ * type as soon as it's pending, or ANY type once it reaches manager_approved (HR's hop).
+ * The two queues are VIEWS, not a new authority: canDecide is unchanged.
  *
  * @return Builder<Request>
  */
@@ -50,9 +52,23 @@ final class ApprovalQueues
             ->whereIn('current_office_id', $officeIds)
             ->pluck('id');
 
-        return self::pending()
+        // single-hop request types (those with requiresHrStep()===false). Kept explicit and
+        // in sync with RequestType::requiresHrStep() — as new single-hop types are added,
+        // list them here.
+        $singleHopTypes = [RequestType::AttendanceAdjustment->value];
+
+        // /office awaits HR's hop: a single-hop request is HR's the moment it's pending (HR
+        // is the only decider it ever needs), while a two-hop request only reaches HR once
+        // the manager has cleared hop 1 (manager_approved) — a two-hop request still in
+        // `pending` belongs to /team alone.
+        return Request::query()
             ->whereIn('employee_id', $memberIds)
-            ->where('employee_id', '!=', $user->employee?->id);
+            ->where('employee_id', '!=', $user->employee?->id)
+            ->where(function (Builder $q) use ($singleHopTypes): void {
+                $q->where(fn (Builder $s) => $s->where('state', RequestState::Pending)->whereIn('type', $singleHopTypes))
+                    ->orWhere('state', RequestState::ManagerApproved);
+            })
+            ->latest();
     }
 
     /** @return Builder<Request> */
