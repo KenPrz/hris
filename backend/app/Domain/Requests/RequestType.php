@@ -9,6 +9,7 @@ enum RequestType: string
 {
     case AttendanceAdjustment = 'attendance_adjustment';
     case Leave = 'leave';
+    case Overtime = 'overtime';
 
     /** Whether this type is a two-hop (manager -> HR) flow, vs. single-hop manager-only. */
     public function requiresHrStep(): bool
@@ -16,6 +17,7 @@ enum RequestType: string
         return match ($this) {
             self::AttendanceAdjustment => false,
             self::Leave => true,
+            self::Overtime => false,
         };
     }
 }
