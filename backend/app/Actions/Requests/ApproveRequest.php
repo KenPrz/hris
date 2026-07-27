@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Actions\Requests;
 
+use App\Domain\Cutoff\CutoffGuard;
 use App\Domain\Requests\RequestAuthority;
 use App\Domain\Requests\RequestEffectResolver;
 use App\Domain\Requests\RequestState;
 use App\Exceptions\Domain\RequestNotPending;
+use App\Models\Employee;
 use App\Models\Request;
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -60,6 +62,14 @@ final class ApproveRequest
             $isFinalHop = ! $twoHop || $locked->state === RequestState::ManagerApproved;
 
             if ($isFinalHop) {
+                // Serialize the cutoff read against a concurrent CloseCutoff for this
+                // employee — the same per-employee row lock ComputeDailySummary/CloseCutoff
+                // take before freezing. Only the final hop touches a summary (via the
+                // effect's recompute); a manager's hop-1 advance never does, so it takes
+                // neither this lock nor the guard. Must precede assertOpen and the effect.
+                Employee::query()->lockForUpdate()->findOrFail($locked->employee_id);
+                CutoffGuard::assertOpen($locked);
+
                 $this->effects->for($locked->type)->applyOnApproval($locked, $approver->id);
 
                 $locked->update([
