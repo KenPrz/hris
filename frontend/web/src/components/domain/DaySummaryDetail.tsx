@@ -47,9 +47,10 @@ function bpToPercent(bp: number): string {
 export function DaySummaryDetail({ summary }: DaySummaryDetailProps) {
   if (summary === undefined) return null
 
-  const { worked_minutes, lines, is_incomplete } = summary
+  const { worked_minutes, lines, is_incomplete, unpaid_overtime_minutes } = summary
   const overtime = hasOvertimeLine(lines)
   const premium = hasPremiumLine(lines)
+  const hasUnpaidExcess = unpaid_overtime_minutes > 0
 
   return (
     <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
@@ -60,7 +61,24 @@ export function DaySummaryDetail({ summary }: DaySummaryDetailProps) {
         {is_incomplete ? <Tag kind="warning">incomplete</Tag> : null}
         {overtime ? <Tag kind="neutral">OT</Tag> : null}
         {premium ? <Tag kind="neutral">premium</Tag> : null}
+        {hasUnpaidExcess ? <Tag kind="warning">unpaid OT</Tag> : null}
       </div>
+
+      {hasUnpaidExcess ? (
+        // Overtime worked beyond what was pre-authorized: the compute engine records it but
+        // prices none of it (M6c — no authorization, no premium). Surfaced as a muted line
+        // so the employee sees WHY the priced total is short of the hours they were at their
+        // desk, styled like the line-item rows below rather than as a priced line itself.
+        <div
+          className="flex items-center justify-between"
+          style={{ font: 'var(--t-caption)', letterSpacing: 'var(--ls-caption)', color: 'var(--ink-muted)' }}
+        >
+          <span>Unpaid excess</span>
+          <span>
+            <Duration minutes={unpaid_overtime_minutes} />
+          </span>
+        </div>
+      ) : null}
 
       {lines.length > 0 ? (
         <ul className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
