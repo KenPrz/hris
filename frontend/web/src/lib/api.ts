@@ -168,6 +168,7 @@ export type DailySummary = {
   worked_minutes: number
   late_minutes: number
   undertime_minutes: number
+  unpaid_overtime_minutes: number
   status: string
   is_incomplete: boolean
   rule_version_id: string | null
@@ -401,16 +402,18 @@ export type LeaveGrantInput = {
 
 // ---------------------------------------------------------------------------
 // Wire types — verified against app/Http/Resources/RequestResource.php,
-// app/Http/Controllers/Attendance/SubmitController.php, and
-// app/Http/Controllers/Leave/SubmitLeaveRequestController.php. `RequestResource#detail` branches on
-// `type`: an `attendance_adjustment` request carries `AttendanceAdjustmentDetail`, a
-// `leave` request carries `LeaveRequestDetail`. `RequestDetail` is their union (plus
-// `null`, which the resource returns for a still-unbacked corner) so every consumer of
-// `RequestRecord.detail` narrows on `request.type` before reading type-specific fields.
+// app/Http/Controllers/Attendance/SubmitController.php,
+// app/Http/Controllers/Leave/SubmitLeaveRequestController.php, and
+// app/Http/Controllers/Overtime/SubmitOvertimeRequestController.php. `RequestResource#detail`
+// branches on `type`: an `attendance_adjustment` request carries `AttendanceAdjustmentDetail`,
+// a `leave` request carries `LeaveRequestDetail`, and an `overtime` request carries
+// `OvertimeRequestDetail`. `RequestDetail` is their union (plus `null`, which the resource
+// returns for a still-unbacked corner) so every consumer of `RequestRecord.detail` narrows on
+// `request.type` before reading type-specific fields.
 // ---------------------------------------------------------------------------
 
 export type RequestState = 'pending' | 'manager_approved' | 'approved' | 'rejected' | 'cancelled'
-export type RequestType = 'attendance_adjustment' | 'leave'
+export type RequestType = 'attendance_adjustment' | 'leave' | 'overtime'
 export type AdjustmentOperation = 'add' | 'void' | 'amend'
 
 export type AttendanceAdjustmentDetail = {
@@ -430,7 +433,12 @@ export type LeaveRequestDetail = {
   amount_minutes: number
 }
 
-export type RequestDetail = AttendanceAdjustmentDetail | LeaveRequestDetail | null
+export type OvertimeRequestDetail = {
+  date: string // YYYY-MM-DD
+  minutes: number
+}
+
+export type RequestDetail = AttendanceAdjustmentDetail | LeaveRequestDetail | OvertimeRequestDetail | null
 
 export type RequestRecord = {
   id: string
@@ -461,6 +469,12 @@ export type LeaveRequestInput = {
   day_part: LeaveDayPart
   note: string
   attachment?: File | null
+}
+
+export type OvertimeRequestInput = {
+  date: string // YYYY-MM-DD
+  hours: number
+  note: string
 }
 
 export const api = {
@@ -626,6 +640,14 @@ export const api = {
       if (input.attachment) form.set('attachment', input.attachment)
       return request<RequestRecord>('/leave/requests', { method: 'POST', body: form })
     },
+  },
+  overtime: {
+    submitRequest: (input: OvertimeRequestInput) =>
+      request<RequestRecord>('/overtime/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      }),
   },
   requests: {
     mine: () => request<RequestRecord[]>('/requests'),
