@@ -16,6 +16,7 @@ final readonly class ComputedDay
         public int $workedMinutes,
         public int $lateMinutes,
         public int $undertimeMinutes,
+        public int $unpaidOvertimeMinutes,
         public bool $isIncomplete,
         public array $lines,
     ) {}

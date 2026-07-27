@@ -23,6 +23,7 @@ final class DailySummaryResource extends JsonResource
             'worked_minutes' => $this->worked_minutes,
             'late_minutes' => $this->late_minutes,
             'undertime_minutes' => $this->undertime_minutes,
+            'unpaid_overtime_minutes' => $this->unpaid_overtime_minutes,
             'status' => $this->status,
             'is_incomplete' => $this->is_incomplete,
             'rule_version_id' => $this->rule_version_id,

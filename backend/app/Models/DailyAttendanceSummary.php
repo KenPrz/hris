@@ -20,7 +20,7 @@ final class DailyAttendanceSummary extends Model
     protected $fillable = [
         'employee_id', 'date', 'office_id', 'day_type', 'is_rest_day', 'scheduled_minutes',
         'is_art82_exempt', 'rule_version_id', 'worked_minutes', 'late_minutes',
-        'undertime_minutes', 'status', 'is_incomplete', 'computed_at',
+        'undertime_minutes', 'unpaid_overtime_minutes', 'status', 'is_incomplete', 'computed_at',
     ];
 
     protected function casts(): array
@@ -34,6 +34,7 @@ final class DailyAttendanceSummary extends Model
             'worked_minutes' => 'integer',
             'late_minutes' => 'integer',
             'undertime_minutes' => 'integer',
+            'unpaid_overtime_minutes' => 'integer',
             'is_incomplete' => 'boolean',
             'computed_at' => 'datetime',
         ];
@@ -56,7 +57,7 @@ final class DailyAttendanceSummary extends Model
             ->logOnly([
                 'employee_id', 'date', 'office_id', 'day_type', 'is_rest_day', 'scheduled_minutes',
                 'is_art82_exempt', 'rule_version_id', 'worked_minutes', 'late_minutes',
-                'undertime_minutes', 'status', 'is_incomplete', 'computed_at',
+                'undertime_minutes', 'unpaid_overtime_minutes', 'status', 'is_incomplete', 'computed_at',
             ])
             ->logOnlyDirty()
             ->useLogName('daily_attendance_summary');
