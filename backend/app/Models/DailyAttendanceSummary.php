@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Pay\DayType;
+use Database\Factories\DailyAttendanceSummaryFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,7 +17,8 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 final class DailyAttendanceSummary extends Model
 {
-    use HasUuids, LogsActivity;
+    /** @use HasFactory<DailyAttendanceSummaryFactory> */
+    use HasFactory, HasUuids, LogsActivity;
 
     protected $fillable = [
         'employee_id', 'date', 'office_id', 'day_type', 'is_rest_day', 'scheduled_minutes',
