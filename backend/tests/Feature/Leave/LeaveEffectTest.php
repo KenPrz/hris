@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use App\Domain\Compute\RecomputeTrigger;
+use App\Domain\Leave\LeaveBalances;
 use App\Domain\Requests\RequestState;
 use App\Domain\Requests\RequestType;
+use App\Domain\Schedule\Weekday;
 use App\Exceptions\Domain\InsufficientLeaveBalance;
 use App\Models\Employee;
 use App\Models\LeaveDetail;
@@ -13,6 +15,8 @@ use App\Models\LeaveType;
 use App\Models\Office;
 use App\Models\RecomputeRun;
 use App\Models\Request;
+use App\Models\ShiftTemplate;
+use App\Models\ShiftTemplateDay;
 use App\Models\User;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,11 +33,36 @@ uses(RefreshDatabase::class);
 | (source=leave_taken) at approved, insufficient balance rolls the whole approval back
 | (state stays manager_approved, no row), and an event type (deducts_balance=false) writes
 | no ledger row at all. Bus::fake() proves the leave-span recompute is dispatched.
+|
+| Task 8 review Minor: the "no debit before approved" proof is ONE continuous test on a
+| single request — submit via the real POST /leave/requests, a real manager hop-1
+| approve, then a real HR hop-2 approve — rather than two separate fixtures where hop 2
+| seeded `manager_approved` directly (which only proves hop 2 in isolation, never that the
+| SAME request carried no debit through hop 1 into hop 2).
 */
 
 function leaveEffectOffice(): Office
 {
     return Office::factory()->create(['ip_allowlist' => null]);
+}
+
+/** Mon-Fri 08:00-18:00 (60m break), Sat/Sun rest — same shape as SubmitLeaveRequestTest's. */
+function leaveEffectOfficeWithSchedule(int $minutesPerLeaveDay = 480): Office
+{
+    $office = Office::factory()->create(['ip_allowlist' => null, 'minutes_per_leave_day' => $minutesPerLeaveDay]);
+
+    $template = ShiftTemplate::create(['office_id' => $office->id, 'name' => 'Office']);
+    foreach (Weekday::cases() as $wd) {
+        $rest = in_array($wd, [Weekday::Saturday, Weekday::Sunday], true);
+        ShiftTemplateDay::create([
+            'shift_template_id' => $template->id, 'weekday' => $wd, 'is_rest' => $rest,
+            'start_minute' => $rest ? null : 480, 'end_minute' => $rest ? null : 1080,
+            'break_minutes' => $rest ? null : 60,
+        ]);
+    }
+    $office->update(['default_shift_template_id' => $template->id]);
+
+    return $office;
 }
 
 /** @return array{0: User, 1: Employee} */
@@ -75,43 +104,12 @@ function managerApprovedLeaveRequest(Employee $report, Employee $manager, User $
     return $request->fresh();
 }
 
-it('writes no leave_ledger row at manager_approved (hop 1) — the debit is deferred to the final hop', function (): void {
-    $office = leaveEffectOffice();
-    [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
-    [, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
-    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => true]);
-
-    LeaveLedger::factory()->for($report, 'employee')->create([
-        'leave_type_id' => $leaveType->id,
-        'entry_type' => 'credit',
-        'minutes' => 2000,
-    ]);
-
-    $request = Request::factory()->for($report)->create([
-        'type' => RequestType::Leave,
-        'state' => RequestState::Pending,
-    ]);
-    LeaveDetail::factory()->for($request)->create([
-        'leave_type_id' => $leaveType->id,
-        'start_date' => '2026-08-03',
-        'end_date' => '2026-08-04',
-        'amount_minutes' => 960,
-    ]);
-
-    Sanctum::actingAs($managerUser);
-    $this->postJson("/api/v1/requests/{$request->id}/approve")
-        ->assertOk()
-        ->assertJsonPath('data.state', 'manager_approved');
-
-    expect(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(0);
-});
-
-it('debits exactly one leave_ledger row at approved (hop 2, HR) and drops the derived balance', function (): void {
+it('proves no debit through hop 1, then exactly one on hop 2, on the SAME request: submit -> manager approve (no row) -> HR approve (one row)', function (): void {
     Bus::fake();
 
-    $office = leaveEffectOffice();
+    $office = leaveEffectOfficeWithSchedule(480);
     [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
-    [, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [$reportUser, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
     [$hrUser] = leaveEffectHrAdmin($office);
     $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => true]);
 
@@ -121,10 +119,35 @@ it('debits exactly one leave_ledger row at approved (hop 2, HR) and drops the de
         'minutes' => 2000,
     ]);
 
-    $request = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType);
+    // Submit for real: Monday 2026-08-03 through Tuesday 2026-08-04, 2 scheduled working
+    // days at 480 minutes/day = 960 minutes, server-computed (never client-supplied).
+    Sanctum::actingAs($reportUser);
+    $submitted = $this->postJson('/api/v1/leave/requests', [
+        'leave_type_id' => $leaveType->id,
+        'start_date' => '2026-08-03',
+        'end_date' => '2026-08-04',
+        'day_part' => 'full',
+        'note' => 'Family trip.',
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.state', 'pending')
+        ->assertJsonPath('data.detail.amount_minutes', 960);
 
+    $requestId = $submitted->json('data.id');
+
+    expect(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(0);
+
+    // Hop 1 — the manager. Still no debit; state advances only to manager_approved.
+    Sanctum::actingAs($managerUser);
+    $this->postJson("/api/v1/requests/{$requestId}/approve")
+        ->assertOk()
+        ->assertJsonPath('data.state', 'manager_approved');
+
+    expect(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(0);
+
+    // Hop 2 — HR, the final hop. Exactly one debit row, on THIS SAME request.
     Sanctum::actingAs($hrUser);
-    $this->postJson("/api/v1/requests/{$request->id}/approve")
+    $this->postJson("/api/v1/requests/{$requestId}/approve")
         ->assertOk()
         ->assertJsonPath('data.state', 'approved')
         ->assertJsonPath('data.decided_by', $hrUser->id);
@@ -135,17 +158,17 @@ it('debits exactly one leave_ledger row at approved (hop 2, HR) and drops the de
     $debit = $debits->first();
     expect($debit->source)->toBe('leave_taken')
         ->and($debit->minutes)->toBe(960)
-        ->and($debit->request_id)->toBe($request->id)
+        ->and($debit->request_id)->toBe($requestId)
         ->and($debit->created_by)->toBe($hrUser->id)
         ->and($debit->employee_id)->toBe($report->id)
         ->and($debit->leave_type_id)->toBe($leaveType->id);
 
-    expect(App\Domain\Leave\LeaveBalances::forEmployee($report->fresh())[$leaveType->id])->toBe(2000 - 960);
+    expect(LeaveBalances::forEmployee($report->fresh())[$leaveType->id])->toBe(2000 - 960);
 
     Bus::assertBatched(fn (PendingBatch $batch): bool => $batch->jobs->count() === 2);
 
     $run = RecomputeRun::query()->where('trigger_type', RecomputeTrigger::Leave)->sole();
-    expect($run->trigger_id)->toBe($request->id)
+    expect($run->trigger_id)->toBe($requestId)
         ->and($run->pair_count)->toBe(2);
 });
 
@@ -176,7 +199,7 @@ it('rolls back the whole approval when the balance is insufficient: state stays 
         ->and($fresh->decided_at)->toBeNull();
 
     expect(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(0);
-    expect(App\Domain\Leave\LeaveBalances::forEmployee($report->fresh())[$leaveType->id] ?? 0)->toBe(500);
+    expect(LeaveBalances::forEmployee($report->fresh())[$leaveType->id] ?? 0)->toBe(500);
 });
 
 it('approves an event type (deducts_balance=false) with NO ledger row at all', function (): void {
