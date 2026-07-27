@@ -314,10 +314,13 @@ themself, however broad their own scope otherwise reaches.
 **M6a generalized the read/decision surface off attendance specifically.** M3.6 shipped
 everything under `/attendance/adjustments/*`; M6a moved the read, decide, and queue routes
 to the type-agnostic `/requests/*` and `/team/approvals` / `/office/approvals` below, so a
-future request type (leave, M6b-b; overtime pre-authorization, M6c) is served by the exact
-same routes with no new endpoints. **Submission stays type-specific** — there is still no
-generic `POST /requests`, only `POST /attendance/adjustments` below — because what a
-submission needs to validate (an `operation`, a `target_log_id`, a `direction`) is
+new request type is served by the exact same routes with no new endpoints — **M6b-b landed
+the first one, leave** (its own submission endpoint and detail shape are below, under
+"Leave requests"), and overtime pre-authorization (M6c) reuses this same surface a second
+time. **Submission stays type-specific** — there is still no generic `POST /requests`, only
+a per-type submit route (`POST /attendance/adjustments` below, `POST /leave/requests`
+below) — because what a submission needs to validate (an `operation`/`target_log_id`/
+`direction` for a correction; a `leave_type_id`/date range/`day_part` for leave) is
 irreducibly per-type; only the shape *after* a request exists is shared.
 
 ### Submit
@@ -365,11 +368,14 @@ reachable through the scoped download endpoint below.
 ### Approve / reject / cancel
 
 **M6a moved these three off `/attendance/adjustments/{request}/*` onto the generalized
-`/requests/{request}/*`** — same behavior, same authority rule, same status codes; only the
-URL changed. `{request}` is any request type's id (still only `attendance_adjustment`
-today); the action dispatches its effect by `type` (`RequestEffectFactory` →
-`RequestEffect`), so approving a future leave or overtime request will run through this
-exact same route with a different effect resolved underneath, not a new endpoint.
+`/requests/{request}/*`** — same URL, same three verbs, for **every** request type;
+`{request}` is any request type's id (`attendance_adjustment` or, since M6b-b, `leave`).
+The action dispatches its effect by `type` (`RequestEffectFactory` → `RequestEffect`), so
+approving a leave (or, later, overtime) request runs through this exact same route with a
+different effect resolved underneath, not a new endpoint. **M6b-b is the first type where
+approve does not always mean "final"** — see "Leave requests," below, for the full two-hop
+shape; what follows here is the single-hop case M6a shipped, still exactly how
+`attendance_adjustment` behaves today.
 
 ```
 POST /api/v1/requests/{request}/approve   # auth:sanctum
@@ -379,8 +385,16 @@ POST /api/v1/requests/{request}/approve   # auth:sanctum
   → 422 invalid_adjustment_target   # a void/amend target is missing, not the requester's,
                                      #   or already annulled by an earlier approval
                                      #   (attendance_adjustment's own effect failure — a
-                                     #   future request type's effect fails with its own code)
+                                     #   different request type's effect fails with its own
+                                     #   code, e.g. leave's 422 insufficient_leave_balance,
+                                     #   below)
 ```
+
+**On a two-hop type (`leave`) this same route can instead land on `state: "manager_approved"`**
+— the manager's (hop-1) decision — with `decided_by`/`decided_at` still null and
+`manager_decided_by`/`manager_decided_at` set instead; only the SECOND `approve` call (HR's
+hop) reaches `state: "approved"` and stamps `decided_by`/`decided_at`. See "Leave requests,"
+below, for exactly which actor may call this route at which hop.
 
 ```
 POST /api/v1/requests/{request}/reject
@@ -391,6 +405,10 @@ POST /api/v1/requests/{request}/reject
   → 400 validation_failed      # decision_note missing or empty
 ```
 
+Reject always lands on `rejected` regardless of which hop it came from — there is no
+"partially rejected" state, and rejecting never dispatches a type's effect (an approved
+punch is never recorded, a leave balance is never debited) at either hop.
+
 ```
 POST /api/v1/requests/{request}/cancel     # requester only
   → 200 { data: <request, state: "cancelled"> }
@@ -398,32 +416,46 @@ POST /api/v1/requests/{request}/cancel     # requester only
   → 409 request_not_pending
 ```
 
-**Authority is "in-scope-minus-self": `RequestAuthority::canDecide`** — the requester must
-be visible to the approver under `EmployeeScope::visibleTo()` (self, direct reports, HR's
-office, or system-admin-all) **and** the approver must not be the requester. A manager
-approves their report's request, an HR admin their office's, a system admin anyone's; the
-requester approving their own — however broad their scope otherwise is — is refused exactly
-like an out-of-scope stranger, `404`, never a different status that would confirm "this is
-yours, you just can't approve it." **Cancel has its own, narrower rule**: only the requester
-may cancel, so a manager or HR admin who could approve the request may **not** cancel it on
-the requester's behalf.
+**Cancel is withdrawable from `pending` OR `manager_approved`** (M6b-b broadened it from
+M6a's `pending`-only) — a two-hop leave request awaiting HR's hop is never stuck just
+because a manager already signed off on it; only `approved`/`rejected`/`cancelled` (already
+terminal) refuse with `409`.
 
-**Order of checks, and why it's fixed:** authority (`404`) → pending (`409`) → the effect,
-which can itself fail (`422 invalid_adjustment_target`, rolling back the whole approval —
-the request stays pending). Reject's `decision_note` requiredness is checked **last**,
-*inside* the action, deliberately after authority and pending — validating it at the HTTP
-layer would let an out-of-scope prober distinguish "exists but hidden" (`400` on an empty
-body) from "doesn't exist" (`404`), the exact existence leak the 404-not-403 rule exists to
-close. So an out-of-scope reject with an empty body is still `404`, never `400`.
+**Authority is "in-scope-minus-self": `RequestAuthority::canDecide`**, now state- and
+type-aware since M6b-b. For a single-hop type (`attendance_adjustment`) it is unchanged
+from M6a: the requester must be visible to the approver under `EmployeeScope::visibleTo()`
+(self, direct reports, HR's office, or system-admin-all) **and** the approver must not be
+the requester — a manager approves their report's request, an HR admin their office's, a
+system admin anyone's. For a two-hop type (`leave`), which actor may act depends on the
+CURRENT hop — the manager alone at `pending`, HR alone (and never the same actor who
+decided hop 1) at `manager_approved` — the full routing is under "Leave requests," below,
+and `05-rbac.md`. In every case the requester approving their own request — however broad
+their scope otherwise is — is refused exactly like an out-of-scope stranger, `404`, never a
+different status that would confirm "this is yours, you just can't approve it." **Cancel
+has its own, narrower rule**: only the requester may cancel, so a manager or HR admin who
+could approve the request may **not** cancel it on the requester's behalf, at either hop.
 
-**Approval is transactional with its effect.** `RequestEffectFactory::for($request->type)`
-resolves the type's `RequestEffect` (today, always `AttendanceAdjustmentEffect`, delegating
-to `ApplyAttendanceAdjustment`) and calls it inside the same lock `add` → `RecordPunch`
-(`source: adjustment`, `recorded_by` the approver); `void` → `RecordAnnulment`; `amend` →
-both. The effect call, plus the request's own state write, happen inside one
-`SELECT ... FOR UPDATE`-locked transaction — if the effect throws, nothing commits,
-including the state transition. An unmapped `type` reaching this factory is a programming
-error (a request type shipped with no effect wired), never a silent no-op approve.
+**Order of checks, and why it's fixed:** authority (`404`) → terminal (`409`) → the effect,
+which can itself fail (`422`, rolling back the whole approval — the request stays at
+whatever state it was in before the call). Reject's `decision_note` requiredness is checked
+**last**, *inside* the action, deliberately after authority and terminal-ness — validating
+it at the HTTP layer would let an out-of-scope prober distinguish "exists but hidden"
+(`400` on an empty body) from "doesn't exist" (`404`), the exact existence leak the
+404-not-403 rule exists to close. So an out-of-scope reject with an empty body is still
+`404`, never `400`.
+
+**Approval is transactional with its effect, and only on the hop that reaches `approved`.**
+`RequestEffectFactory::for($request->type)` resolves the type's `RequestEffect`
+(`AttendanceAdjustmentEffect`, delegating to `ApplyAttendanceAdjustment`; `LeaveEffect`
+since M6b-b, below) and calls it inside the same lock, but only when the decision about to
+be recorded is the FINAL one — for `attendance_adjustment` (single-hop) that is every
+decision; for `leave` (two-hop) that is HR's hop alone, never the manager's. `add` →
+`RecordPunch` (`source: adjustment`, `recorded_by` the approver); `void` → `RecordAnnulment`;
+`amend` → both; leave's final approval → `LeaveEffect`'s ledger debit, below. The effect
+call, plus the request's own state write, happen inside one `SELECT ... FOR UPDATE`-locked
+transaction — if the effect throws, nothing commits, including the state transition. An
+unmapped `type` reaching this factory is a programming error (a request type shipped with
+no effect wired), never a silent no-op approve.
 
 ### List mine, the two approval queues, show, and the attachment
 
@@ -476,9 +508,10 @@ reachable from inside the container network (`02-data-model.md`).
 generalization onto `/requests/*`, and the full correction-filing vertical in the browser
 (`/me/attendance`'s file-a-correction form, `/me/requests`, `/team/approvals`,
 `/office/approvals`) — proven end to end by `scripts/e2e-requests.sh` against the live
-stack. The state machine is still M3.6's single step, `pending → approved | rejected |
-cancelled` — the multi-step `draft → submitted → manager_approved → hr_approved → approved`
-machine leave will need is deferred to M6b-b (`06-roadmap.md`).
+stack. The state machine was still M3.6's single step, `pending → approved | rejected |
+cancelled`, at that point — **M6b-b widened it to the two-hop `pending → [manager_approved
+→] approved | rejected | cancelled` machine leave needs**, `manager_approved` reachable only
+by a `requiresHrStep()` type. See "Leave requests," below, and `06-roadmap.md`.
 
 ## Office — holidays *(M4a)*
 
@@ -800,10 +833,11 @@ Leave-type config per office, the office-wide day-length divisor, HR manual gran
 derived balance read — the pieces a leave *request* will need without there being a leave
 request yet. Everything a balance is built from lives in `leave_ledger`
 (`02-data-model.md`): an append-only row per grant or deduction, integer minutes, never a
-stored running total. **There is no self-service leave request in this milestone** — an
-employee cannot yet file for their own leave the way they can an attendance adjustment; that
-multi-step `draft → submitted → manager_approved → hr_approved → approved` machine is
-M6b-b, reusing the `requests` spine above once it exists.
+stored running total. **There was no self-service leave request in this milestone** — an
+employee could not yet file for their own leave the way they can an attendance adjustment;
+that landed in M6b-b, reusing the `requests` spine above and widening it to the two-hop
+`pending → manager_approved → approved` machine leave needs — see "Leave requests," just
+below.
 
 ### Leave-type config
 
@@ -919,6 +953,124 @@ employee-scoped variant is a **broader** read than granting above — `EmployeeS
 only HR may credit it; both routes share the 404-not-403 discipline, an out-of-scope
 subject indistinguishable from a nonexistent one.
 
+## Leave requests — filing and the two-hop approval machine *(M6b-b)*
+
+An employee filing their own leave against a type from the catalog above, and the first
+widening of the `requests` state machine since M6a: `pending → [manager_approved →]
+approved | rejected | cancelled`, the intermediate hop reachable only by a
+`RequestType::requiresHrStep()` type (`leave`, today). Decision, queue, and cancel all stay
+on the exact `/requests/*` / `/team/approvals` / `/office/approvals` routes M6a shipped —
+see "Attendance adjustments and the requests spine," above, for the shared mechanics; this
+section covers what's new: submission, and the two-hop decision routing.
+
+### Submit
+
+```
+POST /api/v1/leave/requests          # auth:sanctum — any employee, for their own record
+  { "leave_type_id": "0199…", "start_date": "2026-09-28", "end_date": "2026-09-30",
+    "day_part": "full" | "half", "note": "string, REQUIRED",
+    "attachment": file, OPTIONAL — pdf/jpg/jpeg/png, ≤10MB }
+  → 201 { data: <request, below> }
+  → 400 validation_failed                    # bad shape, or end_date before start_date
+  → 404 not_found                            # leave_type_id is out of the caller's own
+                                              #   current office, or doesn't exist
+  → 422 not_an_employee                      # the caller has no linked employee record
+  → 422 leave_type_inactive                  # the type has been retired (is_active: false)
+  → 422 leave_attachment_required            # the type requires_attachment and none was sent
+  → 422 leave_request_has_no_working_days    # the [start_date, end_date] range spans zero
+                                              #   scheduled working days (e.g. all rest days)
+```
+
+Not admin-gated (any signed-in employee files for themself, mirroring
+`POST /attendance/adjustments`) and not behind the `idempotent` middleware — a considered
+one-off filing, not a retryable network event. The `leave_type_id` is resolved **scoped to
+the employee's own current office**, never a caller-supplied office, so a foreign-office
+type 404s exactly like a nonexistent one (404-not-403) — `leave_type_inactive`/
+`leave_attachment_required` are only ever reachable for a type the caller already has
+visibility into, since the scope check runs first.
+
+**`amount_minutes` (in the detail shape below) is never client-supplied.** It's derived
+from `App\Domain\Leave\LeaveDays::scheduledWorkingDays()` — the scheduled working days the
+`[start_date, end_date]` range actually spans, a rest day inside the range never counted —
+times the office's `minutes_per_leave_day` (`day_part: "half"` halves the per-day rate). A
+range with zero scheduled working days is refused outright
+(`leave_request_has_no_working_days`) rather than filing a request that would debit
+nothing.
+
+**The initial state depends on whether the filer has a manager on file.** An employee with
+a `current_reports_to_id` starts `pending` (hop 1, the manager's); an employee with none
+(`current_reports_to_id` null) starts **`manager_approved`** — there is no hop-1 approver to
+wait on, so the request begins already at HR's hop rather than sitting `pending` with no
+one ever authorized to clear it.
+
+The request/detail shape returned by submit, and by every read:
+
+```json
+{ "data": {
+  "id": "0199…", "type": "leave", "state": "pending",
+  "note": "Family trip", "employee_id": "0199…",
+  "detail": { "leave_type_id": "0199…", "start_date": "2026-09-28",
+              "end_date": "2026-09-30", "day_part": "full", "amount_minutes": 1440 },
+  "decided_by": null, "decided_at": null, "decision_note": null,
+  "has_attachment": false
+} }
+```
+
+Same envelope shape as an `attendance_adjustment` request (above) — only `detail`'s inner
+fields differ by type, per `RequestResource`'s type branch.
+
+### The two-hop decision routing
+
+Decisions run through the exact same `/requests/{request}/approve|reject|cancel` routes
+M6a shipped (above) — no new endpoints — but **which actor may call `approve` depends on
+the request's current hop**, per `App\Domain\Requests\RequestAuthority::canDecide`:
+
+| State | Who may `approve` | What happens |
+| --- | --- | --- |
+| `pending` | The requester's manager, only | → `manager_approved`. `manager_decided_by`/`manager_decided_at` set; `decided_by`/`decided_at` stay null; **no effect fires — the ledger is untouched.** |
+| `manager_approved` | An HR admin of the requester's office, only — and NEVER the same user who decided hop 1 | → `approved`. `decided_by`/`decided_at` set; **`LeaveEffect` fires now** — see below. |
+| `approved`/`rejected`/`cancelled` | (terminal) | `409 request_not_pending` for anyone who had authority at some hop; `404` for a stranger — same existence-leak ordering as a single-hop request. |
+
+`reject` is callable at either hop by whichever actor could `approve` at that hop, and
+always lands on `rejected` with no effect ever dispatched, exactly like a single-hop
+reject. `cancel` (requester-only) works from `pending` OR `manager_approved` — a leave
+request awaiting HR is never stuck just because a manager already signed off on it.
+
+**Queue placement moves with the hop**, per `App\Domain\Requests\ApprovalQueues` (unchanged
+in shape from M6a): a `pending` leave request is on `/team/approvals` and NOT
+`/office/approvals` (HR has no authority yet); once `manager_approved`, it drops off
+`/team/approvals` and appears on `/office/approvals` (a single-hop type, by contrast,
+appears on `/office/approvals` from the moment it's `pending`).
+
+**`LeaveEffect` is `leave`'s `RequestEffect`, and it only ever runs on the final (HR) hop:**
+
+```
+POST /api/v1/requests/{request}/approve   # HR's hop on a leave request
+  → 200 { data: <request, state: "approved", decided_by, decided_at> }
+  → 422 insufficient_leave_balance   # would debit more than the employee's derived balance;
+                                      #   details: { leave_type_id, requested_minutes,
+                                      #              available_minutes }; the whole approval
+                                      #   rolls back — the request stays manager_approved
+```
+
+For a `deducts_balance` type it debits `leave_ledger` exactly `detail.amount_minutes`
+(`source: "leave_taken"`, `request_id` set), never before this hop and never for a rejected
+or cancelled request at either hop. An **event** type (`deducts_balance: false`) never
+touches the ledger at all — only its span gets recomputed. Either way, the approved date
+range is recomputed after commit; once that queued recompute drains, each day in the span
+that has no punches, isn't a rest day, and has scheduled minutes prices as a
+`leave_with_pay` line at a flat 100% (`applied_bp: 10000`), `rule_version_id` staying null
+on that day even if a `pay_rules` version is configured — it was never used to price the
+line. See `02-data-model.md` for the full compute-integration detail.
+
+`scripts/e2e-leave.sh` proves the whole chain live: HR grants a balance, the employee
+files a 3-scheduled-working-day request, it shows up on the manager's queue and not HR's,
+the manager's decision moves it to `manager_approved` with the balance and the raw
+`leave_ledger` debit-row count completely unchanged and moves it onto HR's queue, HR's
+final decision is what debits the ledger and triggers the recompute, and a second,
+independent request that is instead rejected at HR's hop leaves the balance and the
+debit-row count untouched.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -952,6 +1104,10 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 422 | `cannot_punch_self` | An HR/admin using the manual entry endpoint to record their *own* punch (separation of duties). |
 | 422 | `invalid_adjustment_target` | Approving a `void`/`amend` whose target punch is missing, belongs to someone else, or was already annulled by an earlier approval. |
 | 422 | `leave_type_not_grantable` | Manually granting into a leave type whose `deducts_balance` is `false` — an event type banks no balance to credit (`details.leave_type_id`). |
+| 422 | `leave_type_inactive` | Filing a leave request, or manually granting, against a retired (`is_active: false`) leave type (`details.leave_type_id`). |
+| 422 | `leave_attachment_required` | Filing a leave request against a type with `requires_attachment: true` and no file attached (`details.leave_type_id`). |
+| 422 | `leave_request_has_no_working_days` | Filing a leave request whose `[start_date, end_date]` range spans zero scheduled working days (e.g. it falls entirely on rest days). |
+| 422 | `insufficient_leave_balance` | A leave request's final (HR) approval would debit more minutes than the employee's derived balance holds (`details.leave_type_id`/`requested_minutes`/`available_minutes`); the approval rolls back, the request stays `manager_approved`. |
 | 422 | `pay_rate_below_floor` | Creating a pay-rule version with one or more cells below `config('hris.pay_floors')` (`details.violations` names every offending cell). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
@@ -965,12 +1121,13 @@ you). See `05-rbac.md`.
 Cutoffs and payroll export are their own milestones (`06-roadmap.md`); their endpoints land
 with them. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
 spine; M5a's compute engine (above) now reads all three to price a day — **M5a is
-complete**. **M6b-a shipped the leave foundation** — leave-type config, the office leave
-day, HR manual grants, and derived balance reads, all above (`Leave — foundation`) — but a
-leave *request* an employee files themself does not exist yet: that, and overtime
-pre-authorization, still reuse the `requests` spine M3.6 built above, and their own detail
-tables and endpoints land with M6b-b and M6c respectively. Nothing yet *writes* a summary on
-demand — a manual, range-driven recompute is M5b's `RecomputeRange`, next.
+complete**. **M6b-a shipped the leave foundation** (leave-type config, the office leave
+day, HR manual grants, and derived balance reads, all above under "Leave — foundation"),
+and **M6b-b shipped the leave request itself and the two-hop approval machine** (above,
+under "Leave requests") — **M6 (requests and approvals) is now complete**. Overtime
+pre-authorization (M6c, next) reuses the exact same `requests` spine and the two-hop
+machinery leave just proved out, plugging in as a new `RequestType` and `RequestEffect`
+rather than a new endpoint shape.
 
 The **device ingestion contract** for biometric hardware is exposed, not built: the punch
 payload already accepts `source`, `device_id`, `geo_lat`/`geo_lng`, and an idempotency key —

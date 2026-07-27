@@ -146,6 +146,7 @@ export type SummaryLineKind =
   | 'overtime_day'
   | 'overtime_night'
   | 'holiday_unworked'
+  | 'leave_with_pay'
 
 export type DailySummaryLine = {
   kind: SummaryLineKind
@@ -399,20 +400,37 @@ export type LeaveGrantInput = {
 }
 
 // ---------------------------------------------------------------------------
-// Wire types — verified against app/Http/Resources/RequestResource.php and
-// app/Http/Controllers/Attendance/SubmitController.php.
+// Wire types — verified against app/Http/Resources/RequestResource.php,
+// app/Http/Controllers/Attendance/SubmitController.php, and
+// app/Http/Controllers/Leave/SubmitLeaveRequestController.php. `RequestResource#detail` branches on
+// `type`: an `attendance_adjustment` request carries `AttendanceAdjustmentDetail`, a
+// `leave` request carries `LeaveRequestDetail`. `RequestDetail` is their union (plus
+// `null`, which the resource returns for a still-unbacked corner) so every consumer of
+// `RequestRecord.detail` narrows on `request.type` before reading type-specific fields.
 // ---------------------------------------------------------------------------
 
-export type RequestState = 'pending' | 'approved' | 'rejected' | 'cancelled'
-export type RequestType = 'attendance_adjustment'
+export type RequestState = 'pending' | 'manager_approved' | 'approved' | 'rejected' | 'cancelled'
+export type RequestType = 'attendance_adjustment' | 'leave'
 export type AdjustmentOperation = 'add' | 'void' | 'amend'
 
-export type RequestDetail = {
+export type AttendanceAdjustmentDetail = {
   operation: AdjustmentOperation
   target_log_id: string | null
   direction: PunchDirection | null
   punched_at: string | null // ISO8601
 }
+
+export type LeaveDayPart = 'full' | 'half'
+
+export type LeaveRequestDetail = {
+  leave_type_id: string
+  start_date: string // YYYY-MM-DD
+  end_date: string // YYYY-MM-DD
+  day_part: LeaveDayPart
+  amount_minutes: number
+}
+
+export type RequestDetail = AttendanceAdjustmentDetail | LeaveRequestDetail | null
 
 export type RequestRecord = {
   id: string
@@ -420,7 +438,7 @@ export type RequestRecord = {
   state: RequestState
   note: string
   employee_id: string
-  detail: RequestDetail | null
+  detail: RequestDetail
   decided_by: string | null
   decided_at: string | null
   decision_note: string | null
@@ -433,6 +451,15 @@ export type CorrectionInput = {
   target_log_id?: string
   direction?: PunchDirection
   punched_at?: string // ISO8601
+  attachment?: File | null
+}
+
+export type LeaveRequestInput = {
+  leave_type_id: string
+  start_date: string // YYYY-MM-DD
+  end_date: string // YYYY-MM-DD
+  day_part: LeaveDayPart
+  note: string
   attachment?: File | null
 }
 
@@ -587,6 +614,18 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),
+    // Multipart, mirroring `api.adjustments.submit`: build FormData and DO NOT set
+    // Content-Type — the browser must set the multipart boundary itself.
+    submitRequest: (input: LeaveRequestInput) => {
+      const form = new FormData()
+      form.set('leave_type_id', input.leave_type_id)
+      form.set('start_date', input.start_date)
+      form.set('end_date', input.end_date)
+      form.set('day_part', input.day_part)
+      form.set('note', input.note)
+      if (input.attachment) form.set('attachment', input.attachment)
+      return request<RequestRecord>('/leave/requests', { method: 'POST', body: form })
+    },
   },
   requests: {
     mine: () => request<RequestRecord[]>('/requests'),

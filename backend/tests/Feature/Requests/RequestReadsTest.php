@@ -5,8 +5,11 @@ declare(strict_types=1);
 use App\Domain\Attendance\AdjustmentOperation;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Requests\RequestState;
+use App\Domain\Requests\RequestType;
 use App\Models\AttendanceAdjustmentDetail;
 use App\Models\Employee;
+use App\Models\LeaveDetail;
+use App\Models\LeaveType;
 use App\Models\Office;
 use App\Models\Request;
 use App\Models\User;
@@ -119,6 +122,31 @@ it('shows a request to an authorized approver', function (): void {
     $this->getJson("/api/v1/requests/{$request->id}")
         ->assertOk()
         ->assertJsonPath('data.id', $request->id);
+});
+
+it('shows a leave request with its leave detail shape', function (): void {
+    $office = readAdjustmentsOffice();
+    [$requesterUser, $requester] = readAdjustmentsEmployee($office);
+    $leaveType = LeaveType::factory()->create(['office_id' => $office->id]);
+    $request = Request::factory()->for($requester)->create(['type' => RequestType::Leave]);
+    LeaveDetail::factory()->for($request)->create([
+        'leave_type_id' => $leaveType->id,
+        'start_date' => '2026-08-10',
+        'end_date' => '2026-08-11',
+        'day_part' => 'full',
+        'amount_minutes' => 960,
+    ]);
+
+    Sanctum::actingAs($requesterUser);
+
+    $this->getJson("/api/v1/requests/{$request->id}")
+        ->assertOk()
+        ->assertJsonPath('data.type', 'leave')
+        ->assertJsonPath('data.detail.leave_type_id', $leaveType->id)
+        ->assertJsonPath('data.detail.start_date', '2026-08-10')
+        ->assertJsonPath('data.detail.end_date', '2026-08-11')
+        ->assertJsonPath('data.detail.day_part', 'full')
+        ->assertJsonPath('data.detail.amount_minutes', 960);
 });
 
 it('404s a request show for an unrelated employee — existence must not leak', function (): void {

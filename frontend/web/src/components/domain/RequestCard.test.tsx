@@ -64,6 +64,70 @@ describe('RequestCard', () => {
     expect(screen.getByText('Amend to 08:15')).toBeInTheDocument()
   })
 
+  it('summarizes a leave request as "<span> · <day part> · <cost>"', () => {
+    render(
+      <RequestCard
+        request={requestRecord({
+          type: 'leave',
+          detail: {
+            leave_type_id: 'lt1',
+            start_date: '2026-08-10',
+            end_date: '2026-08-12',
+            day_part: 'full',
+            amount_minutes: 1440,
+          },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    expect(screen.getByText('Aug 10–12 · full day · 3 days')).toBeInTheDocument()
+    expect(screen.getByText('Leave')).toBeInTheDocument()
+  })
+
+  it('summarizes a half-day leave request', () => {
+    render(
+      <RequestCard
+        request={requestRecord({
+          type: 'leave',
+          detail: {
+            leave_type_id: 'lt1',
+            start_date: '2026-08-10',
+            end_date: '2026-08-10',
+            day_part: 'half',
+            amount_minutes: 240,
+          },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    expect(screen.getByText('Aug 10 · half day · 4 hrs')).toBeInTheDocument()
+  })
+
+  it('renders a "Pending" tag for a pending request and a distinct "Awaiting HR" tag for manager_approved', () => {
+    const { rerender } = render(
+      <RequestCard request={requestRecord({ state: 'pending' })} onApprove={vi.fn()} onReject={vi.fn()} pending={false} />,
+    )
+    expect(screen.getByText('Pending')).toBeInTheDocument()
+    expect(screen.queryByText('Awaiting HR')).not.toBeInTheDocument()
+
+    rerender(
+      <RequestCard
+        request={requestRecord({ state: 'manager_approved' })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        pending={false}
+      />,
+    )
+    expect(screen.getByText('Awaiting HR')).toBeInTheDocument()
+    expect(screen.queryByText('Pending')).not.toBeInTheDocument()
+  })
+
   it('clicking Approve calls onApprove', () => {
     const onApprove = vi.fn()
     render(<RequestCard request={requestRecord()} onApprove={onApprove} onReject={vi.fn()} pending={false} />)

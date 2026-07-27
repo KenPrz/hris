@@ -31,6 +31,12 @@ final readonly class DailyComputationInput
      * @param  ?int  $scheduledStartMinute  Null when there is no scheduled start (a rest
      *                                      day) — late is always 0 in that case, never a
      *                                      phantom lateness against minute 0.
+     * @param  bool  $onApprovedLeave  Whether this employee has an APPROVED full-day
+     *                                 `leave` request covering this date (LeaveDayLookup,
+     *                                 resolved by the caller — this class stays pure and
+     *                                 never queries the database itself). Only consulted
+     *                                 on the no-punches path; a day with punches prices
+     *                                 from worked time regardless.
      */
     public function __construct(
         public array $punches,
@@ -42,5 +48,6 @@ final readonly class DailyComputationInput
         public int $breakMinutes,
         public bool $isArt82Exempt,
         public PayRates $rates,
+        public bool $onApprovedLeave,
     ) {}
 }

@@ -391,6 +391,50 @@ yet.
 
 ---
 
-*(Filing leave, the two-step manager-then-HR approval chain it introduces, and overtime
-pre-authorization follow in later milestones, now that the approval spine (M6a) and this
-leave foundation (M6b-a) both exist for them to plug into.)*
+## Requesting leave (M6b-b)
+
+Everything M6b-a's foundation was for: an employee can now actually take leave, and the
+approval it needs runs through two people, not one — the first request type where that's
+true.
+
+- **File a leave request, right from your own balance.** The same `/me/leave` screen that
+  shows your balances now has a form: pick a leave type you actually hold a balance for,
+  a date range, full day or half day, and a note — the same shape as filing an attendance
+  correction (M6a), so nothing new to learn. The amount it will cost is computed from the
+  *scheduled working days* in that range, not the calendar days — a weekend or a rest day
+  inside the range is never charged, and you can't inflate or shrink your own request by
+  typing a different number, because there isn't one to type.
+- **Two decisions, not one.** Filing lands the request with your manager first. Once they
+  approve, it moves to HR — your balance is completely untouched at this point, because
+  nothing is actually debited until the SECOND, final decision. HR's approval is what
+  actually spends the balance and marks the days as paid leave; if HR rejects instead, your
+  balance never moves at all, exactly as if the whole thing had never happened.
+- **The two queues from M6a now genuinely take turns.** A freshly-filed leave request shows
+  up on your manager's `/team/approvals`, and NOT yet on HR's `/office/approvals` — HR has
+  nothing to decide until the manager clears it. The moment the manager approves, the
+  request disappears from the manager's queue and appears on HR's — the same `<RequestCard>`
+  and decide action either queue already used for attendance corrections, now showing an
+  "Awaiting HR" tag while it waits on the second hop.
+- **A manager who's also HR still needs someone else.** If the same person administers the
+  requester's office AND is their manager, they still can't clear both decisions
+  themselves — the system requires the second decision come from someone else in HR, a
+  genuine second pair of eyes, not just a formality.
+- **The approved days show up as paid leave, not a gap.** Once HR approves, the days in the
+  range appear on the employee's month calendar priced at 100% — a `leave_with_pay` day,
+  the same place a worked day or a paid holiday would show its own breakdown — never a
+  blank space that looks like an unexplained absence.
+- **Withdraw it yourself, right up until it's decided.** `/me/requests` still lets you pull
+  back a leave request you filed, whether it's waiting on your manager OR already sitting
+  with HR — only once someone has actually decided it (approved or rejected) does
+  withdrawing stop being an option.
+
+**Deliberately not here yet:** a half-day request still debits half a day correctly but
+computes as a full day's paid leave (M7); nothing yet exports an approved leave day into a
+payroll-shaped report (also M7); and the chain still tops out at two decisions — there is
+no third hop for anything, because nothing needs one yet.
+
+---
+
+*(Overtime pre-authorization — a pre-approved cap on how much overtime the engine will
+actually pay for — follows in the next milestone, reusing this exact same request-and-
+approval machinery a third time.)*

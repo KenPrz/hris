@@ -44,7 +44,7 @@ them all:
 | --- | --- |
 | `employee.manage` | Create and edit employee records |
 | `employee.pii.edit` | Edit personally-identifiable / sensitive fields |
-| `leave.approve` | Approve a leave request (feature lands M6b-b) |
+| `leave.approve` | Approve a leave request (landed M6b-b — see the note below) |
 | `leave.manage` | Manage leave-type config and manually grant leave (M6b-a) |
 | `schedule.manage` | Manage schedules (M4) |
 | `holiday.manage` | Manage the holiday calendar (M4) |
@@ -79,6 +79,72 @@ The actual boundary on every one of those routes is `OfficeScope::administered`/
 role-management UI (M8) to display and assign, but no controller in this codebase branches
 on it today. Treat it as documentation of intent, not as a second, redundant gate behind
 `OfficeScope`.**
+
+**`leave.approve` reached the same state in M6b-b, and for the identical reason.** A leave
+request's decision runs through `POST /requests/{request}/approve|reject`, generalized
+already in M6a — there is no `leave`-specific route for either verb, so there is nothing
+for `leave.approve` to gate that isn't also reachable by an attendance-adjustment decision.
+The actual boundary is `App\Domain\Requests\RequestAuthority::canDecide` (below), which
+never reads a spatie permission at all — a manager or HR admin decides a leave request
+because the org chart or `hr_admin_offices` says they may, not because they hold
+`leave.approve`. It stays cataloged for the same future role-management reason
+`leave.manage`/`holiday.manage`/`schedule.manage` do.
+
+### Request approval authority — `RequestAuthority` and the two-hop leave routing *(M3.6, generalized M6a, widened M6b-b)*
+
+A third scope, purpose-built to a **request's current decision hop** rather than "who sees
+whom" (`EmployeeScope`) or "who administers this office" (`OfficeScope`).
+`App\Domain\Requests\RequestAuthority::canDecide(User, Request): bool` answers "may this
+actor decide THIS request right now" — state-aware since M6b-b, because a two-hop request's
+answer differs at `pending` versus `manager_approved`.
+
+Two pure building blocks:
+
+- **`isManagerOf(approver, request)`** — `true` when the request's employee's
+  `current_reports_to_id` is the approver's own employee id. The same derived-manager
+  relationship `EmployeeScope` reads (`current_reports_to_id`, above) — there is still no
+  "Manager" role.
+- **`isHrOf(approver, request)`** — `true` when the request's employee's
+  `current_office_id` is one of the approver's `hr_admin_offices`. The same pivot
+  `OfficeScope` reads.
+
+`canDecide` composes them, gated by state and by `RequestType::requiresHrStep()`:
+
+1. **Never the requester themselves** — checked first, regardless of hop, scope, or role.
+2. **A System Admin always may** — M6a's decision that a system admin keeps full API
+   authority even though `ApprovalQueues` gives them no *queue* (below); at a terminal
+   state this still yields `409` (decided) rather than `404` (never had authority),
+   preserving the ordering below.
+3. **At `pending`:** a single-hop type (`attendance_adjustment`) accepts `isManagerOf` OR
+   `isHrOf` — either authority is enough, exactly as M6a proved. A two-hop type (`leave`)
+   accepts `isManagerOf` **alone** — HR has no authority over a leave request that hasn't
+   cleared the manager's hop yet, even for their own office.
+4. **At `manager_approved`** (two-hop only, M6b-b): `isHrOf` **and** the approver is not the
+   user who decided hop 1 (`manager_decided_by`). This is a genuine two-person rule, not
+   just two titles — a manager who is *also* their own office's HR admin cannot clear both
+   hops of the same request by themselves; someone else in HR must decide hop 2.
+5. **Terminal** (`approved`/`rejected`/`cancelled`): the same in-scope test as `pending`
+   (`isManagerOf` OR `isHrOf`) — preserved so a previously-authorized actor's second
+   decision 409s (already decided) rather than 404ing (never had authority), the
+   existence-leak ordering `03-api.md` documents for the single-hop case and that holds
+   identically here.
+
+**`ApprovalQueues` mirrors this routing as two views, not a second authority model.**
+`/team/approvals` stays `pending`-only for every type — a two-hop request that has cleared
+hop 1 no longer belongs there, because the manager's decision is done.
+`/office/approvals` is hop-aware: a single-hop type the moment it is `pending` (HR is its
+only decider, same as M6a), or **any** type once it reaches `manager_approved` — a two-hop
+request appears there only once the manager has cleared it. Both queues remain `Builder`
+views over the same underlying authority, never a redefinition of who may decide what.
+
+**Cancellation has its own, narrower rule, unaffected by any of the above:** only the
+requester may cancel their own request (`App\Actions\Requests\CancelRequest`), from
+`pending` OR `manager_approved` — a manager or HR admin who could *approve* the request may
+never cancel it on the requester's behalf, at either hop.
+
+See `02-data-model.md` for the schema this widens (`manager_decided_by`/`manager_decided_at`,
+the `requests_state_check` widening) and `03-api.md` for the endpoint-level detail and the
+full state table.
 
 ### Scope — `EmployeeScope`
 

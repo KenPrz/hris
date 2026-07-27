@@ -18,10 +18,12 @@
 
 import { useState } from 'react'
 
-import type { RequestDetail, RequestRecord, RequestType } from '@/lib/api'
-import { timeInZone } from '@/lib/date'
+import type { AttendanceAdjustmentDetail, LeaveRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
+import { formatDateSpan, timeInZone } from '@/lib/date'
 import { getToken } from '@/lib/session'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
+import type { TagKind } from '@/components/Tag'
+import { Tag } from '@/components/Tag'
 import { Button } from '@/components/ui/Button'
 import { TextInput } from '@/components/ui/TextInput'
 
@@ -34,6 +36,27 @@ export interface RequestCardProps {
 
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
+  leave: 'Leave',
+}
+
+// `manager_approved` gets its OWN label here ("Awaiting HR", not "Pending") — the one
+// state distinction worth calling out on a card, since a manager-hop item and a fresh
+// hop-1 item read identically otherwise. Mirrors `/me/requests`'s own STATE_LABEL (each
+// file keeps its own copy, same duplication as TYPE_LABEL above — see that page's comment).
+const STATE_LABEL: Record<RequestState, string> = {
+  pending: 'Pending',
+  manager_approved: 'Awaiting HR',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  cancelled: 'Withdrawn',
+}
+
+const STATE_TAG_KIND: Record<RequestState, TagKind> = {
+  pending: 'warning',
+  manager_approved: 'warning',
+  approved: 'success',
+  rejected: 'error',
+  cancelled: 'neutral',
 }
 
 /**
@@ -43,7 +66,7 @@ const TYPE_LABEL: Record<RequestType, string> = {
  * `null` for a bare `void`), so each branch degrades to a plain description when the
  * field it needs isn't there rather than rendering "at null".
  */
-function summarizeAttendanceAdjustment(detail: RequestDetail): string {
+function summarizeAttendanceAdjustment(detail: AttendanceAdjustmentDetail): string {
   const time = detail.punched_at !== null ? timeInZone(detail.punched_at, OFFICE_TIME_ZONE) : null
   const direction = detail.direction !== null ? detail.direction.toUpperCase() : null
 
@@ -57,10 +80,47 @@ function summarizeAttendanceAdjustment(detail: RequestDetail): string {
   }
 }
 
+// The office's actual `minutes_per_leave_day` isn't available here — this card only
+// carries the leave detail, not the office config `LeaveUnit::readable` would need to
+// decompose `amount_minutes` exactly. 480 (an 8-hour day) is the office DEFAULT (see the
+// `minutes_per_leave_day` migration), so this is a display-only approximation of the
+// server's authoritative amount — not a recomputation of what it charges.
+const APPROX_MINUTES_PER_DAY = 480
+
+function formatLeaveCost(minutes: number): string {
+  const days = Math.floor(minutes / APPROX_MINUTES_PER_DAY)
+  const remainderMinutes = minutes % APPROX_MINUTES_PER_DAY
+  const hours = Math.floor(remainderMinutes / 60)
+  const mins = remainderMinutes % 60
+
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days} day${days === 1 ? '' : 's'}`)
+  if (hours > 0) parts.push(`${hours} hr${hours === 1 ? '' : 's'}`)
+  if (mins > 0) parts.push(`${mins} min`)
+
+  return parts.length > 0 ? parts.join(' ') : '0 days'
+}
+
+/** `"Aug 10–12 · full day · 3 days"` — the span (`formatDateSpan`), the day part in
+ * prose, and a rough cost decomposition of `amount_minutes` (see `formatLeaveCost`). */
+function summarizeLeave(detail: LeaveRequestDetail): string {
+  const span = formatDateSpan(detail.start_date, detail.end_date)
+  const dayPartLabel = detail.day_part === 'full' ? 'full day' : 'half day'
+  const cost = formatLeaveCost(detail.amount_minutes)
+
+  return `${span} · ${dayPartLabel} · ${cost}`
+}
+
 function summarize(request: RequestRecord): string {
   switch (request.type) {
     case 'attendance_adjustment':
-      return request.detail !== null ? summarizeAttendanceAdjustment(request.detail) : 'Attendance correction'
+      return request.detail !== null && 'operation' in request.detail
+        ? summarizeAttendanceAdjustment(request.detail)
+        : 'Attendance correction'
+    case 'leave':
+      return request.detail !== null && 'leave_type_id' in request.detail
+        ? summarizeLeave(request.detail)
+        : 'Leave request'
   }
 }
 
@@ -119,9 +179,12 @@ export function RequestCard({ request, onApprove, onReject, pending }: RequestCa
         <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
           {request.employee_id}
         </span>
-        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
-          {TYPE_LABEL[request.type]}
-        </span>
+        <div className="flex items-center" style={{ gap: 'var(--sp-xs)' }}>
+          <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+            {TYPE_LABEL[request.type]}
+          </span>
+          <Tag kind={STATE_TAG_KIND[request.state]}>{STATE_LABEL[request.state]}</Tag>
+        </div>
       </div>
 
       <span style={{ font: 'var(--t-body)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>

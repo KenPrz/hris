@@ -165,6 +165,26 @@ describe('/me/requests', () => {
     expect(withdrawButtons).toHaveLength(1)
   })
 
+  it('shows "Awaiting HR" for a manager_approved request, distinct from "Pending", and gives it a Withdraw button too — only the terminal (approved) request has none', async () => {
+    stubRequests({
+      data: [
+        request({ id: 'r-pending', state: 'pending', note: 'Forgot to punch out' }),
+        request({ id: 'r-manager-approved', state: 'manager_approved', note: 'Family trip' }),
+        request({ id: 'r-approved', state: 'approved', note: 'Missed morning punch', decision_note: 'ok' }),
+      ],
+    })
+    stubDecide()
+
+    renderPage()
+
+    expect(await screen.findByText('Family trip')).toBeInTheDocument()
+    expect(screen.getByText('Awaiting HR')).toBeInTheDocument()
+    expect(screen.getByText('Pending')).toBeInTheDocument()
+
+    const withdrawButtons = screen.getAllByRole('button', { name: 'Withdraw' })
+    expect(withdrawButtons).toHaveLength(2)
+  })
+
   it('clicking Withdraw calls the cancel mutation with the pending request\'s id', async () => {
     stubRequests({
       data: [
@@ -179,5 +199,18 @@ describe('/me/requests', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }))
 
     expect(mutate).toHaveBeenCalledWith({ id: 'r-pending', action: 'cancel' })
+  })
+
+  it('clicking Withdraw on a manager_approved request calls the cancel mutation with its id', async () => {
+    stubRequests({
+      data: [request({ id: 'r-manager-approved', state: 'manager_approved' })],
+    })
+    const mutate = stubDecide()
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }))
+
+    expect(mutate).toHaveBeenCalledWith({ id: 'r-manager-approved', action: 'cancel' })
   })
 })

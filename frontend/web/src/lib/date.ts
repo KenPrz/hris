@@ -77,6 +77,45 @@ export function monthLabel(month: string): string {
   return `${MONTH_NAMES[monthNumber - 1]} ${year}`
 }
 
+const MONTH_ABBR = MONTH_NAMES.map((name) => name.slice(0, 3))
+
+function parseDate(date: string): { year: number; monthNumber: number; day: number } {
+  const [yearPart, monthPart, dayPart] = date.split('-')
+  return { year: Number(yearPart), monthNumber: Number(monthPart), day: Number(dayPart) }
+}
+
+/** Inclusive calendar-day count between two `YYYY-MM-DD` dates — pure integer arithmetic
+ * via each date's Julian-ish epoch-day number, never a `Date` diff in milliseconds (which
+ * would silently miscount across a DST spring-forward/fall-back if either date were ever
+ * paired with a time). `daysBetweenInclusive('2026-08-10', '2026-08-12')` is `3`, not `2` —
+ * a leave request spans BOTH endpoints. */
+export function daysBetweenInclusive(start: string, end: string): number {
+  const s = parseDate(start)
+  const e = parseDate(end)
+  const startEpochDay = Date.UTC(s.year, s.monthNumber - 1, s.day) / 86_400_000
+  const endEpochDay = Date.UTC(e.year, e.monthNumber - 1, e.day) / 86_400_000
+  return endEpochDay - startEpochDay + 1
+}
+
+/** `('2026-08-10', '2026-08-12')` → `'Aug 10–12'`; `('2026-07-30', '2026-08-02')` →
+ * `'Jul 30 – Aug 2'`; `('2026-12-30', '2027-01-02')` → `'Dec 30, 2026 – Jan 2, 2027'`;
+ * a single-day span → just `'Aug 10'`. Pure string parsing, no `Date` round-trip: these
+ * are calendar dates already, not instants, so there is no host timezone to disagree with
+ * (see this file's own doc comment on why that distinction matters). */
+export function formatDateSpan(start: string, end: string): string {
+  const s = parseDate(start)
+  const e = parseDate(end)
+
+  if (start === end) return `${MONTH_ABBR[s.monthNumber - 1]} ${s.day}`
+  if (s.year !== e.year) {
+    return `${MONTH_ABBR[s.monthNumber - 1]} ${s.day}, ${s.year} – ${MONTH_ABBR[e.monthNumber - 1]} ${e.day}, ${e.year}`
+  }
+  if (s.monthNumber !== e.monthNumber) {
+    return `${MONTH_ABBR[s.monthNumber - 1]} ${s.day} – ${MONTH_ABBR[e.monthNumber - 1]} ${e.day}`
+  }
+  return `${MONTH_ABBR[s.monthNumber - 1]} ${s.day}–${e.day}`
+}
+
 /** Every `YYYY-MM-DD` in `month`, in order — pure string/integer arithmetic. */
 export function daysInMonth(month: string): string[] {
   const { year, monthNumber } = parseMonth(month)

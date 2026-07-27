@@ -19,4 +19,5 @@ enum SummaryLineKind: string
     case OvertimeDay = 'overtime_day';
     case OvertimeNight = 'overtime_night';
     case HolidayUnworked = 'holiday_unworked';
+    case LeaveWithPay = 'leave_with_pay';
 }

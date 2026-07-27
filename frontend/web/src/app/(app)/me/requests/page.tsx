@@ -2,17 +2,19 @@
 
 /**
  * "My requests" — every request the current employee has filed, with its status and (once
- * decided) outcome, plus a Withdraw action while it's still pending. This is deliberately
- * a self-contained row, not the shared `RequestCard` the manager/HR approval queues will
- * use once that lands — building the same list twice against the same schema is cheaper
- * than a cross-task import dependency, and a later task can adopt the card here if it
- * fits.
+ * decided) outcome, plus a Withdraw action while it's still NOT TERMINAL — `pending` OR
+ * `manager_approved` (a two-hop leave request past hop 1, still awaiting HR at hop 2;
+ * `CancelRequest` broadened its own guard from `! isPending` to `isTerminal` to match).
+ * This is deliberately a self-contained row, not the shared `RequestCard` the manager/HR
+ * approval queues will use once that lands — building the same list twice against the
+ * same schema is cheaper than a cross-task import dependency, and a later task can adopt
+ * the card here if it fits.
  *
  * Withdraw goes through `useDecideRequest`'s `cancel` action rather than a dedicated hook:
- * an employee cancelling their own pending request is rare enough that the plain,
- * non-optimistic round trip (invalidate-then-refetch `keys.requests.mine()`) is fine —
- * see that hook's doc comment for why the manager/HR queues need a different, optimistic
- * one instead.
+ * an employee cancelling their own pending/manager_approved request is rare enough that
+ * the plain, non-optimistic round trip (invalidate-then-refetch `keys.requests.mine()`) is
+ * fine — see that hook's doc comment for why the manager/HR queues need a different,
+ * optimistic one instead.
  */
 
 import type { RequestRecord, RequestState, RequestType } from '@/lib/api'
@@ -27,15 +29,18 @@ import { Button } from '@/components/ui/Button'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 
-// The backend's full `RequestType` set is one value today (`attendance_adjustment`) — see
 // `RequestRecord` in lib/api.ts. A `Record` here (rather than a fallback string) means a
 // future request type fails typecheck instead of silently rendering "undefined".
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
+  leave: 'Leave',
 }
 
 const STATE_LABEL: Record<RequestState, string> = {
   pending: 'Pending',
+  // Distinct from a fresh `pending` — hop 1 (the manager) already signed off; hop 2 (HR)
+  // is what's left. Mirrors `RequestCard`'s own STATE_LABEL.
+  manager_approved: 'Awaiting HR',
   approved: 'Approved',
   rejected: 'Rejected',
   cancelled: 'Withdrawn',
@@ -43,6 +48,7 @@ const STATE_LABEL: Record<RequestState, string> = {
 
 const STATE_TAG_KIND: Record<RequestState, TagKind> = {
   pending: 'warning',
+  manager_approved: 'warning',
   approved: 'success',
   rejected: 'error',
   cancelled: 'neutral',
@@ -82,7 +88,7 @@ function RequestRow({ request, withdrawing, onWithdraw }: RequestRowProps) {
         </span>
       ) : null}
 
-      {request.state === 'pending' ? (
+      {request.state === 'pending' || request.state === 'manager_approved' ? (
         <div>
           <Button variant="ghost" loading={withdrawing} disabled={withdrawing} onClick={() => onWithdraw(request.id)}>
             Withdraw

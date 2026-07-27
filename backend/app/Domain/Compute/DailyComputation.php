@@ -94,15 +94,33 @@ final class DailyComputation
         );
     }
 
-    /** A day with no punches at all: a rest day nobody was expected to work, a paid
-     *  holiday nobody worked, or a plain absence. Never incomplete. */
+    /** A day with no punches at all: a rest day nobody was expected to work, a scheduled
+     *  working day covered by approved leave, a paid holiday nobody worked, or a plain
+     *  absence. Approved leave takes precedence over a paid holiday landing the same day
+     *  (leave pays once, not leave + holiday premium). Never incomplete. */
     private static function computeUnworkedDay(DailyComputationInput $in): ComputedDay
     {
         $undertime = OvertimeThreshold::undertime(Minutes::zero(), Minutes::of($in->scheduledMinutes))->value;
 
         $lines = [];
 
-        if (
+        if ($in->onApprovedLeave && ! $in->isRestDay && $in->scheduledMinutes > 0) {
+            // Leave wins over a paid holiday that happens to fall on the same day — an
+            // employee on approved leave is paid for the leave, not paid twice (leave +
+            // holiday premium). A leave-with-pay minute is a normal-day minute: flat
+            // 10000 bp (100%), never routed through the premium matrix.
+            //
+            // Deliberately NOT gated on isArt82Exempt, unlike the holiday_unworked branch
+            // below. Art. 82 exempts managerial/field personnel from PREMIUMS (overtime,
+            // night differential, holiday pay) and from SIL accrual — not from base pay on
+            // an approved paid leave they hold. leave_with_pay is base 100% (a normal day's
+            // wage), not a premium, so an art82-exempt employee still receives it.
+            $lines[] = new ComputedLine(
+                kind: SummaryLineKind::LeaveWithPay,
+                minutes: $in->scheduledMinutes,
+                appliedBp: 10000,
+            );
+        } elseif (
             ! $in->isRestDay
             && ! $in->isArt82Exempt
             && self::isPaidHoliday($in->dayType)

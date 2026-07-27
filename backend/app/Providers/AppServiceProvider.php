@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Actions\Requests\RequestEffectFactory;
+use App\Domain\Requests\RequestEffectResolver;
 use App\Models\Employee;
 use App\Models\User;
 use App\Policies\EmployeePolicy;
@@ -15,6 +17,14 @@ use RuntimeException;
 
 final class AppServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        // The one production implementation. Tests bind a spy/fake over this interface
+        // (e.g. TwoHopApprovalTest's deferred-effect assertions) rather than mocking the
+        // final RequestEffectFactory class directly, which Mockery cannot do.
+        $this->app->bind(RequestEffectResolver::class, RequestEffectFactory::class);
+    }
+
     public function boot(): void
     {
         self::assertConfigured();

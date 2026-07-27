@@ -3,13 +3,51 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   addMonths,
   currentMonth,
+  daysBetweenInclusive,
   daysInMonth,
+  formatDateSpan,
   monthLabel,
   timeInZone,
   todayInZone,
   toIsoInZone,
   weekdayIndex,
 } from './date'
+
+describe('daysBetweenInclusive', () => {
+  it('counts a single day as 1', () => {
+    expect(daysBetweenInclusive('2026-08-10', '2026-08-10')).toBe(1)
+  })
+
+  it('counts a same-month span inclusively', () => {
+    expect(daysBetweenInclusive('2026-08-10', '2026-08-12')).toBe(3)
+  })
+
+  it('counts a span crossing a month boundary', () => {
+    expect(daysBetweenInclusive('2026-07-30', '2026-08-02')).toBe(4)
+  })
+
+  it('counts a span crossing a year boundary', () => {
+    expect(daysBetweenInclusive('2026-12-30', '2027-01-02')).toBe(4)
+  })
+})
+
+describe('formatDateSpan', () => {
+  it('renders a single-day span as just the one date', () => {
+    expect(formatDateSpan('2026-08-10', '2026-08-10')).toBe('Aug 10')
+  })
+
+  it('renders a same-month span as "Mon D–D"', () => {
+    expect(formatDateSpan('2026-08-10', '2026-08-12')).toBe('Aug 10–12')
+  })
+
+  it('renders a cross-month span with both month abbreviations', () => {
+    expect(formatDateSpan('2026-07-30', '2026-08-02')).toBe('Jul 30 – Aug 2')
+  })
+
+  it('renders a cross-year span with both years', () => {
+    expect(formatDateSpan('2026-12-30', '2027-01-02')).toBe('Dec 30, 2026 – Jan 2, 2027')
+  })
+})
 
 describe('addMonths', () => {
   it('rolls over into the next year', () => {

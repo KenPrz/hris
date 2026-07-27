@@ -23,6 +23,7 @@ use App\Http\Controllers\Employees\ShowEmployeeController;
 use App\Http\Controllers\Leave\GrantController as GrantLeaveController;
 use App\Http\Controllers\Leave\ListEmployeeLeaveController;
 use App\Http\Controllers\Leave\ListMyLeaveController;
+use App\Http\Controllers\Leave\SubmitLeaveRequestController;
 use App\Http\Controllers\Office\Holidays\CloneController as CloneHolidaysController;
 use App\Http\Controllers\Office\Holidays\CreateController as CreateHolidayController;
 use App\Http\Controllers\Office\Holidays\DeleteController as DeleteHolidayController;
@@ -87,6 +88,12 @@ Route::prefix('v1')->group(function (): void {
         // retryable network event). Submission stays type-specific; the read/decision
         // surface below is the shared, type-agnostic requests spine.
         Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
+
+        // Same shape as the attendance-adjustment submission above: any employee may file
+        // their own leave, not admin-gated, not behind idempotency middleware. The debit
+        // amount is server-computed from the scheduled working days in range, never
+        // client-supplied — see SubmitLeaveRequestController.
+        Route::post('/leave/requests', SubmitLeaveRequestController::class);
 
         // The two scope-filtered approval queues — a manager's direct reports and an HR
         // admin's office members — replace the old single combined

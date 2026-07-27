@@ -1015,12 +1015,21 @@ what will set them.
    fresh one plus its lines in the same transaction — so calling it twice for the same day
    (two rapid punches each triggering their own compute, or a future manual recompute)
    yields exactly one summary and never a duplicate line, with no upsert/on-conflict
-   trickery needed. **A line is only ever persisted when a `pay_rules` version was actually
-   configured for that date** — `rule_version_id` is non-null precisely when the summary
-   has lines, and null precisely when it doesn't (no configured version, or the calculator
-   itself produced none: an incomplete day, an unworked rest day, an unworked ordinary/
-   special day, …). This action never attributes a priced line to a rate that wasn't
-   actually in effect.
+   trickery needed. **A punch-derived, rule-priced line is only ever persisted when a
+   `pay_rules` version was actually configured for that date** — for those lines,
+   `rule_version_id` is non-null precisely when the summary carries one, and null precisely
+   when it doesn't (no configured version, or the calculator itself produced none: an
+   incomplete day, an unworked rest day, an unworked ordinary/special day, …). This action
+   never attributes a priced line to a rate that wasn't actually in effect.
+   **`leave_with_pay` (M6b-b, below) is the one line kind exempt from that gate**: it's a
+   flat 100%, resolved from `App\Domain\Leave\LeaveDayLookup` rather than the `pay_rules`
+   matrix, so it persists even on a date with no configured version — but `rule_version_id`
+   still stays null whenever `leave_with_pay` is the ONLY line the day carries, even if a
+   `pay_rules` version IS configured for that date, since no rule actually priced it. **The
+   corrected invariant, superseding an earlier draft of this document that read "any summary
+   with lines has a non-null `rule_version_id`": a summary carries a non-null
+   `rule_version_id` exactly when it has at least one punch-derived, rule-priced line —
+   never merely because it has lines at all.**
 
 **No pesos anywhere in either table.** Every minute column (`worked_minutes`,
 `late_minutes`, `undertime_minutes`, `scheduled_minutes`, `daily_summary_lines.minutes`) is
@@ -1047,7 +1056,8 @@ guard of its own — `App\Http\Controllers\Admin\PayRules\DeleteController`, `03
 so this FK is the only thing standing between a careless `DELETE` and a corrupted audit
 trail; `scripts/e2e-compute.sh` proves the refusal against the live database.) Nullable
 because a summary can be legitimately priced against the statutory floor with nothing
-persisted for it to reference — see step 4 above.
+persisted for it to reference — see step 4 above — or because the only line it carries is
+`leave_with_pay` (M6b-b, below), which is never priced from a `pay_rules` version at all.
 
 **The synchronous on-write trigger.** `App\Actions\Attendance\RecordPunch` — the sole
 writer of `attendance_logs` — registers a `DB::afterCommit()` callback that calls
@@ -1372,6 +1382,142 @@ an event type is refused 422 with no row written.
 
 ---
 
+## Leave requests: the two-hop (manager → HR) machine, and compute integration *(M6b-b)*
+
+M6b-a built the leave foundation — types, the ledger, manual grants, derived balances —
+and deliberately stopped short of a leave *request*. M6b-b is the second slice: an
+employee files their own leave request on the shared `requests` spine (above), and the
+approval machine widens for the first time since M6a, because leave is the first
+`RequestType` that genuinely needs two decisions instead of one.
+
+**`requests.state` widens to five values, and two new columns record the intermediate
+hop:**
+
+```sql
+alter table requests
+  add column manager_decided_by uuid references users(id) on delete set null,
+  add column manager_decided_at timestamptz;
+
+alter table requests drop constraint requests_state_check;
+alter table requests add constraint requests_state_check
+  check (state in ('pending','manager_approved','approved','rejected','cancelled'));
+
+alter table requests drop constraint requests_type_check;
+alter table requests add constraint requests_type_check
+  check (type in ('attendance_adjustment','leave'));
+```
+
+**`manager_approved` is the hop-1 (manager) decision on a two-hop request, and only a
+two-hop request ever enters it.** `App\Domain\Requests\RequestType::requiresHrStep()` is
+the one place that axis is named — `false` for `attendance_adjustment` (unchanged, still a
+single decision), `true` for the new `leave` type — and `App\Actions\Requests\ApproveRequest`
+reads it to decide whether the decision it is about to record is the FINAL one. A
+single-hop type still goes straight `pending → approved` on its one decision, exactly as
+M6a shipped it; a two-hop type's first decision (by the requester's manager) writes
+`manager_decided_by`/`manager_decided_at` — mirroring the existing `decided_by`/
+`decided_at` pair, but named separately because a two-hop request's SECOND decision writes
+`decided_by`/`decided_at` too, and the two must never be confused about which decision
+actually made the request `approved`. Only the transition INTO `approved` ever dispatches
+the request's `RequestEffect` (below) — the manager's hop-1 decision advances the state and
+stamps the two new columns, nothing else.
+
+**Per-hop authority is `App\Domain\Requests\RequestAuthority::canDecide`, now state- and
+type-aware** (`05-rbac.md` has the full authority argument): at `pending`, a two-hop
+request is the manager's alone — HR has no authority yet, even over their own office; at
+`manager_approved`, it flips to HR alone, and specifically excludes whoever just decided
+hop 1, so the same actor can never clear both hops of one request even if they happen to
+hold both authorities (e.g. a manager who is also their own office's HR admin). A
+single-hop request is unchanged: manager OR HR, either sufficient, exactly as M6a proved.
+Terminal states (`approved`/`rejected`/`cancelled`) preserve the same authority set so a
+second decision by a previously-authorized actor still `409`s rather than leaking a `404`
+that would imply "you never had authority here" — the same existence-leak discipline M6a
+established. `App\Actions\Requests\CancelRequest` (requester-only, its own narrower rule)
+widens the same way: a not-yet-terminal request is withdrawable from `pending` OR
+`manager_approved`, so a two-hop leave request awaiting HR is never stuck once a manager
+has signed off on it.
+
+**`ApprovalQueues` routes each hop to its own queue, unchanged in shape from M6a.**
+`/team/approvals` stays `pending`-only, for both single- and two-hop types — a two-hop
+request that has cleared hop 1 no longer belongs there. `/office/approvals` is hop-aware: a
+single-hop type the moment it is `pending` (HR is its only decider, same as M6a), OR ANY
+type once it reaches `manager_approved` — a two-hop request only ever appears there once
+the manager has cleared it.
+
+```sql
+create table leave_details (
+  request_id      uuid primary key references requests(id) on delete cascade,
+  leave_type_id   uuid not null references leave_types(id),
+  start_date      date not null,
+  end_date        date not null,
+  day_part        text not null,                    -- 'full' | 'half'
+  amount_minutes  integer not null,
+
+  check (day_part in ('full','half')),
+  check (amount_minutes > 0),
+  check (end_date >= start_date)
+);
+```
+
+**`leave_details` mirrors `attendance_adjustment_details` exactly** — the primary key IS
+`requests.id`, one request, one detail row, enforced by the database rather than by
+convention (the M3.6 section, above). `amount_minutes` is never client-supplied:
+`App\Http\Controllers\Leave\SubmitLeaveRequestController` derives it from
+`App\Domain\Leave\LeaveDays::scheduledWorkingDays()` (the `[start_date, end_date]` range's
+*scheduled working days only* — a rest day inside the range is never charged) times the
+office's `minutes_per_leave_day` (`day_part: 'half'` halves the per-day rate) — a client
+cannot inflate or shrink its own debit by sending a different number.
+`App\Actions\Leave\SubmitLeaveRequest` starts a request `manager_approved` rather than
+`pending` when the filing employee has no manager on file (`current_reports_to_id is
+null`) — there is no hop-1 approver to wait on, so the request begins already at HR's hop
+rather than sitting `pending` forever with no one authorized to ever clear it.
+
+**`App\Actions\Requests\Effects\LeaveEffect` is the leave `RequestEffect`, and it only ever
+runs on the FINAL hop.** `ApproveRequest` resolves it through the same
+`RequestEffectFactory` M6a built, and calls it only when the decision about to be recorded
+is the one that reaches `approved`. For a `deducts_balance` type it debits `leave_ledger`
+exactly `amount_minutes`, after locking the EMPLOYEE row
+(`Employee::lockForUpdate()`, not just the request row `ApproveRequest` already locks) —
+two different leave requests for the SAME employee are two different `requests` rows, so
+the request-level lock alone does not serialize two concurrent final-hop approvals against
+one balance; the employee lock does, and a debit that would overdraw throws
+`App\Exceptions\Domain\InsufficientLeaveBalance` (`422`), rolling the whole approval back —
+the request stays `manager_approved`, nothing is written. An event type
+(`deducts_balance: false`) never touches the ledger or takes this lock at all.
+**`leave_ledger.source` widens to admit `'leave_taken'`** alongside M6b-a's
+`'manual_grant'` — the debit's `reason` names the request it came from, and
+`leave_ledger.request_id` (nullable since M6b-a, unused until now) is finally populated.
+Both balance and event types get the approved span recomputed after commit
+(`App\Domain\Compute\RecomputeTrigger::Leave`, widening the `recompute_runs.trigger_type`
+CHECK the same way `holiday`/`pay_rule`/`shift_template`/`schedule_assignment`/
+`schedule_override`/`office_default` already do, M5b above) — a rejected request, at
+either hop, is never recomputed, because nothing about a day changes when a request that
+would have priced it differently gets refused instead.
+
+**Compute prices an approved leave day as `leave_with_pay`, a flat 100% independent of any
+`pay_rules` version.** `daily_summary_lines.kind`'s CHECK widens to admit
+`'leave_with_pay'` alongside the four worked kinds and `holiday_unworked` (M5a, above).
+`App\Domain\Leave\LeaveDayLookup::isOnApprovedLeave(employee, date)` — pure, no DB access
+of its own, `ComputeDailySummary` hands it in — is `true` exactly when an `approved` leave
+request's `leave_details` span covers that date; `App\Domain\Compute\DailyComputation`
+emits the line only on a day with no punches, that isn't a rest day, and that has
+scheduled minutes — it takes precedence over `holiday_unworked` when both would otherwise
+apply (an employee on approved leave over a paid holiday still shows the leave, not the
+holiday premium), and a rest day covered by leave gets no line at all, the same as an
+ordinary rest day gets none (leave never charges a day already off). See the corrected
+`rule_version_id` invariant in the M5a section, above — a `leave_with_pay` line persists
+even when no `pay_rules` version is configured for the date, and its presence never sets
+`rule_version_id`, unlike every other line kind.
+
+`scripts/e2e-leave.sh` proves the whole chain live: HR grants a balance, the employee files
+a 3-scheduled-working-day request, it appears on the manager's queue and not HR's, the
+manager's decision moves it to `manager_approved` with the balance and the raw
+`leave_ledger` debit-row count completely unchanged and moves the request onto HR's queue,
+HR's final decision is what actually debits the ledger and triggers the recompute that
+prices the span `leave_with_pay`, and a second request that is instead REJECTED at HR's hop
+leaves the balance and the debit-row count untouched.
+
+---
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -1436,3 +1582,10 @@ Stated plainly, since these are the reasons for the constraints above:
   balance cannot drift from it because no balance is ever stored — there is no column to
   drift. (`GrantLeave` only `create`s, no `updated_at` on the model;
   `LeaveBalances::forEmployee` derives `SUM(credit) - SUM(debit)` fresh on every read.)
+- A request cannot claim a `state` outside the five-value two-hop set, or a `type` outside
+  `attendance_adjustment`/`leave`. (`requests_state_check`/`requests_type_check`, M6b-b
+  above.)
+- A leave request's detail row cannot carry a non-positive `amount_minutes`, an `end_date`
+  before its `start_date`, or a `day_part` outside `full`/`half` — and it is deleted the
+  instant its parent request is. (`CHECK`s + `on delete cascade` on `leave_details`, M6b-b
+  above.)

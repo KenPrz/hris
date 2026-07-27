@@ -28,6 +28,7 @@ final class Request extends Model implements HasMedia
             'type' => RequestType::class,
             'state' => RequestState::class,
             'decided_at' => 'datetime',
+            'manager_decided_at' => 'datetime',
         ];
     }
 
@@ -45,6 +46,17 @@ final class Request extends Model implements HasMedia
     public function isPending(): bool
     {
         return $this->state === RequestState::Pending;
+    }
+
+    /** Approved/Rejected/Cancelled: nothing left to decide. A `manager_approved` request
+     *  is NOT terminal — it is still actionable, at hop 2. */
+    public function isTerminal(): bool
+    {
+        return in_array($this->state, [
+            RequestState::Approved,
+            RequestState::Rejected,
+            RequestState::Cancelled,
+        ], true);
     }
 
     public function registerMediaCollections(): void
@@ -73,5 +85,11 @@ final class Request extends Model implements HasMedia
     public function attendanceAdjustmentDetail(): HasOne
     {
         return $this->hasOne(AttendanceAdjustmentDetail::class);
+    }
+
+    /** @return HasOne<LeaveDetail, $this> */
+    public function leaveDetail(): HasOne
+    {
+        return $this->hasOne(LeaveDetail::class, 'request_id');
     }
 }

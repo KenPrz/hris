@@ -8,7 +8,9 @@ use App\Domain\Attendance\EffectivePunches;
 use App\Domain\Compute\DailyComputation;
 use App\Domain\Compute\DailyComputationInput;
 use App\Domain\Employment\EmploymentResolver;
+use App\Domain\Leave\LeaveDayLookup;
 use App\Domain\Pay\DayType;
+use App\Domain\Pay\SummaryLineKind;
 use App\Domain\Schedule\ScheduleResolver;
 use App\Models\DailyAttendanceSummary;
 use App\Models\DailySummaryLine;
@@ -57,6 +59,11 @@ use Illuminate\Support\Facades\DB;
  *    calculator itself produced no lines" (incomplete day, an unworked rest day, an
  *    unworked ordinary/special day, ...) collapse to the same persisted shape: no lines,
  *    rule_version_id null.
+ *  - leave_with_pay is the one line kind exempt from the pay-rule gate above: it's a flat
+ *    100%, resolved from LeaveDayLookup rather than the pay_rules matrix, so it persists
+ *    even on a date with no configured pay_rule version — but rule_version_id still stays
+ *    null in that case (and, in fact, whenever the ONLY line is leave_with_pay, even if a
+ *    pay_rule IS configured for the date) since no rule actually priced it.
  */
 final class ComputeDailySummary
 {
@@ -73,6 +80,8 @@ final class ComputeDailySummary
             : DayType::Ordinary;
 
         $schedule = (new ScheduleResolver)->resolve($employee, $date);
+
+        $onApprovedLeave = LeaveDayLookup::isOnApprovedLeave($employee, $date);
 
         $payRule = PayRule::query()
             ->whereDate('effective_from', '<=', $date)
@@ -97,13 +106,24 @@ final class ComputeDailySummary
             breakMinutes: $schedule->breakMinutes ?? 0,
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,
+            onApprovedLeave: $onApprovedLeave,
         ));
 
-        // Only ever persist lines priced against a pay_rules version that was actually
-        // configured for this date — never the statutory-floor stand-in above.
-        $lines = $payRule !== null ? $computed->lines : [];
+        // Only ever persist punch-derived lines priced against a pay_rules version that
+        // was actually configured for this date — never the statutory-floor stand-in
+        // above. leave_with_pay is the one exception: it's a flat 100%, independent of
+        // the pay_rules matrix entirely, so it persists even when no version is
+        // configured for the date.
+        $lines = $payRule !== null
+            ? $computed->lines
+            : array_values(array_filter($computed->lines, fn ($line): bool => $line->kind === SummaryLineKind::LeaveWithPay));
 
-        return DB::transaction(function () use ($employee, $date, $officeId, $dayType, $schedule, $isArt82Exempt, $payRule, $computed, $lines): DailyAttendanceSummary {
+        // rule_version_id is only ever attributed when a non-leave (punch-derived,
+        // rule-priced) line exists — a leave-only day (no pay_rule needed to price it)
+        // persists with rule_version_id null even though it does carry a line.
+        $hasRulePricedLine = array_any($lines, fn ($line): bool => $line->kind !== SummaryLineKind::LeaveWithPay);
+
+        return DB::transaction(function () use ($employee, $date, $officeId, $dayType, $schedule, $isArt82Exempt, $payRule, $computed, $lines, $hasRulePricedLine): DailyAttendanceSummary {
             // Serialize concurrent computes of the same employee-day — two rapid punches each
             // trigger a compute (Task 6), and an unlocked delete-then-insert would let both pass
             // the delete and race the unique(employee_id, date) insert into a raw 500. Locking the
@@ -124,7 +144,7 @@ final class ComputeDailySummary
                 'is_rest_day' => $schedule->isRestDay,
                 'scheduled_minutes' => $schedule->scheduledMinutes,
                 'is_art82_exempt' => $isArt82Exempt,
-                'rule_version_id' => $lines !== [] ? $payRule?->id : null,
+                'rule_version_id' => $hasRulePricedLine ? $payRule?->id : null,
                 'worked_minutes' => $computed->workedMinutes,
                 'late_minutes' => $computed->lateMinutes,
                 'undertime_minutes' => $computed->undertimeMinutes,
