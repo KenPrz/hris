@@ -8,6 +8,7 @@ use App\Actions\Leave\GrantLeave;
 use App\Actions\Leave\GrantLeaveInput;
 use App\Domain\Leave\LeaveUnit;
 use App\Domain\Scope\OfficeScope;
+use App\Exceptions\Domain\LeaveTypeInactive;
 use App\Exceptions\Domain\LeaveTypeNotGrantable;
 use App\Http\Requests\GrantLeaveRequest;
 use App\Http\Resources\LeaveLedgerResource;
@@ -44,6 +45,10 @@ final class GrantController
 
         if (! $leaveType->deducts_balance) {
             throw new LeaveTypeNotGrantable($leaveType->id);
+        }
+
+        if (! $leaveType->is_active) {
+            throw new LeaveTypeInactive($leaveType->id);
         }
 
         $minutes = LeaveUnit::toMinutes(

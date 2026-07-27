@@ -164,6 +164,30 @@ it('422s granting an event (deducts_balance=false) leave type', function (): voi
     $this->assertDatabaseCount('leave_ledger', 0);
 });
 
+it('422s granting into an inactive (retired) leave type', function (): void {
+    $manila = grantOffice();
+    $hrUser = grantHrAdminOf($manila);
+    $employee = Employee::factory()->create(['current_office_id' => $manila->id]);
+    $retired = LeaveType::factory()->for($manila, 'office')->create([
+        'deducts_balance' => true,
+        'is_active' => false,
+    ]);
+
+    Sanctum::actingAs($hrUser);
+
+    $this->postJson('/api/v1/leave/grants', [
+        'employee_id' => $employee->id,
+        'leave_type_id' => $retired->id,
+        'amount' => 5,
+        'unit' => 'day',
+        'reason' => 'Cannot grant into a retired type',
+    ])
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'leave_type_inactive');
+
+    $this->assertDatabaseCount('leave_ledger', 0);
+});
+
 it('400s an empty reason', function (): void {
     $manila = grantOffice();
     $hrUser = grantHrAdminOf($manila);
