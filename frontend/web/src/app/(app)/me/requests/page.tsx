@@ -27,15 +27,16 @@ import { Button } from '@/components/ui/Button'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 
-// The backend's full `RequestType` set is one value today (`attendance_adjustment`) — see
 // `RequestRecord` in lib/api.ts. A `Record` here (rather than a fallback string) means a
 // future request type fails typecheck instead of silently rendering "undefined".
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
+  leave: 'Leave',
 }
 
 const STATE_LABEL: Record<RequestState, string> = {
   pending: 'Pending',
+  manager_approved: 'Pending',
   approved: 'Approved',
   rejected: 'Rejected',
   cancelled: 'Withdrawn',
@@ -43,6 +44,7 @@ const STATE_LABEL: Record<RequestState, string> = {
 
 const STATE_TAG_KIND: Record<RequestState, TagKind> = {
   pending: 'warning',
+  manager_approved: 'warning',
   approved: 'success',
   rejected: 'error',
   cancelled: 'neutral',

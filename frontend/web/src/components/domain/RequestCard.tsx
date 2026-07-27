@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 
-import type { RequestDetail, RequestRecord, RequestType } from '@/lib/api'
+import type { AttendanceAdjustmentDetail, RequestRecord, RequestType } from '@/lib/api'
 import { timeInZone } from '@/lib/date'
 import { getToken } from '@/lib/session'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
@@ -34,6 +34,7 @@ export interface RequestCardProps {
 
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
+  leave: 'Leave',
 }
 
 /**
@@ -43,7 +44,7 @@ const TYPE_LABEL: Record<RequestType, string> = {
  * `null` for a bare `void`), so each branch degrades to a plain description when the
  * field it needs isn't there rather than rendering "at null".
  */
-function summarizeAttendanceAdjustment(detail: RequestDetail): string {
+function summarizeAttendanceAdjustment(detail: AttendanceAdjustmentDetail): string {
   const time = detail.punched_at !== null ? timeInZone(detail.punched_at, OFFICE_TIME_ZONE) : null
   const direction = detail.direction !== null ? detail.direction.toUpperCase() : null
 
@@ -60,7 +61,14 @@ function summarizeAttendanceAdjustment(detail: RequestDetail): string {
 function summarize(request: RequestRecord): string {
   switch (request.type) {
     case 'attendance_adjustment':
-      return request.detail !== null ? summarizeAttendanceAdjustment(request.detail) : 'Attendance correction'
+      return request.detail !== null && 'operation' in request.detail
+        ? summarizeAttendanceAdjustment(request.detail)
+        : 'Attendance correction'
+    // The leave summary UI (dates, day part, amount) is Task 11's job — this stub only
+    // keeps `summarize` exhaustive over `RequestType` so the card typechecks and renders
+    // something sane in the meantime.
+    case 'leave':
+      return 'Leave request'
   }
 }
 

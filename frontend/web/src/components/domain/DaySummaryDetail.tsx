@@ -16,6 +16,7 @@ const LINE_LABEL: Record<SummaryLineKind, string> = {
   overtime_day: 'Overtime (day)',
   overtime_night: 'Overtime (night)',
   holiday_unworked: 'Holiday (unworked)',
+  leave_with_pay: 'Leave (with pay)',
 }
 
 // applied_bp is basis points of the ordinary rate; 10000bp === 100%. A line above that is
