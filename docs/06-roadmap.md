@@ -1239,7 +1239,7 @@ once M6b-a began — see M6b-a's own section, below, for why.)
 - Leave types, `leave_ledger`, derived balances, manual grants → **M6b-a**, below (done).
 - The leave request itself and the two-hop machine → **M6b-b**, below (done).
 - Overtime pre-authorization and the `min(actual, approved)` compute integration →
-  **M6c**, next.
+  **M6c**, below (done).
 
 **Done when:** an employee forgets to clock out, the day shows zero hours and
 `incomplete`; they file an add adjustment for the missing punch; the request shows up on
@@ -1390,20 +1390,35 @@ untouched. **630 backend tests (22 of them Arch) + 419 frontend tests**, all gre
 `typecheck`/`build` clean native and inside `make test`'s containers alike.
 
 **M6 — requests and approvals — is complete**: M6a's single-step spine, M6b-a's leave
-foundation, and M6b-b's leave request and two-hop machine are all done. M6c (overtime
-pre-authorization), next, reuses the exact same spine, queues, and per-hop authority model
-a third time.
+foundation, M6b-b's leave request and two-hop machine, and M6c's overtime pre-authorization
+are all done. M6c reused the exact same spine, queues, and per-hop authority model a third
+time — a new `RequestType` and `RequestEffect`, no state-machine change — the clearest proof
+yet that the M6a spine generalizes.
 
-## M6c — Overtime pre-authorization *(next)*
+## M6c — Overtime pre-authorization *(done)*
 
 - Overtime pre-authorization. The engine pays `min(actual_worked, approved)` and surfaces
-  the remainder as **unpaid excess time** — visible, never silently converted to money.
-- A new `RequestType` and `RequestEffect`, same spine, same queues, same card — the
-  pattern M6a proved and M6b-b has already exercised a second time.
+  the remainder as **unpaid excess time** — visible, never silently converted to money
+  (`daily_attendance_summaries.unpaid_overtime_minutes`).
+- A new single-hop `RequestType` (`overtime`) and `RequestEffect` (`OvertimeEffect`, which
+  writes nothing — the approved request's `overtime_details.minutes` IS the authorization
+  the compute engine reads), same spine, same two queues, same card — the pattern M6a proved
+  and M6b-b exercised a second time. No `requests.state` change; the single approval is the
+  final hop.
 
-**Done when:** an employee's pre-authorized overtime caps what the engine pays for a day
-that ran long, and the excess shows up as unpaid time rather than vanishing or silently
-being paid anyway. `scripts/e2e-leave-and-ot.sh` proves the leave and OT paths together.
+**Status: done.** An employee files `POST /overtime/requests` for their own record (un-gated,
+like leave and adjustments); because overtime is single-hop it appears at once on both the
+manager's `/team/approvals` and office HR's `/office/approvals`; the single approval enqueues
+a recompute that re-prices the day at `min(actual, approved)`, booking anything beyond the
+cap as `unpaid_overtime_minutes` — the strict model, where unauthorized overtime pays zero.
+Art. 82-exempt employees short-circuit the premium entirely. **656 backend tests (19 of them
+Arch) + 430 frontend tests**, all green. `scripts/e2e-leave-and-ot.sh` proves it live: two
+identical long days — the first capped by a 1-hour pre-authorization to exactly the approved
+minutes with the excess booked unpaid, the second with no request paying zero and booking its
+full overtime unpaid — and `scripts/e2e-leave.sh` running unchanged alongside it, proving the
+leave and overtime paths coexist on one stack.
+
+Next: **M7 — cutoffs, locking, and payroll export.**
 
 ## M7 — Cutoffs, locking, and payroll export
 
