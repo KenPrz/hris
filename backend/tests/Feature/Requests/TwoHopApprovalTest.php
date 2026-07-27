@@ -334,3 +334,70 @@ it('409s an approval attempt on an already-rejected two-hop request', function (
         ->assertStatus(409)
         ->assertJsonPath('error.code', 'request_not_pending');
 });
+
+// --- Cancel (withdraw): manager_approved is NOT terminal — the requester may still
+// withdraw at hop 2, same as at hop 1. CancelRequest broadened its guard from `! isPending`
+// to `isTerminal` for exactly this: before the fix, a leave request past hop 1 could never
+// be withdrawn again, even though hop 2 (HR) hadn't decided anything yet. ---
+
+it('lets the requester cancel their own two-hop leave request while manager_approved (hop 2, awaiting HR)', function (): void {
+    $office = twoHopOffice();
+    [$managerUser, $manager] = twoHopEmployeeWithUser($office);
+    [$requesterUser, $requester] = twoHopEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+
+    $request = Request::factory()->for($requester)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::ManagerApproved,
+        'manager_decided_by' => $managerUser->id,
+        'manager_decided_at' => now(),
+    ]);
+
+    Sanctum::actingAs($requesterUser);
+
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
+        ->assertOk()
+        ->assertJsonPath('data.state', 'cancelled');
+
+    expect($request->fresh()->state)->toBe(RequestState::Cancelled);
+});
+
+it('404s when someone other than the requester tries to cancel a manager_approved leave request', function (): void {
+    $office = twoHopOffice();
+    [$managerUser, $manager] = twoHopEmployeeWithUser($office);
+    [, $requester] = twoHopEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+
+    $request = Request::factory()->for($requester)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::ManagerApproved,
+        'manager_decided_by' => $managerUser->id,
+        'manager_decided_at' => now(),
+    ]);
+
+    // The manager is in scope to decide hop 1 (and already has) but is not the requester —
+    // cancellation stays requester-only, so this is 404, not 403.
+    Sanctum::actingAs($managerUser);
+
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
+        ->assertStatus(404)
+        ->assertJsonPath('error.code', 'not_found');
+
+    expect($request->fresh()->state)->toBe(RequestState::ManagerApproved);
+});
+
+it('409s a cancel of a leave request that has already reached a terminal state', function (): void {
+    $office = twoHopOffice();
+    [$requesterUser, $requester] = twoHopEmployeeWithUser($office);
+
+    $request = Request::factory()->for($requester)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::Approved,
+    ]);
+
+    Sanctum::actingAs($requesterUser);
+
+    $this->postJson("/api/v1/requests/{$request->id}/cancel")
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'request_not_pending');
+
+    expect($request->fresh()->state)->toBe(RequestState::Approved);
+});

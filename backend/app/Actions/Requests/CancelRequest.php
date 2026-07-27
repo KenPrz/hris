@@ -12,11 +12,14 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Cancels a pending request. Cancellation has its own authority rule — narrower than
- * RequestAuthority — only the requester may withdraw their own request; a manager, HR
- * admin, or system admin who could otherwise decide it may NOT cancel it on the
- * requester's behalf. A non-requester gets 404 (same subject-scope-leak treatment as an
- * unauthorized approver); an already-decided request gets 409.
+ * Cancels a not-yet-terminal request — `pending` OR `manager_approved`. Cancellation has
+ * its own authority rule — narrower than RequestAuthority — only the requester may
+ * withdraw their own request; a manager, HR admin, or system admin who could otherwise
+ * decide it may NOT cancel it on the requester's behalf. A non-requester gets 404 (same
+ * subject-scope-leak treatment as an unauthorized approver); a TERMINAL request (approved/
+ * rejected/cancelled) gets 409 — same `isTerminal()` guard ApproveRequest/RejectRequest
+ * already use, so a two-hop (leave) request still awaiting HR at hop 2 remains
+ * withdrawable, not stuck once a manager has signed off on it.
  */
 final class CancelRequest
 {
@@ -29,7 +32,7 @@ final class CancelRequest
                 throw (new ModelNotFoundException)->setModel(Request::class, [$locked->id]);
             }
 
-            if (! $locked->isPending()) {
+            if ($locked->isTerminal()) {
                 throw new RequestNotPending($locked->state);
             }
 
