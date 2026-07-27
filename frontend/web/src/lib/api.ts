@@ -402,7 +402,7 @@ export type LeaveGrantInput = {
 // ---------------------------------------------------------------------------
 // Wire types — verified against app/Http/Resources/RequestResource.php,
 // app/Http/Controllers/Attendance/SubmitController.php, and
-// app/Http/Controllers/Leave/SubmitController.php. `RequestResource#detail` branches on
+// app/Http/Controllers/Leave/SubmitLeaveRequestController.php. `RequestResource#detail` branches on
 // `type`: an `attendance_adjustment` request carries `AttendanceAdjustmentDetail`, a
 // `leave` request carries `LeaveRequestDetail`. `RequestDetail` is their union (plus
 // `null`, which the resource returns for a still-unbacked corner) so every consumer of

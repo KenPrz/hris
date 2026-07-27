@@ -18,6 +18,12 @@ use App\Models\Request;
  *
  * A query-builder wrapper over Eloquent, the same shape as EmployeeScope/OfficeScope/
  * ApprovalQueues — domain-Eloquent is allowed here for the same reason it's allowed there.
+ *
+ * Also gates on the covering leave type's `is_paid` flag: `is_paid` is a distinct,
+ * required, admin-settable column (separate from `deducts_balance`), so an admin can
+ * create a Leave-Without-Pay type. An approved LWOP day must NOT match here — otherwise
+ * DailyComputation would price it as leave_with_pay at 100%, a mispay. An unpaid approved
+ * leave day instead falls through to the normal unworked/absent computation.
  */
 final class LeaveDayLookup
 {
@@ -31,7 +37,10 @@ final class LeaveDayLookup
             ->where('state', RequestState::Approved)
             ->whereHas('leaveDetail', function ($query) use ($date): void {
                 $query->whereDate('start_date', '<=', $date)
-                    ->whereDate('end_date', '>=', $date);
+                    ->whereDate('end_date', '>=', $date)
+                    ->whereHas('leaveType', function ($query): void {
+                        $query->where('is_paid', true);
+                    });
             })
             ->exists();
     }

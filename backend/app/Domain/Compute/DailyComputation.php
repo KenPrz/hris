@@ -109,6 +109,12 @@ final class DailyComputation
             // employee on approved leave is paid for the leave, not paid twice (leave +
             // holiday premium). A leave-with-pay minute is a normal-day minute: flat
             // 10000 bp (100%), never routed through the premium matrix.
+            //
+            // Deliberately NOT gated on isArt82Exempt, unlike the holiday_unworked branch
+            // below. Art. 82 exempts managerial/field personnel from PREMIUMS (overtime,
+            // night differential, holiday pay) and from SIL accrual — not from base pay on
+            // an approved paid leave they hold. leave_with_pay is base 100% (a normal day's
+            // wage), not a premium, so an art82-exempt employee still receives it.
             $lines[] = new ComputedLine(
                 kind: SummaryLineKind::LeaveWithPay,
                 minutes: $in->scheduledMinutes,

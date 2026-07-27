@@ -134,3 +134,31 @@ it('gives no leave_with_pay line for a manager_approved (hop 1 only) leave reque
 
     expect($summary->lines)->toHaveCount(0);
 });
+
+it('gives no leave_with_pay line for an approved leave request whose leave type is unpaid (is_paid=false)', function (): void {
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    $date = '2026-08-03'; // Monday
+
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['is_paid' => false]);
+
+    $request = Request::factory()->for($employee)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::Approved,
+    ]);
+
+    LeaveDetail::factory()->for($request)->create([
+        'leave_type_id' => $leaveType->id,
+        'start_date' => $date,
+        'end_date' => $date,
+        'day_part' => 'full',
+    ]);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    // No punches, no leave_with_pay: an unpaid (LWOP) approved leave day is not priced as
+    // leave_with_pay at 100% — it falls through to the normal unworked-day computation
+    // (an ordinary working day here, so no holiday/leave line applies either).
+    expect($summary->worked_minutes)->toBe(0)
+        ->and($summary->lines)->toHaveCount(0);
+});

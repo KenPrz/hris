@@ -67,7 +67,7 @@ final class RequestAuthority
                 && $approver->id !== $request->manager_decided_by, // and not the hop-1 approver
             // Terminal (Approved/Rejected/Cancelled): preserve the M6a existence-leak
             // discipline. An approver who HAD authority over some hop still passes here,
-            // so the action's separate isPending() check is what yields 409 (exists, but
+            // so the action's separate isTerminal() check is what yields 409 (exists, but
             // already decided) instead of collapsing that case into 404 (never had
             // authority at all) for a previously-authorized actor.
             default => self::isManagerOf($approver, $request) || self::isHrOf($approver, $request),

@@ -82,3 +82,28 @@ it('is false for another employee\'s approved leave request', function (): void 
 
     expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse();
 });
+
+it('is false for an approved leave request whose leave type is unpaid (is_paid=false)', function (): void {
+    $employee = Employee::factory()->create();
+    $office = $employee->current_office_id !== null
+        ? Office::find($employee->current_office_id)
+        : Office::factory()->create();
+
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['is_paid' => false]);
+
+    $request = Request::factory()->for($employee)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::Approved,
+    ]);
+
+    LeaveDetail::factory()->for($request)->create([
+        'leave_type_id' => $leaveType->id,
+        'start_date' => '2026-08-03',
+        'end_date' => '2026-08-05',
+        'day_part' => 'full',
+    ]);
+
+    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse()
+        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-04'))->toBeFalse()
+        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-05'))->toBeFalse();
+});
