@@ -31,12 +31,14 @@ if (! function_exists('makeManagerReportStranger')) {
         $managerUser = User::factory()->create();
         $manager = Employee::factory()->for($managerUser)->create(['current_office_id' => $office->id]);
 
-        $report = Employee::factory()->create([
+        $reportUser = User::factory()->create();
+        $report = Employee::factory()->for($reportUser)->create([
             'current_office_id' => $office->id,
             'current_reports_to_id' => $manager->id,
         ]);
 
-        $stranger = Employee::factory()->create(['current_office_id' => $office->id]);
+        $strangerUser = User::factory()->create();
+        $stranger = Employee::factory()->for($strangerUser)->create(['current_office_id' => $office->id]);
 
         return [$manager, $report, $stranger];
     }
