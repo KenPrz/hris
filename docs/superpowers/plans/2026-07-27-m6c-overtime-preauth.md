@@ -337,11 +337,15 @@ git commit -m "M6c: overtime_details table + model + factory + RequestResource b
 - Create: `backend/app/Http/Requests/SubmitOvertimeRequestRequest.php`
 - Create: `backend/app/Http/Controllers/Overtime/SubmitOvertimeRequestController.php`
 - Modify: `backend/routes/api.php` (add the route)
+- Modify: `backend/app/Domain/Requests/ApprovalQueues.php` (add `Overtime` to `$singleHopTypes`)
 - Test: `backend/tests/Feature/Overtime/SubmitOvertimeRequestTest.php`
+- Test: `backend/tests/Feature/Requests/ApprovalQueuesTest.php` (or the existing queues test — see Step 9)
 
 **Interfaces:**
 - Consumes: `RequestType::Overtime`, `OvertimeDetail`, `RequestState::Pending` (existing).
-- Produces: `SubmitOvertimeRequest::execute(SubmitOvertimeRequestInput): Request` — creates one `overtime` request (`state = pending`) + one `overtime_details` row; `POST /overtime/requests` returns `201` with the `RequestResource`. Input fields: `employeeId`, `date`, `minutes`, `note`.
+- Produces: `SubmitOvertimeRequest::execute(SubmitOvertimeRequestInput): Request` — creates one `overtime` request (`state = pending`) + one `overtime_details` row; `POST /overtime/requests` returns `201` with the `RequestResource`. Input fields: `employeeId`, `date`, `minutes`, `note`. A pending overtime request appears in **both** the manager's `/team` queue and HR's `/office` queue (single-hop routing).
+
+**IMPORTANT — plan correction (found in Task 1 review):** `ApprovalQueues.php` line ~58 hard-codes `$singleHopTypes = [RequestType::AttendanceAdjustment->value]` — a manually-maintained list, NOT derived from `requiresHrStep()`. Without adding `Overtime` here, a single-hop overtime request would never surface to HR's `/office` queue. Steps 9–11 below fix this. (`RequestAuthority::canDecide` needs no change — it already derives from `requiresHrStep()`.)
 
 - [ ] **Step 1: Write the Input DTO.**
 
@@ -566,13 +570,25 @@ it('rejects hours that do not land on a whole minute', function (): void {
 
 > **Note for the implementer:** confirm the validation-failure envelope code (`error.code`) and status against how the existing `SubmitLeaveRequest`/adjustment tests assert a FormRequest failure in this codebase — match that exact shape (this project maps FormRequest validation to `422`/`400` `validation_failed`; use whatever the sibling leave test asserts). The `User::factory()->for($employee)` association mirrors how existing request tests wire a user to an employee — check a sibling test (e.g. `SubmitLeaveRequestTest`) and copy its exact user/employee setup helper if it differs.
 
-- [ ] **Step 7: Run the tests, verify they pass.** Run: `cd backend && ./vendor/bin/pest --filter=SubmitOvertimeRequest`. Expected: PASS.
+- [ ] **Step 7: Run the submit tests, verify they pass.** Run: `cd backend && ./vendor/bin/pest --filter=SubmitOvertimeRequest`. Expected: PASS.
 
-- [ ] **Step 8: Commit.**
+- [ ] **Step 8: Route the single-hop overtime request to HR's `/office` queue.** In `backend/app/Domain/Requests/ApprovalQueues.php`, find `$singleHopTypes` (around line 58) and add `RequestType::Overtime->value`:
+
+```php
+        $singleHopTypes = [RequestType::AttendanceAdjustment->value, RequestType::Overtime->value];
+```
+
+Keep the surrounding comment's intent (it documents that this list is manually kept in sync with `requiresHrStep() === false`). Do NOT touch `RequestAuthority` — it already derives from `requiresHrStep()`.
+
+- [ ] **Step 9: Write the failing queue test.** Find the existing approval-queues test (run `grep -rl "office\|singleHop\|ApprovalQueues\|/office/approvals" backend/tests | grep -i queue`; the M6b-b work added office/team queue tests — extend that file). Add a case: a `pending` **overtime** request for an employee in an HR-administered office appears in that HR user's `/office` queue (mirror exactly how the existing single-hop attendance-adjustment queue case is set up — same office/manager/HR wiring, just `type = overtime` with an `overtime_details` row). Also assert it appears in the manager's `/team` queue.
+
+- [ ] **Step 10: Run the queue test, verify it passes.** Run: `cd backend && ./vendor/bin/pest --filter=Queue` (or the specific filter for the queues test file). Expected: PASS — the overtime request now surfaces to both queues.
+
+- [ ] **Step 11: Commit.**
 
 ```bash
-git add backend/app/Actions/Overtime backend/app/Http/Requests/SubmitOvertimeRequestRequest.php backend/app/Http/Controllers/Overtime backend/routes/api.php backend/tests/Feature/Overtime
-git commit -m "M6c: SubmitOvertimeRequest action + POST /overtime/requests"
+git add backend/app/Actions/Overtime backend/app/Http/Requests/SubmitOvertimeRequestRequest.php backend/app/Http/Controllers/Overtime backend/routes/api.php backend/app/Domain/Requests/ApprovalQueues.php backend/tests/Feature/Overtime backend/tests/Feature/Requests
+git commit -m "M6c: SubmitOvertimeRequest action + POST /overtime/requests + office-queue routing"
 ```
 
 ---
