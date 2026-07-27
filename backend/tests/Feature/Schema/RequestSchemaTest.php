@@ -57,7 +57,7 @@ it('rejects a state outside the CHECK', function (): void {
 
 it('keeps the CHECK lists in sync with the enum cases', function (): void {
     // Golden list — documents the intended values and catches an enum rename.
-    expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment'])
+    expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment', 'leave'])
         ->and(array_map(fn ($c) => $c->value, RequestState::cases()))->toBe(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']);
 
     // Live-constraint parity — reads the actual CHECK from Postgres so the migration's
@@ -143,6 +143,34 @@ it('still rejects a state outside the widened CHECK', function (): void {
         'employee_id' => $employee->id,
         'type' => 'attendance_adjustment',
         'state' => 'bogus',
+        'note' => 'x',
+        'created_at' => now(), 'updated_at' => now(),
+    ]))->toThrow(Illuminate\Database\QueryException::class);
+});
+
+it('accepts the leave request type at the DB level', function (): void {
+    $employee = Employee::factory()->create();
+
+    $inserted = DB::table('requests')->insert([
+        'id' => (string) Illuminate\Support\Str::uuid7(),
+        'employee_id' => $employee->id,
+        'type' => 'leave',
+        'state' => 'pending',
+        'note' => 'VL, July 30-31.',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    expect($inserted)->toBeTrue();
+});
+
+it('rejects a type outside the widened CHECK', function (): void {
+    $employee = Employee::factory()->create();
+
+    expect(fn () => DB::table('requests')->insert([
+        'id' => (string) Illuminate\Support\Str::uuid7(),
+        'employee_id' => $employee->id,
+        'type' => 'bogus',
+        'state' => 'pending',
         'note' => 'x',
         'created_at' => now(), 'updated_at' => now(),
     ]))->toThrow(Illuminate\Database\QueryException::class);
