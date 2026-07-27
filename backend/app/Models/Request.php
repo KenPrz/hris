@@ -86,4 +86,10 @@ final class Request extends Model implements HasMedia
     {
         return $this->hasOne(AttendanceAdjustmentDetail::class);
     }
+
+    /** @return HasOne<LeaveDetail, $this> */
+    public function leaveDetail(): HasOne
+    {
+        return $this->hasOne(LeaveDetail::class, 'request_id');
+    }
 }
