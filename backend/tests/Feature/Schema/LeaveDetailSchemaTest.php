@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Employee;
+use App\Models\LeaveDetail;
 use App\Models\LeaveType;
 use App\Models\Office;
 use App\Models\Request;
@@ -75,6 +76,20 @@ it('rejects an end_date before start_date via the CHECK constraint', function ()
             'end_date' => '2026-08-09',
         ])
     ))->toThrow(QueryException::class);
+});
+
+it('produces valid rows from a bare factory create, with no date overrides', function (): void {
+    // Regression: start_date and end_date used to be drawn independently, so ~50% of
+    // bare creates violated leave_details_dates_check. This must survive at volume.
+    $details = LeaveDetail::factory()->count(20)->create();
+
+    expect($details)->toHaveCount(20);
+
+    foreach ($details as $detail) {
+        expect($detail->end_date->gte($detail->start_date))->toBeTrue(
+            "end_date {$detail->end_date->toDateString()} is before start_date {$detail->start_date->toDateString()}"
+        );
+    }
 });
 
 it('cascades delete from requests to leave_details', function (): void {

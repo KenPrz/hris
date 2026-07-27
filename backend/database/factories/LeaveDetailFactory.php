@@ -16,11 +16,14 @@ final class LeaveDetailFactory extends Factory
 
     public function definition(): array
     {
+        $start = $this->faker->dateTimeBetween('now', '+1 month');
+        $end = (clone $start)->modify('+'.$this->faker->numberBetween(0, 4).' days');
+
         return [
             'request_id' => Request::factory(),
             'leave_type_id' => LeaveType::factory(),
-            'start_date' => $this->faker->dateTimeBetween('now', '+1 month')->format('Y-m-d'),
-            'end_date' => $this->faker->dateTimeBetween('now', '+1 month')->format('Y-m-d'),
+            'start_date' => $start->format('Y-m-d'),
+            'end_date' => $end->format('Y-m-d'),
             'day_part' => 'full',
             'amount_minutes' => 480,
         ];
