@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions\Requests;
 
 use App\Actions\Requests\Effects\AttendanceAdjustmentEffect;
+use App\Actions\Requests\Effects\LeaveEffect;
 use App\Domain\Requests\RequestEffect;
 use App\Domain\Requests\RequestEffectResolver;
 use App\Domain\Requests\RequestType;
@@ -26,6 +27,7 @@ final class RequestEffectFactory implements RequestEffectResolver
     {
         return match ($type) {
             RequestType::AttendanceAdjustment => app(AttendanceAdjustmentEffect::class),
+            RequestType::Leave => app(LeaveEffect::class),
             default => throw new LogicException("No RequestEffect registered for request type {$type->value}."),
         };
     }
