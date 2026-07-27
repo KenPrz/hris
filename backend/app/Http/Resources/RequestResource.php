@@ -34,6 +34,10 @@ final class RequestResource extends JsonResource
                     'day_part' => $this->leaveDetail->day_part,
                     'amount_minutes' => $this->leaveDetail->amount_minutes,
                 ],
+                RequestType::Overtime => $this->overtimeDetail === null ? null : [
+                    'date' => $this->overtimeDetail->date->toDateString(),
+                    'minutes' => $this->overtimeDetail->minutes,
+                ],
             },
             'decided_by' => $this->decided_by,
             'decided_at' => $this->decided_at?->toIso8601String(),
