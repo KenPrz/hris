@@ -34,6 +34,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
   leave: 'Leave',
+  overtime: 'Overtime',
 }
 
 const STATE_LABEL: Record<RequestState, string> = {

@@ -90,7 +90,7 @@ because the org chart or `hr_admin_offices` says they may, not because they hold
 `leave.approve`. It stays cataloged for the same future role-management reason
 `leave.manage`/`holiday.manage`/`schedule.manage` do.
 
-### Request approval authority — `RequestAuthority` and the two-hop leave routing *(M3.6, generalized M6a, widened M6b-b)*
+### Request approval authority — `RequestAuthority` and the two-hop leave routing *(M3.6, generalized M6a, widened M6b-b, overtime M6c)*
 
 A third scope, purpose-built to a **request's current decision hop** rather than "who sees
 whom" (`EmployeeScope`) or "who administers this office" (`OfficeScope`).
@@ -115,10 +115,10 @@ Two pure building blocks:
    authority even though `ApprovalQueues` gives them no *queue* (below); at a terminal
    state this still yields `409` (decided) rather than `404` (never had authority),
    preserving the ordering below.
-3. **At `pending`:** a single-hop type (`attendance_adjustment`) accepts `isManagerOf` OR
-   `isHrOf` — either authority is enough, exactly as M6a proved. A two-hop type (`leave`)
-   accepts `isManagerOf` **alone** — HR has no authority over a leave request that hasn't
-   cleared the manager's hop yet, even for their own office.
+3. **At `pending`:** a single-hop type (`attendance_adjustment` or, since M6c, `overtime`)
+   accepts `isManagerOf` OR `isHrOf` — either authority is enough, exactly as M6a proved. A
+   two-hop type (`leave`) accepts `isManagerOf` **alone** — HR has no authority over a leave
+   request that hasn't cleared the manager's hop yet, even for their own office.
 4. **At `manager_approved`** (two-hop only, M6b-b): `isHrOf` **and** the approver is not the
    user who decided hop 1 (`manager_decided_by`). This is a genuine two-person rule, not
    just two titles — a manager who is *also* their own office's HR admin cannot clear both
@@ -136,6 +136,18 @@ hop 1 no longer belongs there, because the manager's decision is done.
 only decider, same as M6a), or **any** type once it reaches `manager_approved` — a two-hop
 request appears there only once the manager has cleared it. Both queues remain `Builder`
 views over the same underlying authority, never a redefinition of who may decide what.
+
+**Overtime (M6c) adds no new permission.** Filing an overtime pre-authorization is
+un-gated exactly as filing an attendance adjustment or leave is: any authenticated employee
+may `POST /overtime/requests` for their **own** record — the requester-identity check is the
+only boundary (`SubmitOvertimeRequestController` takes `$request->user()->employee`, never a
+target-employee id, so there is nothing to enumerate and no admin gate to apply). *Deciding*
+an overtime request reuses everything above unchanged: `overtime` is a single-hop type, so
+`canDecide` accepts `isManagerOf` OR `isHrOf` at `pending`, and it surfaces on both
+`/team/approvals` and `/office/approvals` the moment it is filed — the same routing
+`attendance_adjustment` takes. No `overtime.*` spatie verb exists or is needed, for the same
+reason `leave.approve` stays cataloged-but-unread: the boundary is `RequestAuthority`, which
+reads no permission at all.
 
 **Cancellation has its own, narrower rule, unaffected by any of the above:** only the
 requester may cancel their own request (`App\Actions\Requests\CancelRequest`), from

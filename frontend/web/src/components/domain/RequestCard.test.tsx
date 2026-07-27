@@ -109,6 +109,23 @@ describe('RequestCard', () => {
     expect(screen.getByText('Aug 10 · half day · 4 hrs')).toBeInTheDocument()
   })
 
+  it('summarizes an overtime request as "<duration> overtime · <date>"', () => {
+    render(
+      <RequestCard
+        request={requestRecord({
+          type: 'overtime',
+          detail: { date: '2026-07-15', minutes: 150 },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    expect(screen.getByText('2h 30m overtime · Jul 15')).toBeInTheDocument()
+    expect(screen.getByText('Overtime')).toBeInTheDocument()
+  })
+
   it('renders a "Pending" tag for a pending request and a distinct "Awaiting HR" tag for manager_approved', () => {
     const { rerender } = render(
       <RequestCard request={requestRecord({ state: 'pending' })} onApprove={vi.fn()} onReject={vi.fn()} pending={false} />,

@@ -63,3 +63,26 @@ it('rejects a negative pair_count', function (): void {
 
     expect(fn () => RecomputeRun::create($attributes))->toThrow(QueryException::class);
 });
+
+it('keeps the trigger_type CHECK in sync with RecomputeTrigger::cases()', function (): void {
+    // Live-constraint parity — reads the actual CHECK from Postgres so the migration's
+    // value list cannot drift from the enum independently (adding a case without widening
+    // the CHECK, or vice versa, fails here).
+    $def = DB::selectOne(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'recompute_runs_trigger_type_check'",
+    );
+
+    expect($def)->not->toBeNull('constraint recompute_runs_trigger_type_check should exist');
+
+    preg_match_all("/'([^']+)'/", $def->def, $m);
+    $checkValues = array_values(array_unique($m[1]));
+
+    $sorted = function (array $v): array {
+        sort($v);
+
+        return $v;
+    };
+
+    expect($sorted($checkValues))
+        ->toBe($sorted(array_map(fn ($c) => $c->value, RecomputeTrigger::cases())));
+});

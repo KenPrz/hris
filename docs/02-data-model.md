@@ -928,6 +928,7 @@ create table daily_attendance_summaries (
   worked_minutes     integer not null,
   late_minutes       integer not null,
   undertime_minutes  integer not null,
+  unpaid_overtime_minutes integer not null default 0,   -- M6c: worked overtime beyond the approved cap
   status             text not null default 'pending',
   is_incomplete      boolean not null default false,
   computed_at        timestamptz,
@@ -938,7 +939,8 @@ create table daily_attendance_summaries (
                        'regular_holiday','double_regular_holiday')),
   check (status in ('pending','computed','disputed','locked')),
   check (scheduled_minutes >= 0 and worked_minutes >= 0
-         and late_minutes >= 0 and undertime_minutes >= 0),
+         and late_minutes >= 0 and undertime_minutes >= 0
+         and unpaid_overtime_minutes >= 0),
   unique (employee_id, date)
 );
 
@@ -1515,6 +1517,67 @@ manager's decision moves it to `manager_approved` with the balance and the raw
 HR's final decision is what actually debits the ledger and triggers the recompute that
 prices the span `leave_with_pay`, and a second request that is instead REJECTED at HR's hop
 leaves the balance and the debit-row count untouched.
+
+## Overtime pre-authorization: the cap, and the unpaid excess *(M6c)*
+
+**Overtime is strict: it is only ever paid when it was pre-authorized, and only up to the
+approved minutes.** An employee who simply works past their scheduled length earns nothing
+for the excess unless a manager (or office HR) approved an overtime request for that date —
+and even with one, the paid overtime is capped at the approved minutes, never the worked
+ones. The compute engine applies `min(actual_overtime, approved_overtime)`; whatever is
+worked beyond that cap is recorded, not paid, as
+`daily_attendance_summaries.unpaid_overtime_minutes` (added to the M5a table above).
+
+**`overtime` is a fifth `RequestType` on the shared `requests` spine, and it is
+single-hop.** It widens the `requests_type_check` alongside `attendance_adjustment` and
+`leave`, and — because `RequestType::Overtime->requiresHrStep()` is `false` — one approval
+IS the final hop: a pending overtime request is actionable at once by both the manager
+(`/team/approvals`) and office HR (`/office/approvals`), the same routing a single-hop
+attendance adjustment takes (`App\Domain\Requests\ApprovalQueues`, the M6a section above),
+and the single approval lands it `approved` rather than `manager_approved`.
+
+```sql
+create table overtime_details (
+  request_id  uuid primary key references requests(id) on delete cascade,
+  date        date not null,
+  minutes     integer not null,
+
+  check (minutes > 0)
+);
+```
+
+**`overtime_details` mirrors `leave_details`/`attendance_adjustment_details` exactly** —
+the primary key IS `requests.id`, one request, one detail row, enforced by the database
+rather than by convention. The client submits `hours` (quarter-hour granularity);
+`App\Http\Controllers\Overtime\SubmitOvertimeRequestController` converts to the integer
+`minutes` the domain stores, rejecting any value that would not land on a whole minute
+(a `422`, never a silently rounded number) — the same integer-minutes discipline the rest
+of the system holds.
+
+**`App\Actions\Requests\Effects\OvertimeEffect` is the overtime `RequestEffect`, and unlike
+`LeaveEffect` it writes NOTHING.** There is no ledger, no balance, no lock — nothing to
+overdraw. The approved request plus its `overtime_details.minutes` IS the authorization the
+compute engine reads: `App\Domain\Overtime\OvertimeAuthorizationLookup::approvedMinutesFor(employee,
+date)` sums the `minutes` of every `approved` overtime request whose `overtime_details.date`
+matches (returning `0` when none is approved — the strict model's default). The effect's
+only job is to enqueue a recompute of the authorized date after commit
+(`App\Domain\Compute\RecomputeTrigger::Overtime`, widening the `recompute_runs.trigger_type`
+CHECK the same way the M5b/M6b triggers do), so `ComputeDailySummary` re-prices that day
+under the now-non-zero cap. `App\Domain\Compute\DailyComputation` splits the worked total at
+two boundaries — regular below the schedule, PAID overtime between the schedule and
+`schedule + approved`, unpaid EXCESS beyond that — pricing the paid overtime as
+`overtime_day`/`overtime_night` lines and storing the excess as `unpaid_overtime_minutes`.
+An Art. 82-exempt employee short-circuits the whole thing: no overtime premium at all (a
+`PHP_INT_MAX` ceiling, so nothing is ever excess), the same exemption gate every other
+premium already respects.
+
+`scripts/e2e-leave-and-ot.sh` proves the cap live: an employee works two identical long
+days; the first, read before any request, pays zero overtime and books it all as unpaid
+excess; a 1-hour pre-authorization filed for it appears at once on both the manager's and
+HR's queues, and the manager's single approval re-prices the day to exactly the approved
+minutes with the excess dropping by that amount, no ledger touched; the second identical day
+with no request pays zero overtime and books its full overtime as unpaid. The same script
+runs `scripts/e2e-leave.sh` unchanged, proving the leave and overtime paths coexist.
 
 ---
 

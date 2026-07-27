@@ -42,6 +42,7 @@ it('prices an ordinary 8h day as 480 regular_day minutes at 100%', function (): 
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeFalse();
@@ -70,6 +71,7 @@ it('prices a rest day worked past 8h as regular_day base + overtime_day at the r
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(540);
@@ -96,6 +98,7 @@ it('prices a special working day worked at 100%', function (): void {
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines[0]->appliedBp)->toBe(10000);
@@ -114,6 +117,7 @@ it('prices a special non-working day worked at 130%', function (): void {
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines[0]->appliedBp)->toBe(13000);
@@ -132,6 +136,7 @@ it('prices a regular holiday worked at 200%', function (): void {
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines[0]->appliedBp)->toBe(20000);
@@ -150,6 +155,7 @@ it('prices a double regular holiday worked at 300%', function (): void {
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines[0]->appliedBp)->toBe(30000);
@@ -170,6 +176,7 @@ it('prices a regular holiday NOT worked as one holiday_unworked line at 100%', f
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeFalse();
@@ -192,6 +199,7 @@ it('gives an art82-exempt employee NO holiday_unworked line at all (no premium e
         isArt82Exempt: true,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(0);
@@ -210,6 +218,7 @@ it('is not incomplete on an unworked rest day, and carries no lines', function (
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeFalse();
@@ -231,6 +240,7 @@ it('carries no lines for an absence on an ordinary day (no punches, not a paid h
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeFalse();
@@ -253,6 +263,7 @@ it('prices a scheduled working day covered by approved leave as one leave_with_p
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: true,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeFalse();
@@ -275,6 +286,7 @@ it('prices leave_with_pay over holiday_unworked when a leave day also happens to
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: true,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines)->toHaveCount(1);
@@ -294,6 +306,7 @@ it('gives no leave_with_pay line on a rest day covered by leave (leave never cha
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: true,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines)->toBe([]);
@@ -314,6 +327,7 @@ it('prices a night shift entirely within one calendar day at the compounded 110%
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(120);
@@ -336,6 +350,7 @@ it('prices a cross-midnight night shift at the compounded 110%', function (): vo
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(480);
@@ -360,6 +375,7 @@ it('prices work beyond the scheduled day as overtime at +25% ordinary', function
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(600);
@@ -387,6 +403,7 @@ it('keeps a compressed 10h scheduled day entirely regular, with no overtime line
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(600);
@@ -410,6 +427,7 @@ it('is incomplete on an unpaired punch: zero worked, no lines', function (): voi
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->isIncomplete)->toBeTrue();
@@ -435,6 +453,7 @@ it('collapses every bucket to 100% for an art82-exempt employee, even on a holid
         isArt82Exempt: true,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(660);
@@ -466,6 +485,7 @@ it('proves the same holiday-night-OT day is NOT flat 100% without the art82 exem
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(660);
@@ -497,6 +517,7 @@ it('populates late and undertime minutes together', function (): void {
         isArt82Exempt: false,
         rates: rates(),
         onApprovedLeave: false,
+        approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->workedMinutes)->toBe(360);

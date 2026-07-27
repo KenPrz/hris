@@ -47,6 +47,7 @@ use App\Http\Controllers\Office\Schedules\ShowTemplateController;
 use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
 use App\Http\Controllers\Office\SetLeaveDayController;
+use App\Http\Controllers\Overtime\SubmitOvertimeRequestController;
 use App\Http\Controllers\Requests\ApproveController;
 use App\Http\Controllers\Requests\CancelController;
 use App\Http\Controllers\Requests\DownloadAttachmentController;
@@ -94,6 +95,11 @@ Route::prefix('v1')->group(function (): void {
         // amount is server-computed from the scheduled working days in range, never
         // client-supplied — see SubmitLeaveRequestController.
         Route::post('/leave/requests', SubmitLeaveRequestController::class);
+
+        // Same shape as the leave/attendance-adjustment submissions above: any employee may
+        // file their own overtime pre-authorization, not admin-gated. Single-hop — the
+        // manager (or office HR) approves it once and the compute engine reads the cap.
+        Route::post('/overtime/requests', SubmitOvertimeRequestController::class);
 
         // The two scope-filtered approval queues — a manager's direct reports and an HR
         // admin's office members — replace the old single combined

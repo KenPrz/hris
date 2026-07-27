@@ -18,8 +18,9 @@
 
 import { useState } from 'react'
 
-import type { AttendanceAdjustmentDetail, LeaveRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
+import type { AttendanceAdjustmentDetail, LeaveRequestDetail, OvertimeRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
 import { formatDateSpan, timeInZone } from '@/lib/date'
+import { formatDuration } from '@/lib/duration'
 import { getToken } from '@/lib/session'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import type { TagKind } from '@/components/Tag'
@@ -37,6 +38,7 @@ export interface RequestCardProps {
 const TYPE_LABEL: Record<RequestType, string> = {
   attendance_adjustment: 'Attendance correction',
   leave: 'Leave',
+  overtime: 'Overtime',
 }
 
 // `manager_approved` gets its OWN label here ("Awaiting HR", not "Pending") — the one
@@ -111,6 +113,13 @@ function summarizeLeave(detail: LeaveRequestDetail): string {
   return `${span} · ${dayPartLabel} · ${cost}`
 }
 
+/** `"2h overtime · Jul 15"` — the pre-authorized duration (`formatDuration` on the integer
+ * minutes the backend resolved from the requested hours) and the single day it's for
+ * (`formatDateSpan` on a one-day span renders just `"Jul 15"`). */
+function summarizeOvertime(detail: OvertimeRequestDetail): string {
+  return `${formatDuration(detail.minutes)} overtime · ${formatDateSpan(detail.date, detail.date)}`
+}
+
 function summarize(request: RequestRecord): string {
   switch (request.type) {
     case 'attendance_adjustment':
@@ -121,6 +130,10 @@ function summarize(request: RequestRecord): string {
       return request.detail !== null && 'leave_type_id' in request.detail
         ? summarizeLeave(request.detail)
         : 'Leave request'
+    case 'overtime':
+      return request.detail !== null && 'minutes' in request.detail
+        ? summarizeOvertime(request.detail)
+        : 'Overtime request'
   }
 }
 

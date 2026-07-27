@@ -9,6 +9,7 @@ use App\Domain\Compute\DailyComputation;
 use App\Domain\Compute\DailyComputationInput;
 use App\Domain\Employment\EmploymentResolver;
 use App\Domain\Leave\LeaveDayLookup;
+use App\Domain\Overtime\OvertimeAuthorizationLookup;
 use App\Domain\Pay\DayType;
 use App\Domain\Pay\SummaryLineKind;
 use App\Domain\Schedule\ScheduleResolver;
@@ -83,6 +84,8 @@ final class ComputeDailySummary
 
         $onApprovedLeave = LeaveDayLookup::isOnApprovedLeave($employee, $date);
 
+        $approvedOvertimeMinutes = OvertimeAuthorizationLookup::approvedMinutesFor($employee, $date);
+
         $payRule = PayRule::query()
             ->whereDate('effective_from', '<=', $date)
             ->orderByDesc('effective_from')
@@ -107,6 +110,7 @@ final class ComputeDailySummary
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,
             onApprovedLeave: $onApprovedLeave,
+            approvedOvertimeMinutes: $approvedOvertimeMinutes,
         ));
 
         // Only ever persist punch-derived lines priced against a pay_rules version that
@@ -148,6 +152,7 @@ final class ComputeDailySummary
                 'worked_minutes' => $computed->workedMinutes,
                 'late_minutes' => $computed->lateMinutes,
                 'undertime_minutes' => $computed->undertimeMinutes,
+                'unpaid_overtime_minutes' => $computed->unpaidOvertimeMinutes,
                 'is_incomplete' => $computed->isIncomplete,
                 'status' => 'computed',
                 'computed_at' => now(),

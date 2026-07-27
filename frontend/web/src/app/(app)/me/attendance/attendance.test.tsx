@@ -360,6 +360,7 @@ describe('/me/attendance — the computed layer', () => {
       worked_minutes: 540,
       late_minutes: 0,
       undertime_minutes: 0,
+      unpaid_overtime_minutes: 0,
       status: 'final',
       is_incomplete: false,
       rule_version_id: 'rv1',

@@ -61,6 +61,7 @@ final class DailyComputation
                 workedMinutes: 0,
                 lateMinutes: 0,
                 undertimeMinutes: 0,
+                unpaidOvertimeMinutes: 0,
                 isIncomplete: true,
                 lines: [],
             );
@@ -76,8 +77,12 @@ final class DailyComputation
 
         $keptIntervals = self::trimTail($paired->intervals, $breakDeducted);
 
-        [$regularDay, $regularNight, $overtimeDay, $overtimeNight] =
-            self::splitBuckets($keptIntervals, $in->overtimeThresholdMinutes);
+        $paidCeiling = $in->isArt82Exempt
+            ? PHP_INT_MAX
+            : $in->overtimeThresholdMinutes + $in->approvedOvertimeMinutes;
+
+        [$regularDay, $regularNight, $overtimeDay, $overtimeNight, $excess] =
+            self::splitBuckets($keptIntervals, $in->overtimeThresholdMinutes, $paidCeiling);
 
         $lines = self::buildLines($in, $regularDay, $regularNight, $overtimeDay, $overtimeNight);
 
@@ -89,6 +94,7 @@ final class DailyComputation
             workedMinutes: $net->value,
             lateMinutes: $late,
             undertimeMinutes: $undertime,
+            unpaidOvertimeMinutes: $excess,
             isIncomplete: false,
             lines: $lines,
         );
@@ -137,6 +143,7 @@ final class DailyComputation
             workedMinutes: 0,
             lateMinutes: 0,
             undertimeMinutes: $undertime,
+            unpaidOvertimeMinutes: 0,
             isIncomplete: false,
             lines: $lines,
         );
@@ -218,23 +225,26 @@ final class DailyComputation
     }
 
     /**
-     * Walks the (post-break) intervals in chronological order, slicing each at the
-     * point the running total crosses $overtimeThreshold, and prices the day/night split
-     * of each resulting slice.
+     * Walks the (post-break) intervals in chronological order, attributing minutes to three
+     * regions by two boundaries: regular below overtimeThreshold, PAID overtime between
+     * overtimeThreshold and paidCeiling, and unpaid EXCESS beyond paidCeiling. Each priced
+     * region is day/night split; the excess is a bare magnitude (unpaid — day/night is moot).
      *
      * @param  list<WorkInterval>  $intervals
-     * @return array{0: int, 1: int, 2: int, 3: int} regularDay, regularNight, overtimeDay, overtimeNight
+     * @return array{0: int, 1: int, 2: int, 3: int, 4: int} regularDay, regularNight, overtimeDay, overtimeNight, excess
      */
-    private static function splitBuckets(array $intervals, int $overtimeThreshold): array
+    private static function splitBuckets(array $intervals, int $overtimeThreshold, int $paidCeiling): array
     {
         $regularDay = 0;
         $regularNight = 0;
         $overtimeDay = 0;
         $overtimeNight = 0;
+        $excess = 0;
         $runningBefore = 0;
 
         foreach ($intervals as $interval) {
-            [$regularPart, $overtimePart] = self::splitAtBoundary($interval, $runningBefore, $overtimeThreshold);
+            // First boundary: regular vs. the rest (paid OT + excess).
+            [$regularPart, $rest] = self::splitAtBoundary($interval, $runningBefore, $overtimeThreshold);
 
             if ($regularPart !== null) {
                 $split = NightDiffSplitter::split($regularPart);
@@ -242,16 +252,29 @@ final class DailyComputation
                 $regularDay += $split->outside->value;
             }
 
-            if ($overtimePart !== null) {
-                $split = NightDiffSplitter::split($overtimePart);
-                $overtimeNight += $split->inside->value;
-                $overtimeDay += $split->outside->value;
+            if ($rest !== null) {
+                // Running total at the start of $rest: the boundary if the interval crossed
+                // it, else where the interval began (it lies wholly beyond the threshold).
+                $runningAtRest = max($runningBefore, $overtimeThreshold);
+
+                // Second boundary: paid overtime vs. unpaid excess.
+                [$paidPart, $excessPart] = self::splitAtBoundary($rest, $runningAtRest, $paidCeiling);
+
+                if ($paidPart !== null) {
+                    $split = NightDiffSplitter::split($paidPart);
+                    $overtimeNight += $split->inside->value;
+                    $overtimeDay += $split->outside->value;
+                }
+
+                if ($excessPart !== null) {
+                    $excess += $excessPart->duration()->value;
+                }
             }
 
             $runningBefore += $interval->duration()->value;
         }
 
-        return [$regularDay, $regularNight, $overtimeDay, $overtimeNight];
+        return [$regularDay, $regularNight, $overtimeDay, $overtimeNight, $excess];
     }
 
     /**

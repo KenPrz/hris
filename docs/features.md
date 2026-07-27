@@ -433,8 +433,40 @@ computes as a full day's paid leave (M7); nothing yet exports an approved leave 
 payroll-shaped report (also M7); and the chain still tops out at two decisions — there is
 no third hop for anything, because nothing needs one yet.
 
+## Pre-authorizing overtime *(M6c)*
+
+Overtime is only paid when it was approved in advance — and only up to the minutes that were
+approved. Working late by itself earns nothing extra; a pre-authorization is what turns some
+of those extra minutes into paid overtime, and the rest stays visible as unpaid time rather
+than quietly vanishing or being paid anyway.
+
+- **File an overtime request for a day you'll work long.** Any employee can file for their
+  own record — pick the date and the number of hours (in quarter-hour steps) you expect to
+  work past your schedule, with a required note. It's the same kind of self-service filing as
+  a leave request or an attendance correction, not something only an admin can do.
+- **One approval, on either queue.** Overtime is single-hop, like an attendance correction:
+  the moment you file, it shows up on **both** your manager's `/team/approvals` and your
+  office HR's `/office/approvals`, and whichever of them decides first settles it — no
+  two-step manager-then-HR hand-off. Approving it writes nothing to any balance; the approved
+  request itself is simply the cap the compute engine reads for that day.
+- **The engine pays the smaller of worked and approved.** On a day you actually worked past
+  your schedule, an approved request caps the paid overtime at its approved minutes — approve
+  one hour of a two-hour-long day and exactly one hour is paid as overtime. Whatever you
+  worked beyond the cap is recorded as **unpaid overtime**, a visible number on the day, never
+  paid and never silently dropped.
+- **No pre-authorization means no paid overtime.** Work a long day without an approved request
+  and the engine pays zero overtime for it — the whole excess shows up as unpaid overtime.
+  That's the strict model: overtime is a thing you ask for first, not something the clock
+  grants you by itself.
+- **Managers and field staff (Art. 82-exempt) are unaffected.** They earn no overtime premium
+  to begin with, so an overtime request neither helps nor applies — the same exemption that
+  already zeroes their holiday and night-differential premiums.
+
+**Deliberately not here yet:** the unpaid-overtime number is surfaced on the day, but nothing
+yet rolls it — or the paid overtime — into a payroll-shaped export (M7).
+
 ---
 
-*(Overtime pre-authorization — a pre-approved cap on how much overtime the engine will
-actually pay for — follows in the next milestone, reusing this exact same request-and-
-approval machinery a third time.)*
+*(That completes M6 — the whole request-and-approval subsystem: attendance corrections, leave,
+and overtime pre-authorization, all on one shared spine, two queues, and request card. Cutoffs,
+period locking, and the payroll export follow in M7.)*

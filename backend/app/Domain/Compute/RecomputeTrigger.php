@@ -19,4 +19,5 @@ enum RecomputeTrigger: string
     case ScheduleOverride = 'schedule_override';
     case OfficeDefault = 'office_default';
     case Leave = 'leave';
+    case Overtime = 'overtime';
 }

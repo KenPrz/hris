@@ -57,7 +57,7 @@ it('rejects a state outside the CHECK', function (): void {
 
 it('keeps the CHECK lists in sync with the enum cases', function (): void {
     // Golden list — documents the intended values and catches an enum rename.
-    expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment', 'leave'])
+    expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment', 'leave', 'overtime'])
         ->and(array_map(fn ($c) => $c->value, RequestState::cases()))->toBe(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']);
 
     // Live-constraint parity — reads the actual CHECK from Postgres so the migration's
@@ -161,6 +161,31 @@ it('accepts the leave request type at the DB level', function (): void {
     ]);
 
     expect($inserted)->toBeTrue();
+});
+
+it('accepts the overtime request type at the DB level', function (): void {
+    $employee = Employee::factory()->create();
+
+    $inserted = DB::table('requests')->insert([
+        'id' => (string) Illuminate\Support\Str::uuid7(),
+        'employee_id' => $employee->id,
+        'type' => 'overtime',
+        'state' => 'pending',
+        'note' => 'Requesting OT, July 30, 6-9pm.',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    expect($inserted)->toBeTrue();
+});
+
+it('admits overtime in the requests type check', function (): void {
+    // The CHECK list must equal RequestType::cases() — pin them together.
+    $checked = DB::selectOne(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'requests_type_check'"
+    )->def;
+    foreach (RequestType::cases() as $case) {
+        expect($checked)->toContain("'{$case->value}'");
+    }
 });
 
 it('rejects a type outside the widened CHECK', function (): void {

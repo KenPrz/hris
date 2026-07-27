@@ -8,6 +8,8 @@ use App\Domain\Pay\DayType;
 use App\Domain\Pay\SummaryLineKind;
 use App\Models\DailySummaryLine;
 use App\Models\Holiday;
+use App\Models\OvertimeDetail;
+use App\Models\Request;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 require_once __DIR__.'/support.php';
@@ -176,6 +178,16 @@ it('prices a rest day worked past 8h at rest-day base + rest-day OT, with zero l
     seedPayRule();
 
     $date = '2026-08-08'; // Saturday
+    // Under M6c's cap, the 120 rest-day OT minutes only price if pre-authorized — this test
+    // is about rest-day OT PRICING, so authorize them and keep the pricing assertion intact.
+    $request = Request::factory()->create([
+        'type' => 'overtime',
+        'employee_id' => $employee->id,
+        'state' => 'approved',
+        'decision_note' => null,
+    ]);
+    OvertimeDetail::query()->create(['request_id' => $request->id, 'date' => $date, 'minutes' => 120]);
+
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
     recordManualPunch($employee, $office, $date, '18:00', PunchDirection::Out);
 
@@ -195,6 +207,57 @@ it('prices a rest day worked past 8h at rest-day base + rest-day OT, with zero l
         ->and($byKind['overtime_day']->applied_bp)->toBe(16900);
 });
 
+it('persists unpaid_overtime_minutes for worked overtime nobody pre-authorized (strict default)', function (): void {
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+
+    $date = '2026-08-03'; // Monday: scheduled 540, 60m break.
+    // 08:00-19:00 gross 660, net 600 => 540 regular + 60 overtime. No approved OT => 60 unpaid.
+    recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
+    recordManualPunch($employee, $office, $date, '19:00', PunchDirection::Out);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    expect($summary->worked_minutes)->toBe(600)
+        ->and($summary->unpaid_overtime_minutes)->toBe(60)
+        ->and($summary->lines)->toHaveCount(1); // regular_day only — the overtime went unpaid.
+    expect($summary->lines->first()->kind)->toBe(SummaryLineKind::RegularDay);
+
+    $this->assertDatabaseHas('daily_attendance_summaries', [
+        'id' => $summary->id,
+        'unpaid_overtime_minutes' => 60,
+    ]);
+});
+
+it('pays worked overtime up to an approved pre-authorization and leaves the rest unpaid', function (): void {
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+
+    $date = '2026-08-03';
+    // 60 min of overtime worked (as above); only 30 approved => 30 paid overtime_day, 30 unpaid.
+    $request = Request::factory()->create([
+        'type' => 'overtime',
+        'employee_id' => $employee->id,
+        'state' => 'approved',
+        'decision_note' => null,
+    ]);
+    OvertimeDetail::query()->create(['request_id' => $request->id, 'date' => $date, 'minutes' => 30]);
+
+    recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
+    recordManualPunch($employee, $office, $date, '19:00', PunchDirection::Out);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    expect($summary->unpaid_overtime_minutes)->toBe(30);
+
+    $byKind = $summary->lines->keyBy(fn (DailySummaryLine $l) => $l->kind->value);
+    expect($byKind['regular_day']->minutes)->toBe(540)
+        ->and($byKind['overtime_day']->minutes)->toBe(30)
+        ->and($byKind['overtime_day']->applied_bp)->toBe(12500);
+});
+
 it('collapses every line to 10000bp for an Art. 82-exempt employee, even with overtime', function (): void {
     $office = computeOffice();
     $employee = computeEmployee($office, art82Exempt: true);
@@ -210,6 +273,7 @@ it('collapses every line to 10000bp for an Art. 82-exempt employee, even with ov
 
     expect($summary->is_art82_exempt)->toBeTrue()
         ->and($summary->worked_minutes)->toBe(600)
+        ->and($summary->unpaid_overtime_minutes)->toBe(0) // exempt is never capped
         ->and($summary->lines)->toHaveCount(2);
 
     foreach ($summary->lines as $line) {

@@ -15,6 +15,7 @@ function summary(overrides: Partial<DailySummary> = {}): DailySummary {
     worked_minutes: 480,
     late_minutes: 0,
     undertime_minutes: 0,
+    unpaid_overtime_minutes: 0,
     status: 'final',
     is_incomplete: false,
     rule_version_id: 'rv1',
@@ -92,6 +93,21 @@ describe('DaySummaryDetail', () => {
     render(<DaySummaryDetail summary={summary({ is_incomplete: false })} />)
 
     expect(screen.queryByText('incomplete')).not.toBeInTheDocument()
+  })
+
+  it('surfaces the unpaid excess line and badge when unpaid_overtime_minutes > 0', () => {
+    render(<DaySummaryDetail summary={summary({ unpaid_overtime_minutes: 60 })} />)
+
+    expect(screen.getByText('Unpaid excess')).toBeInTheDocument()
+    expect(screen.getByText('unpaid OT')).toBeInTheDocument()
+    expect(screen.getByText('1h')).toBeInTheDocument()
+  })
+
+  it('does not surface the unpaid excess line when unpaid_overtime_minutes is 0', () => {
+    render(<DaySummaryDetail summary={summary({ unpaid_overtime_minutes: 0 })} />)
+
+    expect(screen.queryByText('Unpaid excess')).not.toBeInTheDocument()
+    expect(screen.queryByText('unpaid OT')).not.toBeInTheDocument()
   })
 
   it('renders nothing, without throwing, when summary is undefined', () => {

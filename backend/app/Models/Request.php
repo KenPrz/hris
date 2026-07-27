@@ -92,4 +92,10 @@ final class Request extends Model implements HasMedia
     {
         return $this->hasOne(LeaveDetail::class, 'request_id');
     }
+
+    /** @return HasOne<OvertimeDetail, $this> */
+    public function overtimeDetail(): HasOne
+    {
+        return $this->hasOne(OvertimeDetail::class, 'request_id');
+    }
 }

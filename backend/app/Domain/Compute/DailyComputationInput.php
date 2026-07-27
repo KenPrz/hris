@@ -37,6 +37,11 @@ final readonly class DailyComputationInput
      *                                 never queries the database itself). Only consulted
      *                                 on the no-punches path; a day with punches prices
      *                                 from worked time regardless.
+     * @param  int  $approvedOvertimeMinutes  Overtime minutes pre-authorized for this
+     *   date (OvertimeAuthorizationLookup, resolved by the caller). The paid-overtime
+     *   ceiling is overtimeThresholdMinutes + this; worked minutes beyond it are unpaid
+     *   excess. 0 when nothing is approved (the strict model). Not consulted for an
+     *   art82-exempt employee, who has no overtime premium to withhold.
      */
     public function __construct(
         public array $punches,
@@ -49,5 +54,6 @@ final readonly class DailyComputationInput
         public bool $isArt82Exempt,
         public PayRates $rates,
         public bool $onApprovedLeave,
+        public int $approvedOvertimeMinutes,
     ) {}
 }

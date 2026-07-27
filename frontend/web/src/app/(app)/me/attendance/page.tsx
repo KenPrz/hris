@@ -33,6 +33,7 @@ import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
 import { CorrectionForm } from '@/components/domain/CorrectionForm'
+import { OvertimeRequestForm } from '@/components/domain/OvertimeRequestForm'
 import { DayCell } from '@/components/domain/DayCell'
 import { DaySummaryDetail } from '@/components/domain/DaySummaryDetail'
 import { DaySummaryIndicator } from '@/components/domain/DaySummaryIndicator'
@@ -142,6 +143,12 @@ export default function AttendancePage() {
   // neither a stale draft nor a stale success notice leaks onto the next day inspected.
   const [correctionFormOpen, setCorrectionFormOpen] = useState(false)
   const [correctionSubmitted, setCorrectionSubmitted] = useState(false)
+  // The "File overtime" affordance in that same panel, mirroring the correction pair:
+  // `overtimeFormOpen` reveals `OvertimeRequestForm` (seeded with the inspected day),
+  // `overtimeSubmitted` flips on once it calls back via `onDone`. Both reset with the
+  // correction pair whenever a different day is selected, so no stale draft or notice leaks.
+  const [overtimeFormOpen, setOvertimeFormOpen] = useState(false)
+  const [overtimeSubmitted, setOvertimeSubmitted] = useState(false)
 
   // Same query key when browsing the current month — TanStack Query dedupes it into one
   // request, so this never doubles the fetch in the common case.
@@ -165,11 +172,18 @@ export default function AttendancePage() {
     setSelectedDate(nextDate)
     setCorrectionFormOpen(false)
     setCorrectionSubmitted(false)
+    setOvertimeFormOpen(false)
+    setOvertimeSubmitted(false)
   }
 
   function closeAndToast(): void {
     setCorrectionFormOpen(false)
     setCorrectionSubmitted(true)
+  }
+
+  function closeOvertimeAndToast(): void {
+    setOvertimeFormOpen(false)
+    setOvertimeSubmitted(true)
   }
 
   const summariesByDate = summaryByDate(summaryQuery.data ?? [])
@@ -389,6 +403,29 @@ export default function AttendancePage() {
                     <div>
                       <Button variant="secondary" onClick={() => setCorrectionFormOpen(true)}>
                         Request correction
+                      </Button>
+                    </div>
+                  )}
+
+                  {overtimeSubmitted ? (
+                    <InlineNotification kind="success" title="Overtime request submitted.">
+                      It&rsquo;s pending approval — check &ldquo;My requests&rdquo; for its status.
+                    </InlineNotification>
+                  ) : null}
+
+                  {overtimeFormOpen ? (
+                    <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+                      <OvertimeRequestForm defaultDate={selectedDate} onDone={closeOvertimeAndToast} />
+                      <div>
+                        <Button variant="ghost" onClick={() => setOvertimeFormOpen(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <Button variant="secondary" onClick={() => setOvertimeFormOpen(true)}>
+                        File overtime
                       </Button>
                     </div>
                   )}

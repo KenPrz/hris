@@ -55,7 +55,7 @@ final class ApprovalQueues
         // single-hop request types (those with requiresHrStep()===false). Kept explicit and
         // in sync with RequestType::requiresHrStep() — as new single-hop types are added,
         // list them here.
-        $singleHopTypes = [RequestType::AttendanceAdjustment->value];
+        $singleHopTypes = [RequestType::AttendanceAdjustment->value, RequestType::Overtime->value];
 
         // /office awaits HR's hop: a single-hop request is HR's the moment it's pending (HR
         // is the only decider it ever needs), while a two-hop request only reaches HR once

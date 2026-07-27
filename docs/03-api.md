@@ -274,8 +274,8 @@ read by M5a's compute engine below, not by either endpoint here.
 ```
 GET /api/v1/me/attendance/summary?month=YYYY-MM        # auth:sanctum — own computed days only
   → { data: [ { date, day_type, is_rest_day, scheduled_minutes, is_art82_exempt,
-                worked_minutes, late_minutes, undertime_minutes, status, is_incomplete,
-                rule_version_id,
+                worked_minutes, late_minutes, undertime_minutes, unpaid_overtime_minutes,
+                status, is_incomplete, rule_version_id,
                 lines: [ { kind, minutes, applied_bp }, … ] }, … ] }   # ordered by date
   → 400 validation_failed   # month missing, or not YYYY-MM
   → 422 not_an_employee     # caller has no linked employee record — same rule as /me/attendance
@@ -295,7 +295,10 @@ invents a zero-value row for a day nothing has computed.
 stored: integer minutes, integer basis points, never a peso.** `rule_version_id` is the
 `pay_rules` version (`03-api.md`'s pay-rules section above) that priced the day's lines —
 null on a day with no lines (no configured version yet, an incomplete day, an unworked rest
-day, …), per the same rule the schema section states.
+day, …), per the same rule the schema section states. `unpaid_overtime_minutes` (added M6c)
+is the overtime worked beyond the day's approved cap — paid overtime shows as
+`overtime_day`/`overtime_night` lines up to `min(actual, approved)`, and everything past
+that is this count, not a line (see the Overtime section below, and `02-data-model.md`).
 
 This is the **only** read M5a adds; there is no write endpoint here. `ComputeDailySummary`
 runs exclusively from the synchronous on-punch trigger (`02-data-model.md`) — a manual,
@@ -1070,6 +1073,60 @@ the manager's decision moves it to `manager_approved` with the balance and the r
 final decision is what debits the ledger and triggers the recompute, and a second,
 independent request that is instead rejected at HR's hop leaves the balance and the
 debit-row count untouched.
+
+## Overtime — pre-authorization *(M6c)*
+
+Overtime is the third request type on the shared spine, after attendance adjustments and
+leave. It is **single-hop** (`RequestType::Overtime->requiresHrStep()` is `false`), so it
+routes exactly like a single-hop attendance adjustment, not like two-hop leave: a pending
+request is on the manager's `/team/approvals` AND office HR's `/office/approvals` from the
+moment it is filed, and the single approval lands it `approved`.
+
+### Submit
+
+```
+POST /api/v1/overtime/requests    # auth:sanctum — any employee, for their own record
+  body: { "date": "2026-11-09", "hours": 1, "note": "Covering the month-end close" }
+  → 201 { data: <request, type: "overtime", state: "pending", detail: { date, minutes }> }
+  → 400 validation_failed   # date missing/not a date, hours missing/≤0, or hours not a whole
+                            #   number of minutes (e.g. 1.01h); note missing
+  → 422 not_an_employee     # caller has no linked employee record
+```
+
+`hours` is client-facing quarter-hour granularity; the controller converts it to the integer
+`minutes` the domain stores (`1` → `60`), and rejects any value that would not land on a
+whole minute rather than silently rounding. The detail shape is `{ date, minutes }` — the
+same envelope every request read returns, only `detail`'s inner fields differing by type per
+`RequestResource`'s branch. Filing is deliberately not admin-gated: any employee files their
+own, exactly like `POST /attendance/adjustments` and `POST /leave/requests`.
+
+### Decision, and what approval does
+
+Decisions run through the **same** `/requests/{request}/approve|reject|cancel`,
+`/team/approvals`, `/office/approvals`, `/requests`, and `/requests/{request}` endpoints M6a
+shipped — no new decision or list routes. Because overtime is single-hop, either the manager
+(`/team`) or an HR admin of the requester's office (`/office`) may approve, and that one
+approval is final:
+
+```
+POST /api/v1/requests/{request}/approve   # a single-hop overtime approval
+  → 200 { data: <request, state: "approved", decided_by, decided_at> }
+```
+
+**`OvertimeEffect` writes nothing** — no ledger, no balance, no lock (unlike `LeaveEffect`).
+The approved request plus its `overtime_details.minutes` IS the authorization; the effect
+only enqueues a recompute of the authorized date after commit. Once that queued recompute
+drains, the day re-prices under the cap: `overtime_day`/`overtime_night` lines totalling
+`min(actual_overtime, approved_minutes)`, with anything worked beyond that in
+`daily_attendance_summaries.unpaid_overtime_minutes` (the summary read above). A day with no
+approved overtime pays zero and books its full overtime as unpaid — the strict model.
+
+`scripts/e2e-leave-and-ot.sh` proves it live: a long day read before any request pays zero
+overtime and books it all unpaid; a 1-hour pre-authorization appears at once on both the
+manager's and HR's queues, and the manager's single approval re-prices the day to exactly
+the approved cap with the excess dropping by that amount, no ledger touched; a second
+identical day with no request pays zero overtime and books its full overtime as unpaid; and
+`scripts/e2e-leave.sh` runs unchanged alongside it, proving the two paths coexist.
 
 ## Errors
 

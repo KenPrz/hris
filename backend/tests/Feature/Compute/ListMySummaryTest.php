@@ -41,7 +41,7 @@ it('returns my computed month, with lines, ordered by date', function (): void {
     $user = User::factory()->create();
     $me = Employee::factory()->for($user)->create();
 
-    $first = seedSummary($me, '2026-08-03');
+    $first = seedSummary($me, '2026-08-03', ['unpaid_overtime_minutes' => 45]);
     $first->lines()->create(['kind' => SummaryLineKind::RegularDay, 'minutes' => 480, 'applied_bp' => 10000]);
 
     $second = seedSummary($me, '2026-08-01');
@@ -74,6 +74,7 @@ it('returns my computed month, with lines, ordered by date', function (): void {
         'worked_minutes' => 480,
         'late_minutes' => 0,
         'undertime_minutes' => 0,
+        'unpaid_overtime_minutes' => 45,
         'status' => 'computed',
         'is_incomplete' => false,
     ]);
