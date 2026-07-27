@@ -6,6 +6,7 @@ use App\Domain\Requests\RequestState;
 use App\Domain\Requests\RequestType;
 use App\Models\Employee;
 use App\Models\Request;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -57,7 +58,7 @@ it('rejects a state outside the CHECK', function (): void {
 it('keeps the CHECK lists in sync with the enum cases', function (): void {
     // Golden list — documents the intended values and catches an enum rename.
     expect(array_map(fn ($c) => $c->value, RequestType::cases()))->toBe(['attendance_adjustment'])
-        ->and(array_map(fn ($c) => $c->value, RequestState::cases()))->toBe(['pending', 'approved', 'rejected', 'cancelled']);
+        ->and(array_map(fn ($c) => $c->value, RequestState::cases()))->toBe(['pending', 'manager_approved', 'approved', 'rejected', 'cancelled']);
 
     // Live-constraint parity — reads the actual CHECK from Postgres so the migration's
     // value list cannot drift from the enum independently (adding a case without widening
@@ -108,4 +109,41 @@ it('rejects a rejected request with no decision_note at the DB level', function 
 
     // A rejection with no decision_note is refused by requests_rejected_note_check.
     expect(fn () => $insert('rejected', null))->toThrow(Illuminate\Database\QueryException::class);
+});
+
+it('admits the manager_approved intermediate state and round-trips the hop-1 decision columns', function (): void {
+    $employee = Employee::factory()->create();
+    $manager = User::factory()->create();
+
+    $id = (string) Illuminate\Support\Str::uuid7();
+    $managerDecidedAt = now();
+
+    DB::table('requests')->insert([
+        'id' => $id,
+        'employee_id' => $employee->id,
+        'type' => 'attendance_adjustment',
+        'state' => 'manager_approved',
+        'note' => 'x',
+        'manager_decided_by' => $manager->id,
+        'manager_decided_at' => $managerDecidedAt,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $row = DB::table('requests')->where('id', $id)->first();
+    expect($row->state)->toBe('manager_approved')
+        ->and($row->manager_decided_by)->toBe($manager->id)
+        ->and($row->manager_decided_at)->not->toBeNull();
+});
+
+it('still rejects a state outside the widened CHECK', function (): void {
+    $employee = Employee::factory()->create();
+
+    expect(fn () => DB::table('requests')->insert([
+        'id' => (string) Illuminate\Support\Str::uuid7(),
+        'employee_id' => $employee->id,
+        'type' => 'attendance_adjustment',
+        'state' => 'bogus',
+        'note' => 'x',
+        'created_at' => now(), 'updated_at' => now(),
+    ]))->toThrow(Illuminate\Database\QueryException::class);
 });

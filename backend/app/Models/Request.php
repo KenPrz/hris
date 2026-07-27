@@ -28,6 +28,7 @@ final class Request extends Model implements HasMedia
             'type' => RequestType::class,
             'state' => RequestState::class,
             'decided_at' => 'datetime',
+            'manager_decided_at' => 'datetime',
         ];
     }
 
