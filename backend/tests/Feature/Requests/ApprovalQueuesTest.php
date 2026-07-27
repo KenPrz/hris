@@ -199,3 +199,22 @@ it('keeps a single-hop attendance_adjustment pending request in both queues, unc
     expect(collect($teamRes->json('data'))->pluck('id')->all())->toContain($adjustment->id)
         ->and(collect($officeRes->json('data'))->pluck('id')->all())->toContain($adjustment->id);
 });
+
+it('keeps a single-hop overtime pending request in both queues, unchanged', function (): void {
+    [$manager, $report] = makeManagerReportStranger();
+    $office = $manager->currentOffice;
+    $hrUser = User::factory()->create();
+    Employee::factory()->for($hrUser)->create(['current_office_id' => $office->id]);
+    $hrUser->hrAdminOffices()->attach($office->id);
+
+    $overtime = Request::factory()->for($report, 'employee')->create([
+        'type' => RequestType::Overtime,
+        'state' => RequestState::Pending,
+    ]);
+
+    $teamRes = actingAs($manager->user)->getJson('/api/v1/team/approvals')->assertOk();
+    $officeRes = actingAs($hrUser)->getJson('/api/v1/office/approvals')->assertOk();
+
+    expect(collect($teamRes->json('data'))->pluck('id')->all())->toContain($overtime->id)
+        ->and(collect($officeRes->json('data'))->pluck('id')->all())->toContain($overtime->id);
+});
