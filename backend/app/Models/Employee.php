@@ -5,17 +5,20 @@ declare(strict_types=1);
 namespace App\Models;
 
 use Database\Factories\EmployeeFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Employee extends Model
 {
     /** @use HasFactory<EmployeeFactory> */
-    use HasFactory, HasUuids;
+    use HasFactory, HasUuids, LogsActivity;
 
     protected $guarded = [];
 
@@ -78,5 +81,19 @@ final class Employee extends Model
     public function employmentRecords(): HasMany
     {
         return $this->hasMany(EmploymentRecord::class);
+    }
+
+    /** Composes first/middle/last/suffix, collapsing extra whitespace from a null middle/suffix. */
+    protected function fullName(): Attribute
+    {
+        return Attribute::make(get: fn (): string => trim(preg_replace('/\s+/', ' ', trim("{$this->first_name} {$this->middle_name} {$this->last_name} {$this->name_suffix}"))));
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['employee_no', 'first_name', 'middle_name', 'last_name', 'name_suffix', 'organization_id', 'hired_at', 'separated_at'])
+            ->useLogName('employee')
+            ->logOnlyDirty();
     }
 }
