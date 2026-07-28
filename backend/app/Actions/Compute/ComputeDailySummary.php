@@ -141,6 +141,11 @@ final class ComputeDailySummary
             // committed first we see `closed` here and skip; if we commit first, the close freezes our
             // result. This subsumes RecomputeDay's old plain status read and also blocks a brand-new
             // summary from being created inside a closed period (which the status read could not).
+            $existing = DailyAttendanceSummary::query()
+                ->where('employee_id', $employee->id)
+                ->whereDate('date', $date)
+                ->first();
+
             $inClosedPeriod = CutoffPeriod::query()
                 ->where('office_id', $officeId)
                 ->where('state', 'closed')
@@ -148,14 +153,17 @@ final class ComputeDailySummary
                 ->whereDate('end_date', '>=', $date)
                 ->exists();
 
-            if ($inClosedPeriod) {
+            // Defense-in-depth alongside the period check above: an already-`locked` summary is
+            // never recomputed, regardless of the re-resolved office. The period check keys on
+            // $officeId (from the employment record effective on the date); if a day were
+            // retroactively reassigned to a different office AFTER being locked, that check could
+            // miss it, but the row's own `locked` status still forbids overwriting it. Together
+            // they make "a locked summary is never recomputed" hold unconditionally.
+            if ($inClosedPeriod || $existing?->status === 'locked') {
                 // Return type is DailyAttendanceSummary; RecomputeDay/RecordPunch/ApplyAttendanceAdjustment
                 // all ignore the value. Hand back the frozen row if one exists, else an unsaved null-object
                 // (->exists === false) for the summary-less closed day — nothing to compute into it.
-                return DailyAttendanceSummary::query()
-                    ->where('employee_id', $employee->id)
-                    ->whereDate('date', $date)
-                    ->first() ?? new DailyAttendanceSummary;
+                return $existing ?? new DailyAttendanceSummary;
             }
 
             DailyAttendanceSummary::query()

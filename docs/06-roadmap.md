@@ -1495,7 +1495,12 @@ rest of the "Done when" above — is **M7b**, next.
   is not covered by the per-employee lock (there was nothing to lock). Low severity: the
   period-aware recompute guard still makes that row immutable to any *future* recompute, so the
   value is correct — only the status label reads `computed` rather than `locked`. A
-  sweep-on-first-compute is deferred.
+  sweep-on-first-compute is deferred. Two nuances for M7b: (a) that leaked row can be
+  `is_incomplete=true`, so a closed period could contain an incomplete day the close gate was
+  meant to forbid — the label is wrong AND the day may be unfinished; and (b) **M7b's payroll
+  export must therefore key off period MEMBERSHIP (office + date range), NOT the `status='locked'`
+  label** — a membership-based selection still captures a leaked `computed` row, whereas a
+  status-based one would silently exclude it from the export.
 - **Adjustment cross-midnight business-date imprecision in `RequestAffectedDates`.** It
   resolves an attendance adjustment to the punch's office-timezone *calendar* date, which for a
   cross-midnight shift can differ by a day from the *business* date its summary is keyed by.

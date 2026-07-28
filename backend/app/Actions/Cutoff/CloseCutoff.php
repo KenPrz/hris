@@ -65,7 +65,12 @@ final class CloseCutoff
             }
 
             // --- Freeze, per-employee under the shared row lock ---
-            foreach ($summaries->pluck('employee_id')->unique() as $employeeId) {
+            // Sort the employee ids before locking so every cutoff operation on this office
+            // acquires the shared Employee row locks in the SAME (ascending id) order. Two
+            // concurrent multi-employee closes/reopens on the same office would otherwise be
+            // free to take overlapping locks in opposite orders — a classic AB-BA deadlock
+            // Postgres aborts as a 500. A total lock order makes them queue instead.
+            foreach ($summaries->pluck('employee_id')->unique()->sort()->values() as $employeeId) {
                 Employee::query()->lockForUpdate()->findOrFail($employeeId);
 
                 DailyAttendanceSummary::query()
