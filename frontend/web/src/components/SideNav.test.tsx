@@ -161,7 +161,12 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/office/cutoffs', label: 'Cutoffs' },
       { href: '/office/approvals', label: 'Approvals' },
     ])
-    expect(byKey.admin?.items).toEqual([{ href: '/admin/pay-rules', label: 'Pay rules' }])
+    expect(byKey.admin?.items).toEqual([
+      { href: '/admin/pay-rules', label: 'Pay rules' },
+      { href: '/admin/organizations', label: 'Organizations' },
+      { href: '/admin/offices', label: 'Offices' },
+      { href: '/admin/departments', label: 'Departments' },
+    ])
   })
 })
 
@@ -227,6 +232,26 @@ describe('SideNav — rendered', () => {
     const payRulesLink = await screen.findByRole('link', { name: 'Pay rules' })
     expect(payRulesLink).toHaveAttribute('href', '/admin/pay-rules')
     expect(screen.getByText('Admin')).toBeInTheDocument()
+  })
+
+  it('a sysadmin sees the org tree links (M8a): Organizations, Offices, Departments', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ is_system_admin: true }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    const organizationsLink = await screen.findByRole('link', { name: 'Organizations' })
+    expect(organizationsLink).toHaveAttribute('href', '/admin/organizations')
+
+    const officesLink = await screen.findByRole('link', { name: 'Offices' })
+    expect(officesLink).toHaveAttribute('href', '/admin/offices')
+
+    const departmentsLink = await screen.findByRole('link', { name: 'Departments' })
+    expect(departmentsLink).toHaveAttribute('href', '/admin/departments')
   })
 
   it('a non-sysadmin does not see the Admin group or the Pay rules link', async () => {

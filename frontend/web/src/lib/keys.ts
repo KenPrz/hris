@@ -8,6 +8,8 @@
  * endpoints that don't exist yet.
  */
 
+import type { AdminDepartmentListParams, AdminOfficeListParams } from './api'
+
 export const keys = {
   session: () => ['session'] as const,
   employees: {
@@ -52,5 +54,19 @@ export const keys = {
     // or office-default change alters what `ScheduleResolver` produces for potentially any
     // employee, so those mutations invalidate this whole prefix — not one employee's key.
     resolvedAll: () => ['schedules', 'resolved'] as const,
+  },
+  // The org tree (M8a). `offices`/`departments` take their list params as a trailing
+  // key segment when present, but every mutation invalidates the no-params form
+  // (`keys.admin.offices()`/`departments()`) — TanStack Query matches query keys by
+  // array PREFIX, so invalidating the shorter key catches every params-filtered list
+  // too, without the mutation needing to know which filter the screen is viewing.
+  admin: {
+    organizations: () => ['admin', 'organizations'] as const,
+    offices: (params?: AdminOfficeListParams) =>
+      params !== undefined ? (['admin', 'offices', params] as const) : (['admin', 'offices'] as const),
+    departments: (params?: AdminDepartmentListParams) =>
+      params !== undefined
+        ? (['admin', 'departments', params] as const)
+        : (['admin', 'departments'] as const),
   },
 }

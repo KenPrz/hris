@@ -46,7 +46,12 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
     { href: '/office/cutoffs', label: 'Cutoffs' },
     { href: '/office/approvals', label: 'Approvals' },
   ],
-  admin: [{ href: '/admin/pay-rules', label: 'Pay rules' }],
+  admin: [
+    { href: '/admin/pay-rules', label: 'Pay rules' },
+    { href: '/admin/organizations', label: 'Organizations' },
+    { href: '/admin/offices', label: 'Offices' },
+    { href: '/admin/departments', label: 'Departments' },
+  ],
 }
 
 const GROUP_LABEL: Record<NavGroupKey, string> = {
