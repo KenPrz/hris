@@ -92,14 +92,49 @@ describe('PayrollExportView', () => {
     expect(screen.queryByText('incomplete days')).not.toBeInTheDocument()
   })
 
-  it('shows base_rate_cents as an integer-centavos reference', () => {
+  it('formats base_rate_cents through formatCentavos', () => {
     render(
       <PayrollExportView
         data={exportData({ employees: [employee({ employee: { id: 'emp-1', employee_no: 'E-001', base_rate_cents: 50000 } })] })}
       />,
     )
 
-    expect(screen.getByText(/50000/)).toBeInTheDocument()
+    expect(screen.getByText(/₱500\.00/)).toBeInTheDocument()
+  })
+
+  it('shows an em dash when base_rate_cents is null', () => {
+    render(
+      <PayrollExportView
+        data={exportData({ employees: [employee({ employee: { id: 'emp-1', employee_no: 'E-001', base_rate_cents: null } })] })}
+      />,
+    )
+
+    expect(screen.getByText(/Base rate:\s*—/)).toBeInTheDocument()
+  })
+
+  it('renders both lines when two lines share the same kind under different rule versions (period straddling a pay_rules version change)', () => {
+    render(
+      <PayrollExportView
+        data={exportData({
+          employees: [
+            employee({
+              lines: [
+                { kind: 'regular_day', applied_bp: 10000, rule_version_id: 'rv1', minutes: 2400 },
+                { kind: 'regular_day', applied_bp: 10000, rule_version_id: 'rv2', minutes: 1200 },
+              ],
+            }),
+          ],
+        })}
+      />,
+    )
+
+    // Distinct minute totals for each half of the straddled period prove neither row was
+    // dropped by a React key collision on the (formerly key={line.kind}) row key.
+    expect(screen.getByText('40h')).toBeInTheDocument()
+    expect(screen.getByText('20h')).toBeInTheDocument()
+
+    const table = screen.getByRole('table', { name: /E-001 earnings/i })
+    expect(within(table).getAllByText('Regular (day)')).toHaveLength(2)
   })
 
   it('renders an empty state when the period has no employees', () => {

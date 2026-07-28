@@ -7,13 +7,15 @@
  *
  * The earnings lines reuse `DaySummaryDetail`'s `LINE_LABEL` and `bpToPercent`, so a payroll
  * line reads identically to the same kind on the day calendar — one copy of the wording, one
- * definition of "basis points to a percent". `base_rate_cents` is shown verbatim as integer
- * centavos: a reference an operator reconciles against, never peso math this screen invents.
+ * definition of "basis points to a percent". `base_rate_cents` is formatted through
+ * `lib/money.ts`'s `formatCentavos`: a reference an operator reconciles against, never peso
+ * math this screen invents.
  */
 
 import type { CSSProperties } from 'react'
 
 import type { PayrollExport, PayrollEmployeeExport } from '@/lib/api'
+import { formatCentavos } from '@/lib/money'
 import { EmptyState } from '../EmptyState'
 import { Tag } from '../Tag'
 import { LINE_LABEL, bpToPercent } from './DaySummaryDetail'
@@ -23,10 +25,11 @@ export interface PayrollExportViewProps {
   data: PayrollExport
 }
 
-/** `50000` -> `"50000¢"` reference label; a missing rate reads as an em dash, never a zero.
- * Integer centavos verbatim — this screen never does peso math. */
+/** `50000` -> `"₱500.00"` reference label via the shared money formatter; a missing rate
+ * reads as an em dash, never a zero. Display formatting only — this screen never does peso
+ * math. */
 function baseRateLabel(cents: number | null): string {
-  return cents === null ? '—' : `${cents}¢`
+  return cents === null ? '—' : formatCentavos(cents)
 }
 
 const LINE_HEAD: CSSProperties = {
@@ -109,7 +112,7 @@ function EmployeeSection({ employee }: { employee: PayrollEmployeeExport }) {
             </thead>
             <tbody>
               {lines.map((line) => (
-                <tr key={line.kind}>
+                <tr key={`${line.kind}-${line.applied_bp}-${line.rule_version_id ?? 'null'}`}>
                   <td style={{ ...LINE_CELL, textAlign: 'left' }}>{LINE_LABEL[line.kind]}</td>
                   <td style={{ ...LINE_CELL, textAlign: 'right', color: 'var(--ink-muted)' }}>
                     {bpToPercent(line.applied_bp)}%
