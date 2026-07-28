@@ -6,6 +6,11 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
+use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
+use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
+use App\Http\Controllers\Admin\Offices\UnarchiveController as UnarchiveOfficeController;
+use App\Http\Controllers\Admin\Offices\UpdateController as UpdateOfficeController;
 use App\Http\Controllers\Admin\Organizations\CreateController as CreateOrganizationController;
 use App\Http\Controllers\Admin\Organizations\ListController as ListOrganizationsController;
 use App\Http\Controllers\Admin\Organizations\UpdateController as UpdateOrganizationController;
@@ -168,6 +173,18 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/organizations', ListOrganizationsController::class);
             Route::post('/organizations', CreateOrganizationController::class);
             Route::patch('/organizations/{organization}', UpdateOrganizationController::class);
+
+            // Offices — the org tree's second tier, same is_system_admin gating as
+            // organizations above (not OfficeScope: you can't scope-check an office by
+            // itself). Archive-never-delete: no DELETE route, only archive/unarchive
+            // toggles on the nullable archived_at column (M8a Task 3). The generic
+            // AlreadyArchived/NotArchived exceptions these two throw are reused verbatim
+            // by departments (Task 4).
+            Route::get('/offices', ListOfficesController::class);
+            Route::post('/offices', CreateOfficeController::class);
+            Route::patch('/offices/{office}', UpdateOfficeController::class);
+            Route::post('/offices/{office}/archive', ArchiveOfficeController::class);
+            Route::post('/offices/{office}/unarchive', UnarchiveOfficeController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
