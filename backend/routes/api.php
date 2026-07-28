@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
 use App\Http\Controllers\Admin\Employees\ShowController as ShowEmployeeAdminController;
 use App\Http\Controllers\Admin\Employees\UpdateEmployeeController;
+use App\Http\Controllers\Admin\ListActivityController;
 use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
 use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
 use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
@@ -212,6 +213,12 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/departments/{department}', UpdateDepartmentController::class);
             Route::post('/departments/{department}/archive', ArchiveDepartmentController::class);
             Route::post('/departments/{department}/unarchive', UnarchiveDepartmentController::class);
+
+            // The read-only audit viewer (M8c Task 1) — a filterable, paginated window
+            // over the Spatie activity log every LogsActivity model already writes to.
+            // Same is_system_admin gating as the rest of this group: the log spans every
+            // subject type company-wide, nothing to scope-check against a single office.
+            Route::get('/activity', ListActivityController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
