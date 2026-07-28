@@ -6,6 +6,9 @@ use App\Http\Controllers\Admin\Attendance\ManualPunchController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Organizations\CreateController as CreateOrganizationController;
+use App\Http\Controllers\Admin\Organizations\ListController as ListOrganizationsController;
+use App\Http\Controllers\Admin\Organizations\UpdateController as UpdateOrganizationController;
 use App\Http\Controllers\Admin\PayRules\CreateController as CreatePayRuleController;
 use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleController;
 use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
@@ -157,6 +160,14 @@ Route::prefix('v1')->group(function (): void {
             // PATCH/PUT route. A correction is a new version, never an edit in place.
             Route::get('/pay-rules/{payRule}', ShowPayRuleController::class);
             Route::delete('/pay-rules/{payRule}', DeletePayRuleController::class);
+
+            // The organization tree's root — global config, gated by each FormRequest's
+            // authorize() (is_system_admin) exactly like pay-rules above, not OfficeScope:
+            // there is no office to scope by yet (an organization is the parent an office
+            // belongs to), so a non-admin gets the default 403 rather than 404-not-403.
+            Route::get('/organizations', ListOrganizationsController::class);
+            Route::post('/organizations', CreateOrganizationController::class);
+            Route::patch('/organizations/{organization}', UpdateOrganizationController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
