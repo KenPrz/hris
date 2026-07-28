@@ -298,7 +298,7 @@ correction, M6a, below). Still absent: a roster of employees.
   attendance ledger a labor inspector would be shown stays byte-for-byte the same before
   and after, no matter how many times a day's price is recalculated.
 - **A closed period is never silently reopened by a recompute.** A day whose pay has
-  already been locked for a closed cutoff (a later milestone) is skipped, not
+  already been locked for a closed cutoff (M7a, below) is skipped, not
   recalculated — a config change never quietly rewrites numbers that have already been
   finalized.
 - **Every recompute is itself an audited event.** Adding, editing, cloning, or removing a
@@ -468,5 +468,38 @@ yet rolls it — or the paid overtime — into a payroll-shaped export (M7).
 ---
 
 *(That completes M6 — the whole request-and-approval subsystem: attendance corrections, leave,
-and overtime pre-authorization, all on one shared spine, two queues, and request card. Cutoffs,
-period locking, and the payroll export follow in M7.)*
+and overtime pre-authorization, all on one shared spine, two queues, and request card.)*
+
+## Closing a cutoff period *(M7a)*
+
+A pay period eventually has to stop moving so the numbers can be trusted and paid. M7a gives
+HR that control: each office runs on the standard PH semi-monthly calendar — the 1st–15th and
+the 16th–end-of-month — and HR can **close** a period once it's settled.
+
+- **HR closes a semi-monthly period.** An HR admin closes the current (or a past) window for an
+  office they administer. Closing **freezes every day in it**: each daily summary in the window
+  flips to *locked*, and the numbers stop changing. The employee sees their locked days on
+  their own attendance breakdown, exactly as computed — nothing is hidden or reshaped.
+- **A period won't close over an open problem.** If any day in the window is still *incomplete*
+  (a missing clock-out), or any leave, overtime, or attendance-correction request touching an
+  in-period day is still awaiting a decision, the close is **refused and tells HR exactly what
+  to resolve first** — the specific incomplete dates and the pending requests. You close a
+  clean period, never one with loose ends silently frozen inside it.
+- **A closed period refuses approvals on its days.** Once a period is closed, approving a
+  request that would change a day inside it is **refused** — the day is locked, and the correct
+  move is to reopen the period, not to force the change through. Filing a request is still
+  allowed; it just can't be approved onto a frozen day until the period reopens.
+- **Reopening is deliberate and audited.** HR can **reopen** a closed period, which unlocks
+  every day back to computed and lets those refused approvals go through — but it **requires a
+  reason**, and that reason is recorded in the audit log. Reopening is a visible, accountable
+  act, not a quiet escape hatch.
+- **The raw punch log never moves.** Closing, locking, and reopening only ever touch the
+  *derived* daily numbers — the append-only record of who punched when, which a labor inspector
+  would be shown, is never altered by any of it.
+
+**Deliberately not here yet:** the payroll **export** — rolling a closed period's locked days
+into a per-employee, per-period earnings report — is **M7b**, next.
+
+---
+
+*(Cutoffs and period locking are done in M7a; the payroll export follows in M7b.)*

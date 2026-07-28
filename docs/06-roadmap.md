@@ -1451,6 +1451,70 @@ rather than silently succeeding; the export reconciles line-for-line against the
 view; and `make restore-drill`-style, a recompute of a closed period returns byte-identical
 numbers.
 
+## M7a — Cutoffs and locking *(done)*
+
+The first half of M7: `cutoff_periods` and the close/lock/reopen spine. Payroll export — the
+rest of the "Done when" above — is **M7b**, next.
+
+- `cutoff_periods`, one row per office per semi-monthly window (1–15, 16–EOM — the
+  `CutoffCalendar` rule). A period is `open` or `closed`; a row only comes into existence the
+  first time `CloseCutoff` touches its window, so `GET /office/cutoffs` synthesizes the
+  current still-running window (unpersisted, `id: null`) rather than show a gap. There is no
+  FK from a summary to a period — the two relate derived-ly, by office + date range; see
+  `02-data-model.md`.
+- `CloseCutoff` runs a strict exception gate first — any in-period `is_incomplete` day or any
+  non-terminal (`pending`/`manager_approved`) request whose effect maps onto an in-period date
+  refuses the close with `cutoff_has_unresolved_exceptions`, listing exactly what to resolve —
+  and otherwise flips every in-period `daily_attendance_summaries.status` to `locked` and the
+  period to `closed`, in one transaction. Re-closing a closed period is `cutoff_already_closed`
+  (409); a non-boundary `period_start` is `invalid_cutoff_start` (422).
+- `ApproveRequest`, on its final hop, calls `CutoffGuard::assertOpen` and refuses with
+  `cutoff_locked` (422) any approval whose effect would change a day in a closed period. The
+  remedy is to reopen the period, never to force the approval through.
+- `ReopenCutoff` is the exact inverse: it requires a reason, is loudly audited (a
+  `cutoff_reopened` activity-log entry carrying the reason), flips the period back to `open`
+  and every in-period `locked` summary back to `computed`.
+- **The locking spine is one per-employee `Employee` row lock.** `CloseCutoff`, `ReopenCutoff`,
+  `ApproveRequest` (final hop), and `RecomputeDay` all `lockForUpdate()` the affected
+  `employees` row before touching that employee's summaries — so a close, an approval, and a
+  recompute for the same employee serialize against each other rather than interleave. Two
+  genuine two-real-Postgres-connections proofs pin this down, the kind
+  `04-backend-conventions.md` demands (a single-process sequential test would pass whether or
+  not the lock exists): `CloseVsApproveConcurrencyTest` (a close racing a final-hop approval —
+  exactly one wins; the loser sees the committed state and refuses cleanly) and
+  `CloseVsRecomputeConcurrencyTest` (a close racing a `RecomputeDay` over the same summary —
+  the freeze and the recompute never interleave). `ComputeSkipsClosedPeriodTest` proves the
+  period-aware guard keeps a closed period's summaries immutable to any future recompute.
+
+**KNOWN LIMITATION (deferred):**
+
+- **A first-ever compute racing a close, for an employee with ZERO in-period summaries, can
+  leave a `computed` (unlocked) row inside a closed period.** `CloseCutoff` locks and freezes
+  the summaries that exist when it runs; an employee whose very first summary for that window
+  is computed *after* the close began — and who therefore had no row for the close to lock —
+  is not covered by the per-employee lock (there was nothing to lock). Low severity: the
+  period-aware recompute guard still makes that row immutable to any *future* recompute, so the
+  value is correct — only the status label reads `computed` rather than `locked`. A
+  sweep-on-first-compute is deferred.
+- **Adjustment cross-midnight business-date imprecision in `RequestAffectedDates`.** It
+  resolves an attendance adjustment to the punch's office-timezone *calendar* date, which for a
+  cross-midnight shift can differ by a day from the *business* date its summary is keyed by.
+  Safe for the close gate (over-inclusion only), imprecise only for the `cutoff_locked` refusal
+  of a cross-midnight punch within a day of a period boundary. Precise business-date
+  attribution for adjustments is deferred.
+
+**Status: done.** `scripts/e2e-cutoffs.sh` proves it live against the seeded stack: Manila HR's
+attempt to close the second-half July window is refused (`cutoff_has_unresolved_exceptions`,
+naming the seed's one incomplete day); the clean first-half window closes, freezing every
+in-period summary `computed` → `locked` while the second half stays `computed`; re-closing is
+`cutoff_already_closed` and a non-boundary start `invalid_cutoff_start`; a manager's approval
+onto a locked in-period day is refused `cutoff_locked` and the request stays pending; reopening
+flips every summary back to `computed` and lets the same approval succeed; and the requester's
+raw `attendance_logs` are byte-identical before and after — the append-only ledger untouched.
+**705 backend tests (19 of them Arch) + 442 frontend tests**, all green.
+
+Next: **M7b — payroll export.**
+
 ## M8 — Admin portal and audit
 
 - Organization, office, and department CRUD; the multi-step employee profiler

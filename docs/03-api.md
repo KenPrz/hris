@@ -1128,6 +1128,87 @@ the approved cap with the excess dropping by that amount, no ledger touched; a s
 identical day with no request pays zero overtime and books its full overtime as unpaid; and
 `scripts/e2e-leave.sh` runs unchanged alongside it, proving the two paths coexist.
 
+## Office — cutoffs *(M7a)*
+
+Closing a semi-monthly cutoff period freezes its numbers: every in-period daily summary flips
+to `locked` and further approvals onto those days are refused. All three routes are gated by
+`OfficeScope` (the `cutoff.manage` verb + an `hr_admin_offices` row for the office); an
+out-of-scope or nonexistent office is `404`, indistinguishable (the 404-not-403 rule).
+
+### List
+
+```
+GET /api/v1/office/cutoffs?office={officeId}
+  → 200 { data: [ <period>, … ] }
+```
+
+Returns the office's stored periods, oldest first. **The current still-running window is
+synthesized** when no row exists for it yet (`id: null`, `state: "open"`) — a period row only
+comes into being once the window is closed, so this keeps "now" from ever being a gap. A
+period object:
+
+```json
+{ "id": "0199…",            // null for the synthesized current window
+  "office_id": "0199…",
+  "start_date": "2026-07-01",
+  "end_date": "2026-07-15",
+  "state": "open",           // "open" | "closed"
+  "closed_by": "0199…",      // null while open
+  "closed_at": "2026-07-15T09:00:00+00:00" }  // null while open
+```
+
+### Close
+
+```
+POST /api/v1/office/cutoffs/close
+  { "office_id": "0199…", "period_start": "2026-07-01" }
+  → 200 { data: <period, state: "closed"> }
+```
+
+`period_start` must be a window boundary — the **1st** or the **16th** (`CutoffCalendar`);
+anything else is `422 invalid_cutoff_start`. The close runs a **strict exception gate** first:
+if any in-period day is `is_incomplete`, or any non-terminal (`pending`/`manager_approved`)
+request's effect maps onto an in-period date, it refuses with `422
+cutoff_has_unresolved_exceptions` and `details` naming exactly what to resolve:
+
+```json
+{ "error": { "code": "cutoff_has_unresolved_exceptions",
+  "details": { "incomplete_dates": ["2026-07-24"], "pending_request_ids": ["0199…"] } } }
+```
+
+Otherwise it flips every in-period `daily_attendance_summaries.status` to `locked` and the
+period to `closed`, in one transaction. Closing an already-closed period is `409
+cutoff_already_closed`.
+
+**Once closed, `POST /requests/{request}/approve` refuses on the final hop** any approval
+whose effect would change an in-period day, with `422 cutoff_locked` and `details.date` the
+locked day — the request stays in its prior state (nothing half-applies). The remedy is to
+reopen the period, never to force the approval through.
+
+```json
+{ "error": { "code": "cutoff_locked", "details": { "date": "2026-07-10" } } }
+```
+
+### Reopen
+
+```
+POST /api/v1/office/cutoffs/{period}/reopen
+  { "reason": "Correcting a mis-keyed punch found after close." }
+  → 200 { data: <period, state: "open"> }
+```
+
+The inverse of close: the period goes back to `open`, every in-period `locked` summary back to
+`computed`, and the reopen is loudly audited (a `cutoff_reopened` activity-log entry carrying
+the `reason`, which is **required** — a blank reason is `400 validation_failed`). Reopening a
+period that is not `closed` is refused. `{period}` binds by id; a period whose office the
+caller doesn't administer is `404`, the same as a nonexistent one.
+
+`scripts/e2e-cutoffs.sh` proves the whole flow live: the exception gate refuses a window
+holding an incomplete day; a clean window closes and freezes its summaries; re-close and a
+non-boundary start are refused; a manager's approval onto a locked day is refused
+`cutoff_locked`; and reopening restores the summaries and lets that same approval succeed —
+with the raw `attendance_logs` byte-identical throughout.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -1155,6 +1236,7 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 409 | `idempotency_key_reused` | An `Idempotency-Key` replayed with a *different* body, or by a *different* user than minted it (the hash folds in the acting user). |
 | 409 | `request_not_pending` | Approving, rejecting, or cancelling a request that is already `approved`/`rejected`/`cancelled`. |
 | 409 | `pay_rule_exists` | Creating a pay-rule version whose `effective_from` matches one that already exists. |
+| 409 | `cutoff_already_closed` | Closing a cutoff period that is already `closed` (M7a). |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
 | 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, submit/list their own adjustments, or read their own leave balances. |
@@ -1166,6 +1248,9 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 422 | `leave_request_has_no_working_days` | Filing a leave request whose `[start_date, end_date]` range spans zero scheduled working days (e.g. it falls entirely on rest days). |
 | 422 | `insufficient_leave_balance` | A leave request's final (HR) approval would debit more minutes than the employee's derived balance holds (`details.leave_type_id`/`requested_minutes`/`available_minutes`); the approval rolls back, the request stays `manager_approved`. |
 | 422 | `pay_rate_below_floor` | Creating a pay-rule version with one or more cells below `config('hris.pay_floors')` (`details.violations` names every offending cell). |
+| 422 | `invalid_cutoff_start` | Closing a cutoff with a `period_start` that is not a window boundary — the 1st or the 16th (M7a). |
+| 422 | `cutoff_has_unresolved_exceptions` | Closing a cutoff while an in-period day is `is_incomplete` or a non-terminal request maps onto an in-period date (`details.incomplete_dates`/`pending_request_ids`) (M7a). |
+| 422 | `cutoff_locked` | Approving a request whose effect would change a day in a `closed` cutoff period (`details.date`); reopen the period instead (M7a). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 
@@ -1175,8 +1260,9 @@ you). See `05-rbac.md`.
 
 ## What is not here yet
 
-Cutoffs and payroll export are their own milestones (`06-roadmap.md`); their endpoints land
-with them. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
+**Cutoffs and locking shipped in M7a** (above, under "Office — cutoffs"): close, reopen, and
+the `cutoff_locked` approval refusal. **Payroll export is M7b**, next — its endpoints land
+with it. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
 spine; M5a's compute engine (above) now reads all three to price a day — **M5a is
 complete**. **M6b-a shipped the leave foundation** (leave-type config, the office leave
 day, HR manual grants, and derived balance reads, all above under "Leave — foundation"),

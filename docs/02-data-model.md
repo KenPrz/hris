@@ -980,9 +980,10 @@ computed*, not as it reads today — so a summary keeps answering "what was true
 day" correctly even after a holiday is added retroactively, a schedule changes, or an
 employee is promoted out of Art. 82 exemption next month. `status` defaults to `pending`
 in the schema, but every row `App\Actions\Compute\ComputeDailySummary` writes is
-`computed`; `disputed`/`locked` are read column values with no writer yet — M3.6's
-adjustment flow and a later cutoff milestone (M6/M7 per the resequencing table below) are
-what will set them.
+`computed`; `disputed` is a read column value with no writer yet. `locked` **now has a
+writer**: M7a's `App\Actions\Cutoff\CloseCutoff` flips every in-period summary to `locked`
+when its office's cutoff period closes, and `ReopenCutoff` flips it back to `computed` — see
+`cutoff_periods` below.
 
 **The compute pipeline, one piece at a time** (`App\Actions\Compute\ComputeDailySummary`):
 
@@ -1240,18 +1241,17 @@ re-runs that engine over already-computed days (M5b, here). `scripts/e2e-recompu
 walks exactly this: a seeded ordinary day, an HR-created `special_non_working` holiday, the
 queue drained, the flip to 130%, the audited `recompute_runs` row, and the untouched ledger.
 
-**Forward note for M7.** `RecomputeDay`'s locked-skip
-(`$existing?->status === 'locked'`) is a plain, unlocked `first()` read — correct for M5b,
-where nothing else is racing to lock a summary out from under a recompute. Once M7's
-`CloseCutoff` exists and actually sets `status: 'locked'` on a batch of summaries, that
-close and a `RecomputeDay` racing the same row become a genuine concurrency question:
-`CloseCutoff` will need its own `lockForUpdate()` over the summaries it's closing, and the
-close-vs-recompute race needs the same two-real-Postgres-connections proof
-`ApproveRequestConcurrencyTest` already set the precedent for (M3.6, above) — a
-single-process sequential test would pass whether or not the lock is actually there, which
-`04-backend-conventions.md` already calls out as worse than no test at all. Whoever builds
-`CloseCutoff` should not assume `RecomputeDay`'s plain read is sufficient once a real lock
-exists to race against.
+**M7a resolved the forward note this section used to carry.** `RecomputeDay`'s locked-skip
+(`$existing?->status === 'locked'`) was a plain, unlocked `first()` read — correct for M5b,
+where nothing raced to lock a summary out from under a recompute. M7a's `CloseCutoff` now
+does set `status: 'locked'` on a batch of summaries, so a close and a `RecomputeDay` racing
+the same row is a real concurrency question — and it is answered the predicted way:
+`RecomputeDay` takes the affected employee's `Employee` row lock (the same one `CloseCutoff`
+holds) before its read, so the close-vs-recompute race serializes rather than interleaves.
+`CloseVsRecomputeConcurrencyTest` proves it with two real Postgres connections, the precedent
+`ApproveRequestConcurrencyTest` (M3.6, above) set — not a single-process sequential test,
+which `04-backend-conventions.md` calls out as worse than no test at all. See `cutoff_periods`
+above and `06-roadmap.md`'s M7a section.
 
 ---
 
@@ -1578,6 +1578,57 @@ HR's queues, and the manager's single approval re-prices the day to exactly the 
 minutes with the excess dropping by that amount, no ledger touched; the second identical day
 with no request pays zero overtime and books its full overtime as unpaid. The same script
 runs `scripts/e2e-leave.sh` unchanged, proving the leave and overtime paths coexist.
+
+---
+
+## Cutoff periods: the per-office lock on a closed pay window *(M7a)*
+
+```sql
+create table cutoff_periods (
+  id          uuid primary key default uuidv7(),
+  office_id   uuid not null references offices(id) on delete cascade,
+  start_date  date not null,
+  end_date    date not null,
+  state       text not null default 'open',
+  closed_by   uuid references users(id) on delete set null,
+  closed_at   timestamptz,
+  created_at  timestamptz,
+  updated_at  timestamptz,
+  unique (office_id, start_date),
+  check (state in ('open','closed')),
+  check (end_date >= start_date)
+);
+```
+
+A `cutoff_periods` row is a per-office semi-monthly pay window that has been acted on. The
+window rule is `App\Domain\Cutoff\CutoffCalendar`: the 1st–15th and the 16th–end-of-month,
+the PH default (per-office custom schedules are deferred). `state` is `open` or `closed`;
+`closed_by`/`closed_at` record who froze it and when.
+
+**A row exists only once `CloseCutoff` has touched the window.** The office's current,
+still-running window has no row until then, so `GET /office/cutoffs` synthesizes it
+(unpersisted, `id: null`, `state: open`) rather than show a gap between the last stored row
+and today. `unique (office_id, start_date)` keeps a window single-rowed per office.
+
+**The period a summary belongs to is DERIVED, by office + date range — there is no FK on
+the summary.** A `daily_attendance_summary` is "in" a period when its `office_id` matches and
+its `date` falls in `[start_date, end_date]`; nothing is stamped on the summary pointing back
+at a period. This is deliberate: a summary is recomputed often (M5b), and a second source of
+truth to keep consistent across every recompute is exactly what the derived relationship
+avoids. `CloseCutoff` reads the window's summaries by that range, and freezing them is a
+**status flip on the summaries themselves** — `daily_attendance_summaries.status = 'locked'`,
+in the same transaction that sets the period `closed`. `ReopenCutoff` is the inverse: period
+back to `open`, every in-period `locked` summary back to `computed`.
+
+**The freeze and its inverse serialize on a per-employee `Employee` row lock.** `CloseCutoff`,
+`ReopenCutoff`, `ApproveRequest` (final hop, via `CutoffGuard::assertOpen`), and `RecomputeDay`
+each `lockForUpdate()` the affected `employees` row before touching that employee's summaries,
+so a close, an approval, and a recompute for the same employee cannot interleave. Two genuine
+two-real-Postgres-connections tests prove it (`CloseVsApproveConcurrencyTest`,
+`CloseVsRecomputeConcurrencyTest`), the kind `04-backend-conventions.md` demands — a
+single-process test would pass whether or not the lock exists. See `06-roadmap.md`'s M7a
+section and `03-api.md` for the endpoints and error codes (`cutoff_locked`,
+`cutoff_has_unresolved_exceptions`, `cutoff_already_closed`, `invalid_cutoff_start`).
 
 ---
 
