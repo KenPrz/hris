@@ -109,6 +109,13 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(office?.items).toContainEqual({ href: '/office/leave-types', label: 'Leave types' })
   })
 
+  it('an hr_offices user\'s Office group includes /office/cutoffs (M7a)', () => {
+    const groups = navEntriesFor(buildSession({ hr_offices: ['office-1'] }))
+    const office = groups.find((g) => g.key === 'office')
+
+    expect(office?.items).toContainEqual({ href: '/office/cutoffs', label: 'Cutoffs' })
+  })
+
   it('an empty hr_offices does NOT add Office', () => {
     const groups = navEntriesFor(buildSession({ hr_offices: [] }))
 
@@ -151,6 +158,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/office/holidays', label: 'Holidays' },
       { href: '/office/schedules', label: 'Schedules' },
       { href: '/office/leave-types', label: 'Leave types' },
+      { href: '/office/cutoffs', label: 'Cutoffs' },
       { href: '/office/approvals', label: 'Approvals' },
     ])
     expect(byKey.admin?.items).toEqual([{ href: '/admin/pay-rules', label: 'Pay rules' }])

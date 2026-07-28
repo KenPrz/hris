@@ -477,6 +477,39 @@ export type OvertimeRequestInput = {
   note: string
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/CutoffPeriodResource.php and
+// app/Http/Controllers/Cutoff/ListCutoffsController.php. The list returns every stored
+// period PLUS one synthetic "current window" entry whose `id` is null — the office's
+// still-running, not-yet-persisted window (a CutoffPeriod row exists only once CloseCutoff
+// has touched it). That null-id entry is the "Close current period" target: a close is
+// keyed by `period_start`, not by id, so a null id never blocks it. Only a stored (closed)
+// period carries a real id, which is what a reopen needs for its route binding.
+// ---------------------------------------------------------------------------
+
+export type CutoffState = 'open' | 'closed'
+
+export type CutoffPeriod = {
+  id: string | null
+  office_id: string
+  start_date: string // YYYY-MM-DD
+  end_date: string // YYYY-MM-DD
+  state: CutoffState
+  closed_by: string | null
+  closed_at: string | null // ISO8601, or null while open
+}
+
+// A close targets a window by its start date (the synthetic current-window entry has no id
+// to key off), never by id — mirrors CloseCutoffRequest's { office_id, period_start }.
+export type CutoffCloseInput = { office_id: string; period_start: string }
+
+/** The shape of `error.details` on a `cutoff_has_unresolved_exceptions` 422 (CloseCutoff's
+ * strict gate). Both lists point an operator at exactly what still blocks the close. */
+export type CutoffUnresolvedDetails = {
+  incomplete_dates: string[]
+  pending_request_ids: string[]
+}
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -662,6 +695,21 @@ export const api = {
         body: JSON.stringify({ decision_note }),
       }),
     cancel: (id: string) => request<RequestRecord>(`/requests/${id}/cancel`, { method: 'POST' }),
+  },
+  cutoffs: {
+    list: (office: string) => request<CutoffPeriod[]>(`/office/cutoffs?office=${office}`),
+    close: (body: CutoffCloseInput) =>
+      request<CutoffPeriod>('/office/cutoffs/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    reopen: (id: string, body: { reason: string }) =>
+      request<CutoffPeriod>(`/office/cutoffs/${id}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
   },
   adjustments: {
     // Multipart: build FormData and DO NOT set Content-Type — the browser must set the

@@ -13,6 +13,7 @@ use App\Domain\Overtime\OvertimeAuthorizationLookup;
 use App\Domain\Pay\DayType;
 use App\Domain\Pay\SummaryLineKind;
 use App\Domain\Schedule\ScheduleResolver;
+use App\Models\CutoffPeriod;
 use App\Models\DailyAttendanceSummary;
 use App\Models\DailySummaryLine;
 use App\Models\Employee;
@@ -134,6 +135,36 @@ final class ComputeDailySummary
             // employee row first makes the second compute wait, then cleanly replace. Mirrors
             // CreateHoliday / ApplyAttendanceAdjustment.
             Employee::query()->lockForUpdate()->findOrFail($employee->id);
+
+            // A closed cutoff period is frozen: never recompute or create a summary inside one. Checked
+            // under the employee lock above, so a close racing this recompute serializes — if the close
+            // committed first we see `closed` here and skip; if we commit first, the close freezes our
+            // result. This subsumes RecomputeDay's old plain status read and also blocks a brand-new
+            // summary from being created inside a closed period (which the status read could not).
+            $existing = DailyAttendanceSummary::query()
+                ->where('employee_id', $employee->id)
+                ->whereDate('date', $date)
+                ->first();
+
+            $inClosedPeriod = CutoffPeriod::query()
+                ->where('office_id', $officeId)
+                ->where('state', 'closed')
+                ->whereDate('start_date', '<=', $date)
+                ->whereDate('end_date', '>=', $date)
+                ->exists();
+
+            // Defense-in-depth alongside the period check above: an already-`locked` summary is
+            // never recomputed, regardless of the re-resolved office. The period check keys on
+            // $officeId (from the employment record effective on the date); if a day were
+            // retroactively reassigned to a different office AFTER being locked, that check could
+            // miss it, but the row's own `locked` status still forbids overwriting it. Together
+            // they make "a locked summary is never recomputed" hold unconditionally.
+            if ($inClosedPeriod || $existing?->status === 'locked') {
+                // Return type is DailyAttendanceSummary; RecomputeDay/RecordPunch/ApplyAttendanceAdjustment
+                // all ignore the value. Hand back the frozen row if one exists, else an unsaved null-object
+                // (->exists === false) for the summary-less closed day — nothing to compute into it.
+                return $existing ?? new DailyAttendanceSummary;
+            }
 
             DailyAttendanceSummary::query()
                 ->where('employee_id', $employee->id)

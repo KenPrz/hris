@@ -11,6 +11,7 @@
 
 import { useApprovalQueue } from '@/hooks/useApprovalQueue'
 import { useQueueDecision } from '@/hooks/useDecideRequest'
+import { ApiError } from '@/lib/api'
 import { keys } from '@/lib/keys'
 import { AppShell } from '@/components/AppShell'
 import { EmptyState } from '@/components/EmptyState'
@@ -29,6 +30,18 @@ export default function TeamApprovalsPage() {
     <AppShell>
       <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
         <SectionHeader eyebrow="Team" title="Approvals" level={1} />
+
+        {/* A decision can be refused server-side — most notably `cutoff_locked` (the day now
+            falls in a closed period). `useQueueDecision` already rolled the optimistic
+            removal back; this tells the approver WHY the card came back, rendering the
+            domain error's own message rather than mapping each code to bespoke copy. */}
+        {decideMutation.isError ? (
+          <InlineNotification kind="error" title="That decision didn't go through.">
+            {decideMutation.error instanceof ApiError
+              ? decideMutation.error.message
+              : 'Check your connection and try again.'}
+          </InlineNotification>
+        ) : null}
 
         {queueQuery.isLoading ? (
           <Skeleton height="12rem" />

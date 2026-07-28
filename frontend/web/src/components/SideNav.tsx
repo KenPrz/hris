@@ -43,6 +43,7 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
     { href: '/office/holidays', label: 'Holidays' },
     { href: '/office/schedules', label: 'Schedules' },
     { href: '/office/leave-types', label: 'Leave types' },
+    { href: '/office/cutoffs', label: 'Cutoffs' },
     { href: '/office/approvals', label: 'Approvals' },
   ],
   admin: [{ href: '/admin/pay-rules', label: 'Pay rules' }],

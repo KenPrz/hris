@@ -304,4 +304,55 @@ describe('/office/approvals — same queue behavior, office scope', () => {
     })
     await waitFor(() => expect(officeApprovalsCalls).toBeGreaterThan(1))
   })
+
+  it('a cutoff_locked refusal rolls the card back AND surfaces the domain error message', async () => {
+    const client = newClient()
+
+    let officeApprovalsCalls = 0
+
+    setToken('sekrit')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (url === '/api/v1/me' && method === 'GET') {
+          return { ok: true, status: 200, json: async () => sessionBody() }
+        }
+        if (url === '/api/v1/office/approvals' && method === 'GET') {
+          officeApprovalsCalls += 1
+          // Both the first load and the onSettled refetch return the same one item — so the
+          // card's reappearance is the rollback + a queue still holding it, and the message
+          // below is the only thing that could have come from the failed POST.
+          return { ok: true, status: 200, json: async () => ({ data: [requestRecord({ id: 'r9' })] }) }
+        }
+        if (url === '/api/v1/requests/r9/approve' && method === 'POST') {
+          return {
+            ok: false,
+            status: 422,
+            json: async () => ({
+              error: {
+                code: 'cutoff_locked',
+                message: 'This day falls in a closed cutoff period and can no longer be changed.',
+                details: { date: '2026-07-20' },
+              },
+            }),
+          }
+        }
+        throw new Error(`Unhandled fetch in test: ${method} ${url}`)
+      }),
+    )
+
+    renderQueuePage(<OfficeApprovalsPage />, client)
+
+    expect(await screen.findByText('Forgot to punch out')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+
+    // The domain error's own message reaches the approver, and the card is back to decide again.
+    expect(
+      await screen.findByText('This day falls in a closed cutoff period and can no longer be changed.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Forgot to punch out')).toBeInTheDocument()
+    expect(officeApprovalsCalls).toBeGreaterThan(1)
+  })
 })

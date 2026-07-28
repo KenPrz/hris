@@ -48,7 +48,7 @@ them all:
 | `leave.manage` | Manage leave-type config and manually grant leave (M6b-a) |
 | `schedule.manage` | Manage schedules (M4) |
 | `holiday.manage` | Manage the holiday calendar (M4) |
-| `cutoff.manage` | Open and close cutoff periods (M7) |
+| `cutoff.manage` | Open and close cutoff periods (M7a) |
 
 Five of these seven gate features that do not exist yet. They are seeded now anyway because
 the role catalog is the "fully configurable" surface the brief asked for, and naming a
@@ -368,6 +368,23 @@ shape-only `uuid`, never `exists:`, so an out-of-scope real id and a fabricated 
 identically (`scripts/e2e-schedules.sh` proves this against the live stack, mirroring
 `e2e-holidays.sh`). See `03-api.md` for the endpoint-level detail and `02-data-model.md` for
 the four schedule tables.
+
+**M7a's cutoff endpoints are governed by the exact same `OfficeScope`, with no new authority
+model** — the same situation holidays and schedules are in. `cutoff.manage` is seeded on the
+`HR Admin` role (RbacSeeder) and named in the catalog above, but **no cutoff endpoint reads
+it**: the enforced boundary is `OfficeScope::administered`/`administers` alone, identical to
+holidays, schedules, and leave-types. `GET /office/cutoffs` and `POST /office/cutoffs/close`
+resolve the `office_id`/`office` they're handed; `POST /office/cutoffs/{period}/reopen`
+resolves the bound period's own `office_id`. So a System Admin administers every office's
+cutoffs; an HR Admin exactly the offices in their `hr_admin_offices` pivot; anyone else zero.
+**No new permission was added** for M7a — `cutoff.manage` was already in the catalog, a verb
+named ahead of the gate that will one day read it. Same 404-not-403 discipline: an out-of-scope
+office (or a period in one) is `404`, indistinguishable from a nonexistent one, because the
+`FormRequest`s validate the office id as shape-only `uuid`, never `exists:`. The per-employee
+`Employee` row lock that serializes a close against a concurrent approval or recompute is a
+*concurrency* control, not an authorization one — it sits below this scope check, inside the
+action. See `03-api.md` for the endpoints and error codes and `02-data-model.md` for the
+`cutoff_periods` table.
 
 ## Pay rules — System Admin only, no scope at all *(M4c)*
 
