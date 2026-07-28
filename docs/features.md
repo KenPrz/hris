@@ -558,6 +558,33 @@ under those.
   an audit-log entry naming who did it — so the company's structural history is recoverable
   even before the dedicated audit-log viewer (later in M8) arrives.
 
-**Still to come in M8:** the multi-step employee profiler (onboarding a person through a
-guided wizard), role management, assigning which offices an HR admin covers, and the
+## Onboarding an employee *(M8b)*
+
+Through M8a an employee was really just a number — the payroll export and the org screens
+showed `MNL-0001` where a name belonged. M8b gives an employee a **name** and a guided way to
+bring a new hire onto the system, System-Administrator only.
+
+- **A system administrator onboards an employee through a wizard.** A multi-step form walks
+  the whole thing: first the person's **identity** (first, middle, last, and a suffix like
+  Jr. or III — the Philippine convention, where the middle name is the mother's maiden
+  surname), then their **employment** (which office and department, employment type, base
+  rate, whether they're exempt from overtime law), and finally an **optional login** (email
+  and password) — because a punch-only worker who never opens the portal is a first-class
+  case, the account step can be skipped and added later.
+- **The employee now has a real name everywhere.** A `full_name` composed from the four
+  parts — collapsing cleanly when the middle name or suffix is blank — shows up in the roster,
+  on the profile, and anywhere the person is labelled, closing the `employee_no`-as-a-name gap
+  that M7b's export and M8a's screens both had.
+- **A company-wide roster, and a profile per person.** The system administrator can list every
+  employee (optionally narrowed to one office), and open any one to see their name, their
+  current employment (office, department, base rate), and whether they have a login yet.
+- **Edit the name; the number never changes.** A misspelled or changed name can be corrected
+  in place. The **employee number is immutable** — it's the person's permanent identity, so
+  there's no field to change it; a change to *what role they work in* is an employment change,
+  not a rename.
+- **Only a system administrator, and every step audited.** Like the org tree, onboarding is a
+  global, system-administrator-only surface — an HR admin or plain employee who tries is
+  refused. Onboarding and every name edit write an audit-log entry naming who did it.
+
+**Still to come in M8:** role management, assigning which offices an HR admin covers, and the
 activity-log viewer.

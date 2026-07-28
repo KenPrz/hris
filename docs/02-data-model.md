@@ -116,6 +116,16 @@ the rows straight at the table).
 create table employees (
   id                    uuid primary key default uuidv7(),
   employee_no           text not null unique,
+
+  -- The person's name (M8b). Filipino convention: middle_name is the mother's maiden
+  -- surname and name_suffix carries Jr./Sr./III, so both are separate nullable columns
+  -- rather than folded into one field. Composed for display by the `full_name` accessor
+  -- (below), never stored — a stored copy would be a second source of truth to keep in sync.
+  first_name            text not null,
+  middle_name           text,
+  last_name             text not null,
+  name_suffix           text,
+
   -- Nullable and unique: a punch-only worker has an employee record and no login;
   -- at most one login per employee. null on delete keeps the employee if the user goes.
   user_id               uuid unique references users(id) on delete set null,
@@ -137,10 +147,26 @@ create index employees_current_reports_to  on employees (current_reports_to_id);
 ```
 
 `employees` holds only what does **not** change over a career: the person's identity
-(`employee_no`), when they joined and left, which organization they belong to, and the
-optional `user_id` that links to a login. Everything that *does* change — office,
-department, manager, employment type, Art. 82 status, base rate — lives in
+(`employee_no` and their name), when they joined and left, which organization they belong
+to, and the optional `user_id` that links to a login. Everything that *does* change —
+office, department, manager, employment type, Art. 82 status, base rate — lives in
 `employment_records`, one row per change (below).
+
+### The name, and `full_name`
+
+Before M8b an employee had only an `employee_no`; every screen that needed a human label
+fell back to it (`MNL-0001` where a name belonged — the M7b/M8a gap). M8b adds the four
+name columns and one read model: **`Employee::full_name`** (a Laravel accessor, not a
+column) composes `first middle last suffix`, collapsing any gap left by a null middle name
+or suffix to a single space. Every API name field (`EmployeeResource`,
+`EmployeeListResource`, `EmployeeDetailResource`) reads this accessor, so display is
+composed in exactly one place. `employee_no` stays the immutable identity — a name edit
+(`PATCH /admin/employees/{id}`, `03-api.md`) never touches it.
+
+Employees now carry spatie's **`LogsActivity`** (the same trait the org tree grew in M8a):
+onboarding and every name edit write an `activity_log` row — `log_name 'employee'`, logging
+only `employee_no`, the four name fields, `organization_id`, `hired_at`, and `separated_at`
+— so who renamed whom is on the record, not lost in an in-place update.
 
 ### The employee/user split
 
