@@ -164,6 +164,41 @@ describe('/office/cutoffs — list', () => {
     expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close period' })).toBeInTheDocument()
   })
+
+  it('offers "View export" only on closed rows, linking to that period\'s export route', () => {
+    stubSession()
+    stubCutoffs({
+      data: [
+        period({ id: 'p-closed', state: 'closed' }),
+        // The synthetic current window: id null, still open — no export to view.
+        period({ id: null, start_date: '2026-07-16', end_date: '2026-07-31', state: 'open', closed_by: null, closed_at: null }),
+      ],
+    })
+    stubCloseCutoff()
+    stubReopenCutoff()
+
+    renderPage()
+
+    // Exactly one "View export" — the closed row — pointing at its period id.
+    const links = screen.getAllByRole('link', { name: 'View export' })
+    expect(links).toHaveLength(1)
+    expect(links[0]).toHaveAttribute('href', '/office/cutoffs/p-closed/export')
+  })
+
+  it('shows no "View export" when every period is open', () => {
+    stubSession()
+    stubCutoffs({
+      data: [
+        period({ id: null, start_date: '2026-07-16', end_date: '2026-07-31', state: 'open', closed_by: null, closed_at: null }),
+      ],
+    })
+    stubCloseCutoff()
+    stubReopenCutoff()
+
+    renderPage()
+
+    expect(screen.queryByRole('link', { name: 'View export' })).not.toBeInTheDocument()
+  })
 })
 
 describe('/office/cutoffs — close', () => {

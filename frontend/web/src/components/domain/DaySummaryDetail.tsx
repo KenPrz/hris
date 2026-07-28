@@ -10,7 +10,9 @@ export interface DaySummaryDetailProps {
   summary: DailySummary | undefined
 }
 
-const LINE_LABEL: Record<SummaryLineKind, string> = {
+// Exported so the payroll export review screen (`PayrollExportView`) reads the same
+// line-kind copy as this day detail — the same closed set of kinds, worded identically.
+export const LINE_LABEL: Record<SummaryLineKind, string> = {
   regular_day: 'Regular (day)',
   regular_night: 'Regular (night)',
   overtime_day: 'Overtime (day)',
@@ -33,8 +35,9 @@ export function hasPremiumLine(lines: DailySummaryLine[]): boolean {
   return lines.some((line) => line.applied_bp > PREMIUM_THRESHOLD_BP)
 }
 
-/** `10000` -> `"100"`, `12500` -> `"125"` — basis points to a percent, for the breakdown. */
-function bpToPercent(bp: number): string {
+/** `10000` -> `"100"`, `12500` -> `"125"` — basis points to a percent, for the breakdown.
+ * Exported so the payroll export screen renders `applied_bp` identically to this detail. */
+export function bpToPercent(bp: number): string {
   return String(bp / 100)
 }
 
