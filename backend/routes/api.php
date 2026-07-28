@@ -3,6 +3,11 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\Attendance\ManualPunchController;
+use App\Http\Controllers\Admin\Departments\ArchiveController as ArchiveDepartmentController;
+use App\Http\Controllers\Admin\Departments\CreateController as CreateDepartmentController;
+use App\Http\Controllers\Admin\Departments\ListController as ListDepartmentsController;
+use App\Http\Controllers\Admin\Departments\UnarchiveController as UnarchiveDepartmentController;
+use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
@@ -185,6 +190,17 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/offices/{office}', UpdateOfficeController::class);
             Route::post('/offices/{office}/archive', ArchiveOfficeController::class);
             Route::post('/offices/{office}/unarchive', UnarchiveOfficeController::class);
+
+            // Departments — the org tree's third tier, same is_system_admin gating and
+            // archive-never-delete shape as offices above (M8a Task 4). code is unique
+            // per (office_id, code), not globally, so DuplicateDepartmentCode's scope
+            // differs from DuplicateOfficeCode; the AlreadyArchived/NotArchived
+            // exceptions are reused verbatim with subjectType 'department'.
+            Route::get('/departments', ListDepartmentsController::class);
+            Route::post('/departments', CreateDepartmentController::class);
+            Route::patch('/departments/{department}', UpdateDepartmentController::class);
+            Route::post('/departments/{department}/archive', ArchiveDepartmentController::class);
+            Route::post('/departments/{department}/unarchive', UnarchiveDepartmentController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
