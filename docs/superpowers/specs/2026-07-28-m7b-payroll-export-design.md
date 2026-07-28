@@ -45,8 +45,10 @@ one `daily_attendance_summaries` row in the period (employees with attendance da
 roster including zero-attendance employees is an M8 concern.
 
 For each employee:
-- **`employee`**: `{ id, name, base_rate_cents }`. `base_rate_cents` is the effective rate — see
-  "Base rate" below.
+- **`employee`**: `{ id, employee_no, base_rate_cents }`. There is no name field on `employees`
+  yet (the person's name is M8's employee profiler); `employee_no` (unique, always present, even
+  for a punch-only worker with no login) is the payroll identifier — matching `EmployeeResource`.
+  `base_rate_cents` is the effective rate — see "Base rate" below.
 - **`totals`** (day-level scalars summed over the employee's in-period summaries):
   `{ worked_minutes, late_minutes, undertime_minutes, unpaid_overtime_minutes }`.
 - **`lines`**: the period's `daily_summary_lines` for this employee, grouped by
