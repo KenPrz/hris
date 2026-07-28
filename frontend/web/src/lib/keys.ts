@@ -37,6 +37,9 @@ export const keys = {
     myBalances: () => ['leave', 'my-balances'] as const,
     employeeBalances: (employeeId: string) => ['leave', 'employee-balances', employeeId] as const,
   },
+  cutoffs: {
+    list: (officeId: string) => ['cutoffs', officeId] as const,
+  },
   schedules: {
     templates: (officeId: string) => ['schedules', 'templates', officeId] as const,
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,
