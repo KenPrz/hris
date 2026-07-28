@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Actions\Departments;
 
 use App\Exceptions\Domain\DuplicateDepartmentCode;
+use App\Exceptions\Domain\InvalidReference;
 use App\Models\Department;
+use App\Models\Office;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +18,11 @@ use Illuminate\Support\Facades\DB;
  * row), same reasoning as UpdateOffice: a pre-check for the clean 422 in the common
  * case, a try/catch backstop around the write for the race a concurrent update could
  * still slip through.
+ *
+ * The full-object update sets office_id unconditionally, so the same changed-parent
+ * guard is needed here as CreateDepartment: only re-check existence when the incoming
+ * office_id actually differs from the current one, backstopped by a catch on the
+ * FK-violation SQLSTATE (23503) for the concurrent-delete race.
  */
 final class UpdateDepartment
 {
@@ -33,6 +41,12 @@ final class UpdateDepartment
                 throw new DuplicateDepartmentCode($in->code);
             }
 
+            if ($in->officeId !== $department->office_id
+                && ! Office::query()->whereKey($in->officeId)->exists()
+            ) {
+                throw new InvalidReference('office', $in->officeId);
+            }
+
             try {
                 $department->fill([
                     'office_id' => $in->officeId,
@@ -41,6 +55,12 @@ final class UpdateDepartment
                 ])->save();
             } catch (UniqueConstraintViolationException) {
                 throw new DuplicateDepartmentCode($in->code);
+            } catch (QueryException $e) {
+                if ($e->getCode() === '23503') {
+                    throw new InvalidReference('office', $in->officeId);
+                }
+
+                throw $e;
             }
 
             return $department;

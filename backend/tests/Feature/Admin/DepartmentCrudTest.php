@@ -6,6 +6,7 @@ use App\Models\Department;
 use App\Models\Office;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Activitylog\Models\Activity;
 
@@ -84,6 +85,29 @@ it('allows the same department code in a different office (per-office scope, not
         ->assertJsonPath('data.code', 'SHARED-01');
 
     $this->assertDatabaseHas('departments', ['office_id' => $officeB->id, 'code' => 'SHARED-01']);
+});
+
+it('rejects creating a department with a nonexistent office_id with a clean 422', function (): void {
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+
+    $this->postJson('/api/v1/admin/departments', createDepartmentPayload((string) Str::uuid7()))
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'invalid_reference');
+
+    $this->assertDatabaseMissing('departments', ['code' => 'ENG-01']);
+});
+
+it('rejects updating a department to a nonexistent office_id with a clean 422', function (): void {
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+    $office = Office::factory()->create();
+    $department = Department::factory()->create(['office_id' => $office->id]);
+
+    $this->patchJson("/api/v1/admin/departments/{$department->id}", createDepartmentPayload((string) Str::uuid7()))
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'invalid_reference');
+
+    $department->refresh();
+    expect($department->office_id)->toBe($office->id);
 });
 
 it('lets a system admin update a department, and logs it', function (): void {

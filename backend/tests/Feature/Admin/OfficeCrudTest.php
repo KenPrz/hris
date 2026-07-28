@@ -6,6 +6,7 @@ use App\Models\Office;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Activitylog\Models\Activity;
 
@@ -78,6 +79,29 @@ it('rejects a duplicate office code with a clean 422', function (): void {
     $this->postJson('/api/v1/admin/offices', createOfficePayload($otherOrg->id, ['code' => 'DUP-01']))
         ->assertStatus(422)
         ->assertJsonPath('error.code', 'duplicate_office_code');
+});
+
+it('rejects creating an office with a nonexistent organization_id with a clean 422', function (): void {
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+
+    $this->postJson('/api/v1/admin/offices', createOfficePayload((string) Str::uuid7()))
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'invalid_reference');
+
+    $this->assertDatabaseMissing('offices', ['code' => 'MB-01']);
+});
+
+it('rejects updating an office to a nonexistent organization_id with a clean 422', function (): void {
+    Sanctum::actingAs(User::factory()->create(['is_system_admin' => true]));
+    $org = Organization::factory()->create();
+    $office = Office::factory()->create(['organization_id' => $org->id]);
+
+    $this->patchJson("/api/v1/admin/offices/{$office->id}", createOfficePayload((string) Str::uuid7()))
+        ->assertStatus(422)
+        ->assertJsonPath('error.code', 'invalid_reference');
+
+    $office->refresh();
+    expect($office->organization_id)->toBe($org->id);
 });
 
 it('lets a system admin update an office, and logs it', function (): void {

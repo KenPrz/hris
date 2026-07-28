@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Actions\Offices;
 
 use App\Exceptions\Domain\DuplicateOfficeCode;
+use App\Exceptions\Domain\InvalidReference;
 use App\Models\Office;
+use App\Models\Organization;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -20,6 +23,12 @@ use Illuminate\Support\Facades\DB;
  * CreatePayRule::execute) — so the worst case a client can observe is still a clean 422
  * DuplicateOfficeCode, never a raw unique-violation 500.
  *
+ * CreateOfficeRequest is deliberately shape-only on organization_id (no `exists:`), so a
+ * nonexistent parent must be turned into a clean 422 here rather than reaching the FK
+ * constraint raw. Same pre-check + try/catch-backstop shape as the code-duplication
+ * check above, this time against the FK-violation SQLSTATE (23503) instead of a unique
+ * violation.
+ *
  * Office is unguarded ($guarded = []), so the write is an explicit array rather than a
  * mass-assignment allowlist.
  */
@@ -30,6 +39,10 @@ final class CreateOffice
         return DB::transaction(function () use ($in): Office {
             if (Office::query()->where('code', $in->code)->exists()) {
                 throw new DuplicateOfficeCode($in->code);
+            }
+
+            if (! Organization::query()->whereKey($in->organizationId)->exists()) {
+                throw new InvalidReference('organization', $in->organizationId);
             }
 
             try {
@@ -46,6 +59,12 @@ final class CreateOffice
                 ]);
             } catch (UniqueConstraintViolationException) {
                 throw new DuplicateOfficeCode($in->code);
+            } catch (QueryException $e) {
+                if ($e->getCode() === '23503') {
+                    throw new InvalidReference('organization', $in->organizationId);
+                }
+
+                throw $e;
             }
         });
     }
