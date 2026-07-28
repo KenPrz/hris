@@ -18,6 +18,9 @@ use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
+use App\Http\Controllers\Cutoff\CloseCutoffController;
+use App\Http\Controllers\Cutoff\ListCutoffsController;
+use App\Http\Controllers\Cutoff\ReopenCutoffController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
 use App\Http\Controllers\Leave\GrantController as GrantLeaveController;
@@ -179,6 +182,15 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/default-template', SetDefaultTemplateController::class);
             Route::get('/schedule/resolved', ResolvedScheduleController::class);
             Route::patch('/leave-day', SetLeaveDayController::class);
+
+            // Cutoff periods — list the office's stored periods plus its current open
+            // window, close a semi-monthly boundary, and reopen a closed one. Gated by
+            // OfficeScope only, same as every other route in this group; `cutoff.manage`
+            // is a seeded permission (see RbacSeeder) but the enforced boundary here is
+            // "administers this office", identical to leave-types/holidays.
+            Route::get('/cutoffs', ListCutoffsController::class);
+            Route::post('/cutoffs/close', CloseCutoffController::class);
+            Route::post('/cutoffs/{period}/reopen', ReopenCutoffController::class);
 
             // Leave-type config — no delete route; a type is retired via PATCH
             // is_active=false, never removed (M6b-a Task 4).

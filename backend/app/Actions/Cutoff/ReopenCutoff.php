@@ -9,6 +9,7 @@ use App\Exceptions\Domain\CutoffNotClosed;
 use App\Models\CutoffPeriod;
 use App\Models\DailyAttendanceSummary;
 use App\Models\Employee;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -62,9 +63,17 @@ final class ReopenCutoff
                 'closed_at' => null,
             ]);
 
+            // causedBy() takes a Model, not a bare id (see CloneHolidays::execute for the
+            // same convention) — passing the raw uuid string instead makes Spatie's
+            // CauserResolver fall back to resolveUsingId(), which resolves the *current
+            // default auth guard's* provider. Inside a real request that guard is
+            // 'sanctum' (Authenticate::authenticate() calls Auth::shouldUse() on success),
+            // and Sanctum's guard has no getProvider() — a crash that only ever surfaces
+            // when this action is driven over HTTP (Task 8), never from a direct/console
+            // call. Resolving the model ourselves sidesteps guard resolution entirely.
             activity()
                 ->performedOn($period)
-                ->causedBy($in->actorId)
+                ->causedBy(User::find($in->actorId))
                 ->withProperties(['reason' => $in->reason])
                 ->log('cutoff_reopened');
 
