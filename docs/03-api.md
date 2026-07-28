@@ -1200,8 +1200,8 @@ POST /api/v1/office/cutoffs/{period}/reopen
 The inverse of close: the period goes back to `open`, every in-period `locked` summary back to
 `computed`, and the reopen is loudly audited (a `cutoff_reopened` activity-log entry carrying
 the `reason`, which is **required** — a blank reason is `400 validation_failed`). Reopening a
-period that is not `closed` is refused. `{period}` binds by id; a period whose office the
-caller doesn't administer is `404`, the same as a nonexistent one.
+period that is not `closed` is refused with `409 cutoff_not_closed`. `{period}` binds by id; a
+period whose office the caller doesn't administer is `404`, the same as a nonexistent one.
 
 `scripts/e2e-cutoffs.sh` proves the whole flow live: the exception gate refuses a window
 holding an incomplete day; a clean window closes and freezes its summaries; re-close and a
@@ -1237,6 +1237,7 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 409 | `request_not_pending` | Approving, rejecting, or cancelling a request that is already `approved`/`rejected`/`cancelled`. |
 | 409 | `pay_rule_exists` | Creating a pay-rule version whose `effective_from` matches one that already exists. |
 | 409 | `cutoff_already_closed` | Closing a cutoff period that is already `closed` (M7a). |
+| 409 | `cutoff_not_closed` | Reopening a cutoff period that is not `closed` (M7a). |
 | 422 | `employee_already_has_login` | Provisioning a second login for an employee. |
 | 422 | `employment_record_exists` | Recording a second employment change for the same employee on the same `effective_from`. |
 | 422 | `not_an_employee` | A logged-in user with no linked employee record trying to self-punch, read their own attendance, submit/list their own adjustments, or read their own leave balances. |
