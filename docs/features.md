@@ -429,8 +429,9 @@ true.
   withdrawing stop being an option.
 
 **Deliberately not here yet:** a half-day request still debits half a day correctly but
-computes as a full day's paid leave (M7); nothing yet exports an approved leave day into a
-payroll-shaped report (also M7); and the chain still tops out at two decisions — there is
+computes as a full day's paid leave; the payroll export (M7b, below) now rolls a closed
+period's summary lines into a per-employee report, but pricing a paid leave day *into* those
+lines is still a separate open item; and the chain still tops out at two decisions — there is
 no third hop for anything, because nothing needs one yet.
 
 ## Pre-authorizing overtime *(M6c)*
@@ -462,8 +463,9 @@ than quietly vanishing or being paid anyway.
   to begin with, so an overtime request neither helps nor applies — the same exemption that
   already zeroes their holiday and night-differential premiums.
 
-**Deliberately not here yet:** the unpaid-overtime number is surfaced on the day, but nothing
-yet rolls it — or the paid overtime — into a payroll-shaped export (M7).
+**Now rolled into the export:** the paid-overtime hours and the unpaid-overtime total surfaced
+on the day are carried into the payroll export (M7b, below) — the paid overtime as its own
+`(kind, applied_bp)` line, the unpaid-overtime minutes as a period total.
 
 ---
 
@@ -497,9 +499,35 @@ the 16th–end-of-month — and HR can **close** a period once it's settled.
   *derived* daily numbers — the append-only record of who punched when, which a labor inspector
   would be shown, is never altered by any of it.
 
-**Deliberately not here yet:** the payroll **export** — rolling a closed period's locked days
-into a per-employee, per-period earnings report — is **M7b**, next.
+## Exporting a closed period for payroll *(M7b)*
+
+Once a period is closed and its numbers are frozen, HR can **export** it — a per-employee
+earnings breakdown, ready to hand to whoever cuts the checks.
+
+- **HR exports a closed period's earnings breakdown.** For an office they administer, HR pulls
+  the whole closed period at once: every employee who worked in it, each with their total worked,
+  late, undertime, and unpaid-overtime minutes, and a **line-by-line breakdown of the paid hours**
+  — regular time, the overtime and premium hours, each holiday or rest-day bucket — as *minutes*
+  and the *basis points* (the multiplier) that applies, tagged with the exact pay-rule version
+  that priced it. The employee's base rate rides along for reference.
+- **It reconciles, day-for-day, against the calendar.** The export is not a separate calculation
+  — it is the same frozen daily summaries the employee already sees on their own attendance
+  breakdown, added up over the period. Every line and every total ties back to the calendar
+  exactly; there is no place for a number to appear in payroll that the employee couldn't see in
+  their own days.
+- **Hours and multipliers, not pesos.** The export deliberately stops at minutes and basis
+  points — it hands payroll the *hours* and the *rules*, and the actual peso gross-to-net is done
+  downstream. This HRIS owns the hours; it does not print the paycheck.
+- **Only a closed period exports, and it's reproducible.** An open period can't be exported —
+  there's nothing final to hand over yet — and because a closed period's numbers are frozen,
+  exporting it twice yields the exact same result every time. If a correction is needed, HR
+  reopens the period (audited, with a reason), fixes it, closes again, and re-exports.
+
+**Deliberately not here yet:** a downloadable **CSV/spreadsheet or PDF** (the export is
+structured data today); the **peso gross** earnings (that's downstream payroll); a **draft** of
+an open period; and a **full roster** including employees with no attendance in the window (only
+those who actually worked in-period appear).
 
 ---
 
-*(Cutoffs and period locking are done in M7a; the payroll export follows in M7b.)*
+*(Cutoffs, period locking, and the payroll export are done — M7 is complete.)*

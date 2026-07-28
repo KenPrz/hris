@@ -1420,9 +1420,11 @@ leave and overtime paths coexist on one stack.
 
 Next: **M7 — cutoffs, locking, and payroll export.**
 
-## M7 — Cutoffs, locking, and payroll export
+## M7 — Cutoffs, locking, and payroll export *(complete)*
 
-The milestone that makes the number defensible.
+The milestone that makes the number defensible. **Complete:** M7a shipped the
+close/lock/reopen spine, M7b the payroll export that reconciles line-for-line against the
+calendar — the full "Done when" below is met.
 
 - `cutoff_periods` per office. Semi-monthly by default (1–15, 16–EOM), which is what
   most PH employers actually run.
@@ -1519,6 +1521,48 @@ raw `attendance_logs` are byte-identical before and after — the append-only le
 **705 backend tests (19 of them Arch) + 442 frontend tests**, all green.
 
 Next: **M7b — payroll export.**
+
+## M7b — Payroll export *(done)*
+
+The second half of M7: the read-only export of a closed period's frozen numbers, per employee,
+into an earnings breakdown in integer minutes + basis points. No migration — it reads the
+`daily_attendance_summaries` and `daily_summary_lines` M5 already froze; a domain-Eloquent
+wrapper (`App\Domain\Payroll\PayrollExport`) rolls them up, `GET /office/cutoffs/{period}/export`
+serves them, and a Carbon review screen renders them.
+
+- **Reads by period MEMBERSHIP, not the `locked` label.** The aggregator selects summaries by
+  `office_id` + the period's date range, never by `status = 'locked'` — so M7a's known-limitation
+  leaked `computed` row (a first-ever compute that raced a close) still appears in the export
+  rather than being silently dropped, and `has_incomplete_days` flags an employee whose in-period
+  window holds an `is_incomplete` day.
+- **Reconciles line-for-line.** Each `lines[]` entry is a summed-minutes `(kind, applied_bp,
+  rule_version_id)` triple, where `rule_version_id` is the parent day's version (a summary line
+  carries none of its own) — so the export is a faithful roll-up of the calendar, provable by
+  summing `/me/attendance/summary` over the in-period dates and comparing. The four totals
+  (`worked`/`late`/`undertime`/`unpaid_overtime`) are the summed day scalars.
+- **Hours + basis points, not pesos.** `base_rate_cents` (the period-end effective rate) and
+  `base_rate_segments` (the distinct effective employment records that priced in-period days)
+  ride along as *reference only* — gross-to-net is downstream, out of scope. The export prices
+  no earnings; it hands payroll the hours and the multipliers.
+- **Closed-only.** An export is defined only for a finalized period; an `open` one (including the
+  synthesized current window, or a just-reopened period) is refused `422 period_not_exportable`.
+  Foreign/nonexistent periods are `404`-not-403, like the cutoff routes. A closed period's numbers
+  are frozen, so the export is **reproducible** — two calls return a byte-identical `data` payload.
+
+**Deferred (not in M7b):** CSV / file download (the export is JSON only — a spreadsheet/PDF
+surface is later); **peso gross earnings** (the export is minutes + bp; multiplying by the rate is
+downstream payroll); an **open-period draft** export (closed-only by decision); and a **full-roster
+export** including zero-attendance employees (the export lists only employees with in-period
+summaries — an employee with no computed day for the window does not appear).
+
+**Status: done.** `scripts/e2e-payroll-export.sh` proves it live against the seeded stack: Manila
+HR closes the clean first-half July window and exports it; every `(kind, applied_bp,
+rule_version_id)` line and every total reconciles EXACTLY against Miguel's own calendar summed over
+the in-period dates; a second export of the still-locked period is byte-identical; reopening the
+period makes the export refuse `422 period_not_exportable`; and a nonexistent period is
+404-not-403. **715 backend tests (22 of them Arch) + 460 frontend tests**, all green.
+
+Next: **M8 — admin portal and audit.**
 
 ## M8 — Admin portal and audit
 
