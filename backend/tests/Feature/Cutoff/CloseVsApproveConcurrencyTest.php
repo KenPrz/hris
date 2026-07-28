@@ -82,6 +82,16 @@ it('genuinely serializes an approval against a concurrent close through the empl
     $holdMs = 500;
 
     $cleanup = function () use ($request, $summary, $period, $manager, $report, $managerUser, $reportUser, $office): void {
+        // Office::factory() and Employee::factory() each default organization_id to their
+        // own lazy Organization::factory() when it isn't overridden — true here for all
+        // three of $office, $manager, and $report — so this real, committed run leaves
+        // behind three organizations unless captured and deleted explicitly. Office->
+        // organization has cascadeOnDelete, but only in that direction (deleting the
+        // office never deletes its parent org), so it must be done by hand, and captured
+        // before the rows that carry these ids are deleted below.
+        $orgIds = collect([$office->organization_id, $manager->organization_id, $report->organization_id])
+            ->unique()->values();
+
         RecomputeRun::where('trigger_id', $request->id)->delete();
         OvertimeDetail::where('request_id', $request->id)->delete();
         Request::whereKey($request->id)->delete();
@@ -90,6 +100,7 @@ it('genuinely serializes an approval against a concurrent close through the empl
         Employee::whereIn('id', [$manager->id, $report->id])->delete();
         User::whereIn('id', [$managerUser->id, $reportUser->id])->delete();
         Office::whereKey($office->id)->delete();
+        DB::table('organizations')->whereIn('id', $orgIds)->delete();
     };
 
     $proc = proc_open(
