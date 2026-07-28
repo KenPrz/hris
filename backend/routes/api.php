@@ -19,6 +19,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Cutoff\CloseCutoffController;
+use App\Http\Controllers\Cutoff\ExportCutoffController;
 use App\Http\Controllers\Cutoff\ListCutoffsController;
 use App\Http\Controllers\Cutoff\ReopenCutoffController;
 use App\Http\Controllers\Employees\ListEmployeesController;
@@ -191,6 +192,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/cutoffs', ListCutoffsController::class);
             Route::post('/cutoffs/close', CloseCutoffController::class);
             Route::post('/cutoffs/{period}/reopen', ReopenCutoffController::class);
+            Route::get('/cutoffs/{period}/export', ExportCutoffController::class);
 
             // Leave-type config — no delete route; a type is retired via PATCH
             // is_active=false, never removed (M6b-a Task 4).

@@ -503,6 +503,29 @@ export type CutoffPeriod = {
 // to key off), never by id — mirrors CloseCutoffRequest's { office_id, period_start }.
 export type CutoffCloseInput = { office_id: string; period_start: string }
 
+// Wire types — verified against app/Http/Resources/PayrollExportResource.php. Reuses
+// SummaryLineKind (DailySummaryResource's line kinds) rather than redefining it — a payroll
+// earnings line and a daily summary line carry the same closed set of kinds.
+export type PayrollEarningsLine = {
+  kind: SummaryLineKind
+  applied_bp: number
+  rule_version_id: string | null
+  minutes: number
+}
+
+export type PayrollEmployeeExport = {
+  employee: { id: string; employee_no: string; base_rate_cents: number | null }
+  base_rate_segments: { effective_from: string; base_rate_cents: number }[]
+  totals: { worked_minutes: number; late_minutes: number; undertime_minutes: number; unpaid_overtime_minutes: number }
+  lines: PayrollEarningsLine[]
+  has_incomplete_days: boolean
+}
+
+export type PayrollExport = {
+  period: { id: string; office_id: string; start_date: string; end_date: string; state: 'open' | 'closed' }
+  employees: PayrollEmployeeExport[]
+}
+
 /** The shape of `error.details` on a `cutoff_has_unresolved_exceptions` 422 (CloseCutoff's
  * strict gate). Both lists point an operator at exactly what still blocks the close. */
 export type CutoffUnresolvedDetails = {
@@ -710,6 +733,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),
+    export: (periodId: string) => request<PayrollExport>(`/office/cutoffs/${periodId}/export`),
   },
   adjustments: {
     // Multipart: build FormData and DO NOT set Content-Type — the browser must set the

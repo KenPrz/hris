@@ -1209,6 +1209,66 @@ non-boundary start are refused; a manager's approval onto a locked day is refuse
 `cutoff_locked`; and reopening restores the summaries and lets that same approval succeed —
 with the raw `attendance_logs` byte-identical throughout.
 
+## Office — payroll export *(M7b)*
+
+```
+GET /api/v1/office/cutoffs/{period}/export
+  → 200 { data: { period, employees: [ <employee export>, … ] } }
+```
+
+The frozen numbers of a **closed** period, rolled up per employee into an earnings breakdown
+in **integer minutes + basis points** — the hours the compute engine already priced, grouped
+for payroll to multiply by a rate. It is deliberately **not pesos**: `base_rate_cents` and
+`base_rate_segments` ride along as *reference only*, so gross-to-net lives downstream, not
+here. Gated by `OfficeScope` exactly like the cutoff routes; `{period}` binds by id and a
+period whose office the caller doesn't administer — or that doesn't exist — is `404` (the
+404-not-403 rule), never a 403.
+
+**Closed-only.** An export is defined only for a finalized period; exporting an `open` one
+(including the synthesized current window, or a period just reopened) is refused `422
+period_not_exportable` with `details.state`:
+
+```json
+{ "error": { "code": "period_not_exportable",
+  "details": { "cutoff_period_id": "0199…", "state": "open" } } }
+```
+
+The response:
+
+```json
+{ "data": {
+  "period": { "id": "0199…", "office_id": "0199…",
+              "start_date": "2026-07-01", "end_date": "2026-07-15", "state": "closed" },
+  "employees": [
+    { "employee": { "id": "0199…", "employee_no": "MNL-0002", "base_rate_cents": 85000 },
+      "base_rate_segments": [ { "effective_from": "2026-07-01", "base_rate_cents": 85000 } ],
+      "totals": { "worked_minutes": 5940, "late_minutes": 0,
+                  "undertime_minutes": 0, "unpaid_overtime_minutes": 0 },
+      "lines": [
+        { "kind": "regular_day", "applied_bp": 10000,
+          "rule_version_id": "0199…", "minutes": 5400 },
+        { "kind": "regular_day", "applied_bp": 13000,
+          "rule_version_id": "0199…", "minutes": 540 } ],
+      "has_incomplete_days": false } ] } }
+```
+
+Each `lines[]` entry is a `(kind, applied_bp, rule_version_id)` triple with its summed
+`minutes` — `rule_version_id` is the parent day's version (a day's summary lines don't carry
+one of their own), so a rate change mid-period splits into distinct lines. The export reads
+its summaries by **period membership** (`office_id` + the period's date range), *not* by the
+`status = 'locked'` label, so a leaked `computed` row or an incomplete day still appears;
+`has_incomplete_days` flags an employee whose in-period window holds an `is_incomplete` day.
+`base_rate_segments` lists the distinct effective employment records that priced the in-period
+days, oldest first; `base_rate_cents` is the period-end effective rate. The totals
+(`worked`/`late`/`undertime`/`unpaid_overtime`) are the summed day scalars.
+
+Because a closed period's numbers are frozen, the export is **reproducible** — two calls
+return a byte-identical `data` payload. `scripts/e2e-payroll-export.sh` proves this live: it
+closes a clean window, exports it, and asserts every line and total **reconciles exactly**
+against the employee's own `/me/attendance/summary` calendar summed over the in-period dates
+(the line-for-line guarantee); that a re-export is byte-identical; and that reopening the
+period makes the export refuse `422 period_not_exportable`.
+
 ## Errors
 
 One envelope (`01-architecture.md`), closed rather than enumerated — every HTTP exception
@@ -1252,6 +1312,7 @@ may change freely; `details` is always a JSON object (`{}` when empty), never an
 | 422 | `invalid_cutoff_start` | Closing a cutoff with a `period_start` that is not a window boundary — the 1st or the 16th (M7a). |
 | 422 | `cutoff_has_unresolved_exceptions` | Closing a cutoff while an in-period day is `is_incomplete` or a non-terminal request maps onto an in-period date (`details.incomplete_dates`/`pending_request_ids`) (M7a). |
 | 422 | `cutoff_locked` | Approving a request whose effect would change a day in a `closed` cutoff period (`details.date`); reopen the period instead (M7a). |
+| 422 | `period_not_exportable` | Exporting a cutoff period that is not `closed` — an export is defined only for a finalized period (`details.cutoff_period_id`/`state`) (M7b). |
 | 429 | `too_many_requests` | Login rate limit (5/min per email+IP) exceeded. |
 | 500 | `internal_error` | An uncaught bug (outside debug; in debug Laravel's own page surfaces). |
 
@@ -1262,8 +1323,10 @@ you). See `05-rbac.md`.
 ## What is not here yet
 
 **Cutoffs and locking shipped in M7a** (above, under "Office — cutoffs"): close, reopen, and
-the `cutoff_locked` approval refusal. **Payroll export is M7b**, next — its endpoints land
-with it. Holidays (M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
+the `cutoff_locked` approval refusal. **Payroll export shipped in M7b** (above, under "Office
+— payroll export"): the per-employee earnings breakdown of a closed period, reconciling
+line-for-line against the calendar — **M7 (cutoffs and export) is now complete**. Holidays
+(M4a), schedules (M4b), and pay rules (M4c) shipped the configuration
 spine; M5a's compute engine (above) now reads all three to price a day — **M5a is
 complete**. **M6b-a shipped the leave foundation** (leave-type config, the office leave
 day, HR manual grants, and derived balance reads, all above under "Leave — foundation"),

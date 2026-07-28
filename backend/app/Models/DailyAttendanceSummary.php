@@ -43,16 +43,34 @@ final class DailyAttendanceSummary extends Model
         ];
     }
 
-    public function newUniqueId(): string { return Str::uuid7()->toString(); }
+    public function newUniqueId(): string
+    {
+        return Str::uuid7()->toString();
+    }
 
     /** @return array<int,string> */
-    public function uniqueIds(): array { return ['id']; }
+    public function uniqueIds(): array
+    {
+        return ['id'];
+    }
 
     /** @return HasMany<DailySummaryLine> */
-    public function lines(): HasMany { return $this->hasMany(DailySummaryLine::class, 'summary_id'); }
+    public function lines(): HasMany
+    {
+        return $this->hasMany(DailySummaryLine::class, 'summary_id');
+    }
 
     /** @return BelongsTo<Office, $this> */
-    public function office(): BelongsTo { return $this->belongsTo(Office::class); }
+    public function office(): BelongsTo
+    {
+        return $this->belongsTo(Office::class);
+    }
+
+    /** @return BelongsTo<Employee, $this> */
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
 
     public function getActivitylogOptions(): LogOptions
     {

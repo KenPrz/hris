@@ -40,6 +40,9 @@ export const keys = {
   cutoffs: {
     list: (officeId: string) => ['cutoffs', officeId] as const,
   },
+  payrollExport: {
+    forPeriod: (periodId: string) => ['payroll-export', periodId] as const,
+  },
   schedules: {
     templates: (officeId: string) => ['schedules', 'templates', officeId] as const,
     assignments: (officeId: string) => ['schedules', 'assignments', officeId] as const,

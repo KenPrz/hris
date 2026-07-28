@@ -21,6 +21,7 @@
  * operator knows what to resolve before the period can close.
  */
 
+import Link from 'next/link'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 
@@ -141,9 +142,26 @@ function CutoffRow({ period, closing, onClose, onReopen }: CutoffRowProps) {
             Close period
           </Button>
         ) : (
-          <Button variant="ghost" onClick={onReopen}>
-            Reopen
-          </Button>
+          // A closed period is always a stored row, so `id` is non-null here — the only
+          // state that carries the id the export route binds to. "View export" is the drill
+          // into that period's per-employee earnings; it never shows on an open row.
+          <div className="inline-flex items-center justify-end" style={{ gap: 'var(--sp-sm)' }}>
+            <Link
+              href={`/office/cutoffs/${period.id}/export`}
+              className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
+              style={{
+                font: 'var(--t-body-sm)',
+                letterSpacing: 'var(--ls-body)',
+                color: 'var(--blue)',
+                textDecoration: 'none',
+              }}
+            >
+              View export
+            </Link>
+            <Button variant="ghost" onClick={onReopen}>
+              Reopen
+            </Button>
+          </div>
         )}
       </td>
     </tr>

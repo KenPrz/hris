@@ -1620,6 +1620,13 @@ avoids. `CloseCutoff` reads the window's summaries by that range, and freezing t
 in the same transaction that sets the period `closed`. `ReopenCutoff` is the inverse: period
 back to `open`, every in-period `locked` summary back to `computed`.
 
+**The M7b payroll export reads the frozen summaries by that same office + date-range
+membership — never by the `status = 'locked'` label.** Selecting by membership still captures
+a leaked `computed` row (the M7a known-limitation first-compute-vs-close race) that a
+status-based selection would silently drop, and it pairs each `daily_summary_lines` row with
+its parent summary's `rule_version_id` to roll the period up per employee. The export writes
+nothing — it is a pure read over the same summaries `CloseCutoff` froze.
+
 **The freeze and its inverse serialize on a per-employee `Employee` row lock.** `CloseCutoff`,
 `ReopenCutoff`, `ApproveRequest` (final hop, via `CutoffGuard::assertOpen`), and `RecomputeDay`
 each `lockForUpdate()` the affected `employees` row before touching that employee's summaries,
