@@ -160,6 +160,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::MANAGER_RATE,
             actorId: $actor,
             login: ['name' => 'Rosa Bautista', 'email' => 'manager.manila@hris.test'],
+            name: 'Rosa Bautista',
         );
 
         // Three rank-and-file reports. The first one is the "plain employee" credential.
@@ -174,6 +175,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::SENIOR_RATE,
             actorId: $actor,
             login: ['name' => 'Miguel Santos', 'email' => 'employee.manila@hris.test'],
+            name: 'Miguel Santos',
         );
 
         // M4b: an employee-level assignment for Miguel, effective from the start of 2026 —
@@ -250,6 +252,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::RANK_AND_FILE_RATE,
             actorId: $actor,
             login: ['name' => 'Andrea Cruz', 'email' => 'andrea.manila@hris.test'],
+            name: 'Andrea Cruz',
         );
         $this->onboard(
             employeeNo: 'MNL-0004',
@@ -262,6 +265,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::RANK_AND_FILE_RATE,
             actorId: $actor,
             login: ['name' => 'Paolo Villanueva', 'email' => 'paolo.manila@hris.test'],
+            name: 'Paolo Villanueva',
         );
 
         // The punch-only worker: an employment record (so the cache is populated and they
@@ -277,6 +281,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::RANK_AND_FILE_RATE,
             actorId: $actor,
             login: null,
+            name: 'Jerome Salazar',
         );
 
         // Manila HR Admin: the verb set comes from the spatie 'HR Admin' role; the scope
@@ -292,6 +297,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::HR_RATE,
             actorId: $actor,
             login: ['name' => 'Carmen Lim', 'email' => 'hr.manila@hris.test'],
+            name: 'Carmen Lim',
         );
         $manilaHr->user->assignRole('HR Admin');
         $manilaHr->user->hrAdminOffices()->attach($manila->id);
@@ -309,6 +315,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::MANAGER_RATE,
             actorId: $actor,
             login: ['name' => 'Ramon Delgado', 'email' => 'manager.cebu@hris.test'],
+            name: 'Ramon Delgado',
         );
         $this->onboard(
             employeeNo: 'CEB-0002',
@@ -321,6 +328,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::SENIOR_RATE,
             actorId: $actor,
             login: ['name' => 'Liza Fernandez', 'email' => 'employee.cebu@hris.test'],
+            name: 'Liza Fernandez',
         );
         $this->onboard(
             employeeNo: 'CEB-0003',
@@ -333,6 +341,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::RANK_AND_FILE_RATE,
             actorId: $actor,
             login: ['name' => 'Noel Aquino', 'email' => 'noel.cebu@hris.test'],
+            name: 'Noel Aquino',
         );
 
         $cebuHr = $this->onboard(
@@ -346,6 +355,7 @@ final class CompanySeeder extends Seeder
             baseRateCents: self::HR_RATE,
             actorId: $actor,
             login: ['name' => 'Grace Tan', 'email' => 'hr.cebu@hris.test'],
+            name: 'Grace Tan',
         );
         $cebuHr->user->assignRole('HR Admin');
         $cebuHr->user->hrAdminOffices()->attach($cebu->id);
@@ -665,7 +675,9 @@ final class CompanySeeder extends Seeder
      * Onboard one employee the way the API does: CreateEmployee inserts the immutable
      * identity and records the first employment through RecordEmploymentChange, which is
      * the sole writer of the current_* cache. A login is provisioned only when one is
-     * given — a null $login leaves user_id null (the punch-only worker).
+     * given — a null $login leaves user_id null (the punch-only worker). $name is a plain
+     * "First Last" and is split on the first space — the seeded roster has no middle
+     * names or suffixes to carry.
      *
      * @param  array{name: string, email: string}|null  $login
      */
@@ -680,11 +692,18 @@ final class CompanySeeder extends Seeder
         int $baseRateCents,
         string $actorId,
         ?array $login,
+        string $name,
     ): Employee {
+        [$firstName, $lastName] = explode(' ', $name, 2);
+
         $employee = app(CreateEmployee::class)->execute(new CreateEmployeeInput(
             employeeNo: $employeeNo,
             organizationId: $organization->id,
             hiredAt: $hiredAt,
+            firstName: $firstName,
+            middleName: null,
+            lastName: $lastName,
+            nameSuffix: null,
             firstEmployment: new RecordEmploymentChangeInput(
                 employeeId: '', // overwritten by CreateEmployee once the employee exists
                 effectiveFrom: $hiredAt,

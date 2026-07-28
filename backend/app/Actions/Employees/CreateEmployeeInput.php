@@ -10,6 +10,10 @@ final readonly class CreateEmployeeInput
         public string $employeeNo,
         public string $organizationId,
         public string $hiredAt,
+        public string $firstName,
+        public ?string $middleName,
+        public string $lastName,
+        public ?string $nameSuffix,
         public ?RecordEmploymentChangeInput $firstEmployment,   // null if created bare
         public ?string $actorId,
     ) {}

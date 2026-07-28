@@ -20,6 +20,10 @@ final class CreateEmployeeRequest extends FormRequest
             'employee_no' => ['required', 'string'],
             'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
             'hired_at' => ['required', 'date'],
+            'first_name' => ['required', 'string'],
+            'middle_name' => ['nullable', 'string'],
+            'last_name' => ['required', 'string'],
+            'name_suffix' => ['nullable', 'string'],
 
             // Optional first employment block — when present, CreateEmployee records it
             // through RecordEmploymentChange so the cache is populated on day one.

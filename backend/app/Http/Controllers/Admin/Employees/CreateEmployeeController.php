@@ -27,6 +27,10 @@ final class CreateEmployeeController
             employeeNo: $request->string('employee_no')->toString(),
             organizationId: $request->string('organization_id')->toString(),
             hiredAt: $request->string('hired_at')->toString(),
+            firstName: $request->string('first_name')->toString(),
+            middleName: $request->input('middle_name'),
+            lastName: $request->string('last_name')->toString(),
+            nameSuffix: $request->input('name_suffix'),
             firstEmployment: $employment === null ? null : new RecordEmploymentChangeInput(
                 employeeId: '', // overwritten by CreateEmployee once the employee exists
                 effectiveFrom: (string) $employment['effective_from'],
