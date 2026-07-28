@@ -321,3 +321,87 @@ it('produces one export per employee with an in-period summary and omits an empl
         ->and($ids)->toContain($employeeB->id)
         ->and($ids)->not->toContain($employeeC->id);
 });
+
+it('orders employees by employee_no regardless of creation/row order, and orders each employee\'s lines by the grouping triple', function (): void {
+    $office = Office::factory()->create();
+
+    // Created and given in-period summaries in the OPPOSITE of employee_no sort order, so a
+    // pass here can't be explained by incidental physical/creation order.
+    $employeeZ = Employee::factory()->create(['current_office_id' => $office->id, 'employee_no' => 'EMP-00002']);
+    $employeeA = Employee::factory()->create(['current_office_id' => $office->id, 'employee_no' => 'EMP-00001']);
+
+    foreach ([$employeeZ, $employeeA] as $e) {
+        EmploymentRecord::factory()->create([
+            'employee_id' => $e->id,
+            'office_id' => $office->id,
+            'effective_from' => '2026-01-01',
+            'base_rate_cents' => 61000,
+        ]);
+    }
+
+    $period = CutoffPeriod::factory()->closed()->create([
+        'office_id' => $office->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-15',
+    ]);
+
+    // employeeZ's summary is created first (lower row id), yet its employee_no sorts LAST.
+    $dayZ = DailyAttendanceSummary::factory()->create([
+        'employee_id' => $employeeZ->id,
+        'office_id' => $office->id,
+        'date' => '2026-07-05',
+    ]);
+
+    // employeeA's lines are spread across four days (the (summary_id, kind) unique index
+    // forbids two same-kind lines on one summary), added out of (kind, applied_bp) order —
+    // including two overtime_day lines whose applied_bp would mis-sort under a naive
+    // string/concatenation compare (13000 before 9000 lexicographically, but 9000 must come
+    // first numerically).
+    $dayA1 = DailyAttendanceSummary::factory()->create([
+        'employee_id' => $employeeA->id, 'office_id' => $office->id, 'date' => '2026-07-05',
+    ]);
+    $dayA1->lines()->create(['kind' => SummaryLineKind::OvertimeDay->value, 'minutes' => 30, 'applied_bp' => 13000]);
+
+    $dayA2 = DailyAttendanceSummary::factory()->create([
+        'employee_id' => $employeeA->id, 'office_id' => $office->id, 'date' => '2026-07-06',
+    ]);
+    $dayA2->lines()->create(['kind' => SummaryLineKind::HolidayUnworked->value, 'minutes' => 480, 'applied_bp' => 20000]);
+
+    $dayA3 = DailyAttendanceSummary::factory()->create([
+        'employee_id' => $employeeA->id, 'office_id' => $office->id, 'date' => '2026-07-07',
+    ]);
+    $dayA3->lines()->create(['kind' => SummaryLineKind::OvertimeDay->value, 'minutes' => 15, 'applied_bp' => 9000]);
+
+    $dayA4 = DailyAttendanceSummary::factory()->create([
+        'employee_id' => $employeeA->id, 'office_id' => $office->id, 'date' => '2026-07-08',
+    ]);
+    $dayA4->lines()->create(['kind' => SummaryLineKind::RegularDay->value, 'minutes' => 480, 'applied_bp' => 10000]);
+
+    $data = PayrollExport::for($period);
+
+    expect(collect($data->employees)->pluck('employeeNo')->all())->toBe(['EMP-00001', 'EMP-00002']);
+
+    $employeeAExport = $data->employees[0];
+    $lineKeys = collect($employeeAExport->lines)
+        ->map(fn ($l): array => [$l->kind->value, $l->appliedBp])
+        ->all();
+
+    expect($lineKeys)->toBe([
+        [SummaryLineKind::HolidayUnworked->value, 20000],
+        [SummaryLineKind::OvertimeDay->value, 9000],
+        [SummaryLineKind::OvertimeDay->value, 13000],
+        [SummaryLineKind::RegularDay->value, 10000],
+    ]);
+
+    // Re-export the same locked period: same order again, proving it's not incidental.
+    $reExport = PayrollExport::for($period);
+
+    expect(collect($reExport->employees)->pluck('employeeNo')->all())
+        ->toBe(collect($data->employees)->pluck('employeeNo')->all());
+
+    $reLineKeys = collect($reExport->employees[0]->lines)
+        ->map(fn ($l): array => [$l->kind->value, $l->appliedBp])
+        ->all();
+
+    expect($reLineKeys)->toBe($lineKeys);
+});

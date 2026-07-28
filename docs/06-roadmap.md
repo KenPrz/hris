@@ -1560,7 +1560,7 @@ HR closes the clean first-half July window and exports it; every `(kind, applied
 rule_version_id)` line and every total reconciles EXACTLY against Miguel's own calendar summed over
 the in-period dates; a second export of the still-locked period is byte-identical; reopening the
 period makes the export refuse `422 period_not_exportable`; and a nonexistent period is
-404-not-403. **715 backend tests (22 of them Arch) + 460 frontend tests**, all green.
+404-not-403. **715 backend tests (19 of them Arch) + 460 frontend tests**, all green.
 
 Next: **M8 — admin portal and audit.**
 

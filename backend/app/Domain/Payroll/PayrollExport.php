@@ -40,6 +40,7 @@ final class PayrollExport
         $employees = $summaries
             ->groupBy('employee_id')
             ->map(fn (Collection $rows, string $employeeId): PayrollEmployeeExport => self::forEmployee($employeeId, $rows, $period))
+            ->sortBy(fn (PayrollEmployeeExport $e): string => $e->employeeNo)
             ->values()
             ->all();
 
@@ -70,6 +71,12 @@ final class PayrollExport
             ->values()
             ->all();
 
+        // Sort by the exact grouping key (kind, applied_bp, rule_version_id) — a tuple compare,
+        // not a concatenated string, so applied_bp sorts numerically — so a re-export of a
+        // locked period always lists lines in the same order.
+        usort($lines, fn (PayrollEarningsLine $a, PayrollEarningsLine $b): int => [$a->kind->value, $a->appliedBp, $a->ruleVersionId ?? '']
+            <=> [$b->kind->value, $b->appliedBp, $b->ruleVersionId ?? '']);
+
         [$baseRateCents, $segments] = self::baseRate($employee, $rows, $period);
 
         return new PayrollEmployeeExport(
@@ -88,7 +95,9 @@ final class PayrollExport
 
     /**
      * The period-end effective base rate + the distinct effective segments that priced in-period
-     * days. Loads the employee's records once (no N+1) and resolves in-memory.
+     * days. Resolves the effective employment record per in-period day via `EmploymentResolver::on`
+     * — a bounded per-day query (~one per in-period summary row, so ~16/employee), not a single
+     * batch load; acceptable at export scale and already triaged.
      *
      * @param  Collection<int, DailyAttendanceSummary>  $rows
      * @return array{0: ?int, 1: list<array{effective_from: string, base_rate_cents: int}>}
