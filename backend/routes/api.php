@@ -11,6 +11,7 @@ use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentC
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Employees\UpdateEmployeeController;
 use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
 use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
 use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
@@ -152,6 +153,7 @@ Route::prefix('v1')->group(function (): void {
         // out-of-scope-subject case the 404-not-403 rule protects.
         Route::prefix('admin')->group(function (): void {
             Route::post('/employees', CreateEmployeeController::class);
+            Route::patch('/employees/{employee}', UpdateEmployeeController::class);
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
 
