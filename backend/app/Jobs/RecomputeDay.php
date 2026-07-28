@@ -22,11 +22,15 @@ use Illuminate\Queue\InteractsWithQueue;
  * connection, and an id round-trips through that cleanly where a full model would not
  * (and would also silently go stale between dispatch and execution).
  *
- * A `locked` summary is frozen — a locked cutoff period's numbers are final as of M7 —
- * so this job is a strict no-op over one: it does not delete it, does not recompute it,
- * does not touch it at all. Everything else about ComputeDailySummary::execute's own
- * idempotency (delete-then-insert under a row lock) is unchanged; this job adds exactly
- * one guard in front of it.
+ * A `locked` summary is frozen — a locked cutoff period's numbers are final as of M7. The
+ * AUTHORITATIVE freeze guard now lives in ComputeDailySummary::execute, UNDER the employee
+ * row lock: it reads the covering cutoff period there and skips the whole delete/recompute/
+ * create when the (office, date) is in a `closed` period, so a close racing a recompute
+ * serializes on that lock (M7a). The early `status === 'locked'` read below is retained only
+ * as a cheap unlocked fast-path — it short-circuits the common already-frozen case before
+ * dispatching a job, but it is NOT the race-safe guard (an unlocked read alone was the
+ * M5b-flagged race, and it cannot see a summary-less closed day at all). Correctness rests on
+ * the in-transaction check in ComputeDailySummary; this fast-path is harmless and optional.
  */
 final class RecomputeDay implements ShouldQueue
 {
