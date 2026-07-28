@@ -62,7 +62,10 @@ it('sets the default template for an administered office, and logs it', function
         'default_shift_template_id' => $template->id,
     ]);
 
-    $activity = Activity::query()->where('subject_id', $office->id)->first();
+    // Office self-logs (M8a's LogsActivity), including its own factory-created `created`
+    // event above — which predates Sanctum::actingAs() and so has no causer. The `update`
+    // this endpoint performs is the entry under test, so it's the one to fetch.
+    $activity = Activity::query()->where('subject_id', $office->id)->where('event', 'updated')->first();
 
     expect($activity)->not->toBeNull()
         ->and($activity->causer_id)->toBe($hr->id)

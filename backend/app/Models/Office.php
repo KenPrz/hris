@@ -11,11 +11,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Office extends Model
 {
     /** @use HasFactory<OfficeFactory> */
-    use HasFactory, HasUuids;
+    use HasFactory, HasUuids, LogsActivity;
 
     // Fully unguarded, not $fillable: every write comes from a vetted Action, so there is
     // no untrusted mass-assignment surface to fence off. Adding a non-empty $fillable here
@@ -31,6 +33,7 @@ final class Office extends Model
         return [
             'ip_allowlist' => 'array',
             'minutes_per_leave_day' => 'integer',
+            'archived_at' => 'datetime',
         ];
     }
 
@@ -79,5 +82,13 @@ final class Office extends Model
     public function uniqueIds(): array
     {
         return ['id'];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['organization_id', 'name', 'code', 'timezone', 'geofence_lat', 'geofence_lng', 'geofence_radius_m', 'ip_allowlist', 'default_shift_template_id', 'archived_at'])
+            ->useLogName('office')
+            ->logOnlyDirty();
     }
 }
