@@ -830,6 +830,116 @@ automatically from the authenticated guard. `scripts/e2e-pay-rules.sh` proves th
 surface — floor-valid create, the below-floor `422`, the duplicate `409`, the immutable
 `405`, the non-admin `403`, and the activity-log row — against the live stack.
 
+## Admin — the organization tree *(M8a)*
+
+The company's shape — `organizations` → `offices` → `departments` (`02-data-model.md`) —
+made admin-editable at runtime. Like pay rules (M4c) and unlike the office-scoped HR
+surfaces (M4a/M4b/M7), this is **not** `OfficeScope`-gated: an organization is the parent
+an office belongs to and an office cannot scope-check itself, so there is no office to gate
+by. Every endpoint here is sysadmin-gated directly by its `FormRequest::authorize()`
+(`(bool) $this->user()?->is_system_admin`), and **a non-admin gets `403 forbidden`, not the
+`404`-not-`403` discipline** the HR endpoints use. That discipline exists to keep an
+out-of-scope *subject* from being confirmed to exist; the org tree is global config with no
+per-subject scope a non-admin could be probing, so refusing the actor outright is the
+correct shape — the same `403` pay rules and onboarding return. This is the one deliberate
+global-admin exception to 404-not-403 (`05-rbac.md`).
+
+**Archive-never-delete.** There is **no `DELETE` route** on any tier. Retiring an office or
+department stamps a nullable `archived_at`; the row, its departments, and every
+`employment_record`/`current_*` snapshot pointing at it stay intact (`02-data-model.md`).
+The list endpoints hide archived rows by default and reveal them with `?include_archived=1`.
+Organizations have no archive (nothing sits above them to close). Every create/update/
+archive/unarchive is logged by the models' `LogsActivity` (log names `organization`/`office`/
+`department`, the row the uuid-morph subject, the acting admin the causer).
+
+```
+GET  /api/v1/admin/organizations          # auth:sanctum — System Admin only
+  → { data: [ { id, name, legal_name, tin, timezone }, … ] }   # name ascending
+  → 403 forbidden                          # caller is not a System Admin
+
+POST /api/v1/admin/organizations
+  { "name": "Acme, Inc.", "legal_name": "Acme Incorporated", "tin": "…", "timezone": "Asia/Manila" }
+  → 201 { data: { id, name, legal_name, tin, timezone } }
+  → 400 validation_failed                  # bad shape (name/timezone required; timezone must be a real tz)
+  → 403 forbidden
+
+PATCH /api/v1/admin/organizations/{organization}   # full object, not a partial patch
+  { "name": …, "legal_name": …, "tin": …, "timezone": … }
+  → { data: { … } }
+  → 403 forbidden
+  → 404 not_found                          # {organization} does not exist — plain not-found, no scope to leak
+```
+
+```
+GET  /api/v1/admin/offices                 # auth:sanctum — System Admin only
+  ?organization=<uuid>                     # optional: only offices under that org
+  ?include_archived=1                      # optional: include archived offices (default hides them)
+  → { data: [ { id, organization_id, name, code, timezone, geofence_lat, geofence_lng,
+                geofence_radius_m, ip_allowlist, default_shift_template_id, archived_at }, … ] }
+  → 403 forbidden
+
+POST /api/v1/admin/offices
+  { "organization_id": "<uuid>", "name": "Manila HQ", "code": "MNL", "timezone": "Asia/Manila",
+    "geofence_lat": null, "geofence_lng": null, "geofence_radius_m": null,
+    "ip_allowlist": null, "default_shift_template_id": null }
+  → 201 { data: { … , archived_at: null } }
+  → 400 validation_failed
+  → 403 forbidden
+  → 422 duplicate_office_code              # offices.code is GLOBALLY unique; details: { code }
+
+PATCH /api/v1/admin/offices/{office}       # full object, not a partial patch
+  → { data: { … } }
+  → 403 forbidden · 404 not_found · 422 duplicate_office_code
+
+POST /api/v1/admin/offices/{office}/archive
+  → { data: { … , archived_at: "…" } }
+  → 403 forbidden · 404 not_found
+  → 409 already_archived                   # details: { subject_type: "office", subject_id }
+
+POST /api/v1/admin/offices/{office}/unarchive
+  → { data: { … , archived_at: null } }
+  → 403 forbidden · 404 not_found
+  → 409 not_archived                       # details: { subject_type: "office", subject_id }
+```
+
+```
+GET  /api/v1/admin/departments             # auth:sanctum — System Admin only
+  ?office=<uuid>                           # optional: only departments under that office
+  ?include_archived=1                      # optional: include archived departments
+  → { data: [ { id, office_id, name, code, archived_at }, … ] }
+  → 403 forbidden
+
+POST /api/v1/admin/departments
+  { "office_id": "<uuid>", "name": "Operations", "code": "OPS" }
+  → 201 { data: { id, office_id, name, code, archived_at: null } }
+  → 400 validation_failed
+  → 403 forbidden
+  → 422 duplicate_department_code          # departments.code is unique WITHIN an office; details: { code }
+
+PATCH /api/v1/admin/departments/{department}   # full object
+  → { data: { … } }
+  → 403 forbidden · 404 not_found · 422 duplicate_department_code
+
+POST /api/v1/admin/departments/{department}/archive
+  → { data: { … , archived_at: "…" } }
+  → 403 forbidden · 404 not_found · 409 already_archived   # details: { subject_type: "department", subject_id }
+
+POST /api/v1/admin/departments/{department}/unarchive
+  → { data: { … , archived_at: null } }
+  → 403 forbidden · 404 not_found · 409 not_archived       # details: { subject_type: "department", subject_id }
+```
+
+`duplicate_office_code` / `duplicate_department_code` are clean `422` translations of the
+underlying unique constraint (global on `offices.code`, `(office_id, code)` on departments):
+a read-only pre-check inside the transaction covers the sequential case and a caught
+`UniqueConstraintViolationException` is the race-safe backstop, so the worst a client can
+observe is the clean `422`, never a raw unique-violation `500`. `already_archived` /
+`not_archived` (`409`) are the idempotency guards on the archive/unarchive toggles — the
+same generic pair, distinguished only by `details.subject_type`, is reused across both tiers.
+`scripts/e2e-admin-org.sh` proves the whole surface — create/list each tier, the duplicate
+`422`, the `activity_log` writes, the archive/list-hide/`include_archived`/re-archive `409`/
+unarchive cycle, and the non-admin `403` — against the live stack.
+
 ## Leave — foundation *(M6b-a)*
 
 Leave-type config per office, the office-wide day-length divisor, HR manual grants, and a

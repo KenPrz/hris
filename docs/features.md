@@ -531,3 +531,33 @@ those who actually worked in-period appear).
 ---
 
 *(Cutoffs, period locking, and the payroll export are done — M7 is complete.)*
+
+## Building the company's org tree *(M8a)*
+
+A company's shape isn't fixed at seed time — a new branch opens, a department is renamed, an
+office is retired. M8a lets a **system administrator** build and reshape the whole
+organization tree from the app: organizations, the offices under them, and the departments
+under those.
+
+- **A system administrator builds the org tree.** Create an organization, add offices under
+  it, add departments under an office — each on its own admin screen, with the parent chosen
+  from the tier above. Names and codes (a short office code like `MNL`, a department code like
+  `OPS`) are editable after the fact. Office codes are unique company-wide; a department code
+  only has to be unique within its office, so `OPS` can name Operations in both Manila and
+  Cebu.
+- **Retire, don't delete.** An office or department that closes is **archived**, never removed
+  — the row, its history, and every employee record that ever pointed at it stay intact, so a
+  closed office's past payroll and attendance are never orphaned. Archived nodes drop out of
+  the normal lists but can be shown with a toggle, and **un-archived** to bring them back.
+  There is no delete anywhere in here.
+- **Only a system administrator, company-wide.** Unlike holiday calendars or schedules — which
+  each office's HR admin manages for their own office — the org tree is global structure, so
+  it's a system-administrator-only surface. An HR admin or a plain employee who tries is simply
+  refused.
+- **Every change is audited.** Creating, renaming, archiving, or un-archiving any node writes
+  an audit-log entry naming who did it — so the company's structural history is recoverable
+  even before the dedicated audit-log viewer (later in M8) arrives.
+
+**Still to come in M8:** the multi-step employee profiler (onboarding a person through a
+guided wizard), role management, assigning which offices an HR admin covers, and the
+activity-log viewer.

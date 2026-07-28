@@ -55,6 +55,7 @@ create table offices (
   geofence_lng      numeric(10,7),
   geofence_radius_m integer,
   ip_allowlist      jsonb,
+  archived_at       timestamptz,               -- M8a: archive-never-delete (see below)
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -64,6 +65,7 @@ create table departments (
   office_id   uuid not null references offices(id) on delete cascade,
   name        text not null,
   code        text not null,
+  archived_at timestamptz,                     -- M8a: archive-never-delete (see below)
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   unique (office_id, code)                    -- code unique WITHIN an office
@@ -89,6 +91,22 @@ The `geofence_*` and `ip_allowlist` columns are stored now so M3's punch endpoin
 home to validate against; nothing reads them in M2. They are forward-declared rather than
 migrated in later for the same reason POS forward-declared `registers.mode` — one nullable
 column at build time is cheaper than an `ALTER` over a populated table later.
+
+**`archived_at`: archive-never-delete, non-cascading *(M8a)*.** Neither an office nor a
+department is ever `DELETE`d — the admin org-tree surface (`03-api.md`, §Admin — the
+organization tree) has no `DELETE` route at all. Retiring one stamps a nullable
+`archived_at` and nothing more; the default admin list hides archived rows, and
+`?include_archived=1` reveals them. The stamp is deliberately **non-cascading**: archiving
+an office does not archive its departments, and — critically — it does not touch the
+`employees.current_office_id`/`current_department_id` snapshots or the historical
+`employment_records` that point at it, so a closed office's payroll history and its
+inspector-facing ledger stay intact and readable. (This is why archive, not delete: the
+`on delete cascade` FKs above would take employment history with the row.) The three
+org-tree models carry spatie's **`LogsActivity`** (M8a): every create/update/archive/unarchive
+writes an `activity_log` row — `log_name` `organization`/`office`/`department`, `subject_id`
+the row, the acting System Admin the `causer` — so a runtime change to the company's shape
+is auditable even though there is no viewer endpoint yet (`scripts/e2e-admin-org.sh` asserts
+the rows straight at the table).
 
 ---
 
