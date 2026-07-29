@@ -1,6 +1,6 @@
 # HRIS
 
-A Human Resource Information System for a single Philippine company operating across
+A Human Resource Information System for a single company operating across
 several offices.
 
 ## Running it
