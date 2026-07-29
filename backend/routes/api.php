@@ -12,6 +12,7 @@ use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Employees\SetHrAdminOfficesController;
 use App\Http\Controllers\Admin\Employees\ShowController as ShowEmployeeAdminController;
 use App\Http\Controllers\Admin\Employees\UpdateEmployeeController;
 use App\Http\Controllers\Admin\ListActivityController;
@@ -166,6 +167,12 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/employees/{employee}', UpdateEmployeeController::class);
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
+
+            // HR-Admin access management (M8c Task 2): couples the hr_admin_offices
+            // pivot with the spatie 'HR Admin' role in one write (SetHrAdminOffices).
+            // Same is_system_admin gating as the rest of this group; office_ids=[]
+            // revokes HR-Admin entirely rather than leaving a dangling role/pivot.
+            Route::post('/employees/{employee}/hr-offices', SetHrAdminOfficesController::class);
 
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
