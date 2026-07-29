@@ -23,7 +23,9 @@ final class User extends Authenticatable
     // Everything is mass-assignable EXCEPT the one flag that bypasses both Gate::before and
     // EmployeeScope. Guarding it means a stray `User::create($request->validated())` can
     // never grant system-admin — the DB default (false) stands unless code sets it
-    // explicitly (forceFill / property assignment), which only the seeder does.
+    // explicitly (forceFill / property assignment). Exactly two places do: CompanySeeder
+    // (the dev/demo company) and the hris:bootstrap-admin command (the first login on a
+    // fresh production database).
     protected $guarded = ['is_system_admin'];
 
     protected $hidden = ['password', 'remember_token'];

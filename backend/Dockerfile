@@ -25,6 +25,12 @@ RUN useradd -u 1000 -m hris \
 
 WORKDIR /app
 
+# ---- vendor: composer layer cached off the lockfile alone -------------------
+FROM base AS vendor
+COPY composer.json composer.lock ./
+RUN --mount=type=cache,target=/root/.composer \
+    composer install --no-dev --no-interaction --prefer-dist --no-progress --no-scripts --no-autoloader
+
 # ---- dev: full deps, code arrives via bind mount ----------------------------
 FROM base AS dev
 ENV APP_ENV=local
@@ -32,5 +38,32 @@ COPY docker/Caddyfile.dev /etc/frankenphp/Caddyfile
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 USER hris
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]
+
+# ---- prod -------------------------------------------------------------------
+FROM base AS prod
+ENV APP_ENV=production
+COPY --chown=hris:hris . .
+COPY --from=vendor --chown=hris:hris /app/vendor ./vendor
+# --no-scripts: composer's post-autoload-dump runs `artisan package:discover`, which
+# boots the framework — and AppServiceProvider::assertConfigured() refuses to boot
+# without HRIS_CURRENCY/HRIS_ORGANIZATION_NAME/APP_KEY, none of which exist at build
+# time (config is cached at BOOT, never baked into the image — see entrypoint.sh).
+# Discovery runs lazily on the first boot instead, once real env is present. Same
+# reasoning, same flag, as .github/workflows/ci.yml.
+RUN composer dump-autoload --optimize --no-dev --no-scripts \
+    && chown -R hris:hris storage bootstrap/cache
+COPY docker/Caddyfile.prod /etc/frankenphp/Caddyfile
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+    && mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
+    && printf 'opcache.validate_timestamps=0\nopcache.memory_consumption=192\n' \
+       > "$PHP_INI_DIR/conf.d/zz-opcache.ini"
+USER hris
+# The internal :8000 listener in Caddyfile.prod exists for exactly this — the public
+# vhost is TLS on a hostname the container itself can't resolve.
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["frankenphp", "run", "--config", "/etc/frankenphp/Caddyfile"]

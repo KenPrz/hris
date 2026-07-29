@@ -46,7 +46,7 @@ DESIGN.md            The token authority for the frontend — colors, type scale
                     in the frontend should reference a raw hex or literal type step.
 ```
 
-Production compose lands in M8; there is no `compose.prod.yml` yet.
+`compose.prod.yml` is the production stack (M9) — see **Production** below.
 
 ## Running it
 
@@ -111,6 +111,56 @@ Next rewrites `/api` to the API, so the browser sees one origin and CORS never c
 
 Check it works: <http://127.0.0.1:5176> should say **System healthy** and print the
 Postgres version.
+
+## Production
+
+`compose.prod.yml` is a single-host stack: **one FrankenPHP container is the whole public
+edge.** It terminates TLS and routes by path — `/api/*` served by PHP, everything else
+proxied to Next on `web:3000`. One domain, because HRIS has one frontend on purpose.
+
+```bash
+cp .env.prod.example .env    # then fill it in — HRIS_* vars, not HRIS_DEV_*
+make prod-up                 # builds the prod images and boots db + api + web + rustfs
+```
+
+**A fresh database has no login.** `DatabaseSeeder` is dev-only (it pairs the RBAC catalog
+with the Manila/Cebu demo company), so production mints its first System Admin explicitly:
+
+```bash
+docker compose -f compose.prod.yml exec --user hris api \
+  php artisan hris:bootstrap-admin you@example.com
+```
+
+That seeds the RBAC catalog and creates one `is_system_admin` user, printing a generated
+password **once**. It refuses to run a second time — recovering a lost admin password is a
+deliberate, separate act, not something a bootstrap command does quietly.
+
+| Target | Does |
+| --- | --- |
+| `make prod-up` / `make prod-down` | Boot / stop the production stack (volumes survive) |
+| `make prod-logs` | Tail every service |
+| `make build` | Build both production images without booting |
+| `make backup` | `pg_dump` the database **and** tar the attachments → `backups/` |
+| `make restore-drill` | Restore the newest dump into a throwaway db and count rows |
+| `make restore FILE=…` | Restore into the **live** db — destructive, asks first |
+
+`backup`/`restore`/`restore-drill` target the dev stack by default; add `COMPOSE=prod`
+for production. `scripts/e2e-prod-boot.sh` proves the whole path — build, boot, TLS,
+bootstrap, sign-in, backup, drill, teardown — under its own compose project name so it
+can never touch a real stack's volumes.
+
+Things worth knowing before you change any of it:
+
+- **`.dockerignore` is a security boundary, not tidiness.** The prod stage is `COPY . .`;
+  without it the host's `backend/.env` — a real `APP_KEY` and database password — is baked
+  into an image layer.
+- **Next's `/api` rewrite does not run in production.** Caddy splits `/api/*` off before
+  Next ever sees it. The browser still sees one origin; the mechanism differs from dev.
+- **Required production vars are guarded in `entrypoint.sh`, not with compose `:?`.** A
+  required var with no default breaks interpolation for *every* compose command —
+  including the `down -v` and `config` you need when something is already wrong.
+- **RustFS publishes no ports in production.** Attachments are app-mediated downloads,
+  never direct object URLs, so nothing outside the compose network needs to reach it.
 
 ## Tests
 
@@ -246,22 +296,28 @@ Found while building M0. Each one cost real time.
 
 ## Status
 
-**M0 through M3.5 complete.** The skeleton boots; the DOLE premium matrix is a
-table-driven unit test; schema/auth/office-scoped RBAC are proven by a four-actor scope
-matrix; timekeeping ingestion turns a punch into an append-only `attendance_logs` row; an
-employee can correct their own attendance through a request a manager or HR approves; and
-as of M3.5 all of it has a real screen — Carbon-styled sign-in, a clock-in/out button that
-always knows what happens next, and a month calendar of actual punch times (never an
-invented total). **267 backend tests + 17 arch tests, 165 frontend tests.** See
-`docs/06-roadmap.md` for the full status of each milestone and `docs/features.md` for
+**M0 through M9 complete — the roadmap is done.** The skeleton boots; the DOLE premium
+matrix is a table-driven unit test; schema/auth/office-scoped RBAC are proven by a
+four-actor scope matrix; timekeeping ingestion turns a punch into an append-only
+`attendance_logs` row; an employee corrects their own attendance through a request a
+manager or HR approves; holidays, shift templates, and `pay_rules` are admin-editable per
+office; the compute engine turns punches and config into a defensible daily summary;
+leave and overtime run through the approval spine; cutoffs lock a period and export
+payroll; the admin portal configures a company from empty and shows the audit trail
+behind every step; and M9 puts all of it behind a single TLS edge with a backup whose
+restore has actually been drilled. **776 backend tests (19 of them Arch) + 541 frontend
+tests.** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
 what a user can actually do today.
 
-One caveat worth knowing before you trust the UI: M3.5's flow is proven by component tests
-and a live API walkthrough, but **the rendered screens have never been confirmed in a real
-browser** — hydration would not complete in the build sandbox (it fails the same way on M0's
-health page, so it is environmental). There is no frontend e2e harness yet. Load it yourself
-before assuming it looks right; see the M3.5 status block in `docs/06-roadmap.md`.
+One caveat worth knowing before you trust the UI: the frontend is covered by component
+tests and live API walkthroughs, but **there is still no browser-level e2e harness** —
+every `scripts/e2e-*.sh` drives the API (and, for M9, the booted production stack), not a
+rendered page. M3.5's screens were never visually confirmed in a real browser, and nothing
+since has closed that gap. Load it yourself before assuming it looks right; see the M3.5
+status block in `docs/06-roadmap.md`.
 
-Next: **M4 — configuration spine.** Holiday calendars, shift templates, and `pay_rules`,
-all admin-editable per office — everything M3.5's frontend and M5's compute engine will
-read. See `docs/06-roadmap.md`.
+Next: no milestone is open. `docs/06-roadmap.md`'s **Deferred** table lists what is
+waiting and, for each item, the trigger that revives it — gross-to-net payroll, biometric
+device ingestion, a mobile app with GPS geofence, rotating rosters, tenure-based accrual,
+recursive manager scope, and multi-tenancy. The nearest unclaimed work that is *not* on
+that table is a frontend e2e harness.
