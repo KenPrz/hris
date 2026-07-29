@@ -707,6 +707,42 @@ export type AdminEmployeeUpdateInput = {
   name_suffix?: string | null
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/ActivityResource.php and
+// app/Http/Controllers/Admin/ListActivityController.php (M8c: the audit viewer).
+// `properties` is Spatie activitylog's arbitrary per-event payload — a bag of whatever
+// the logging call captured, so it stays `Record<string, unknown>` rather than a closed
+// shape. `meta` is the hand-built pagination block the controller returns instead of
+// Laravel's default paginated-resource wrapper (see that controller's own comment).
+// ---------------------------------------------------------------------------
+
+export type ActivityEntry = {
+  id: string
+  log_name: string
+  description: string
+  event: string
+  subject_type: string | null
+  subject_id: string | null
+  causer_id: string | null
+  properties: Record<string, unknown>
+  created_at: string // ISO8601
+}
+
+export type ActivityPage = {
+  data: ActivityEntry[]
+  meta: { current_page: number; last_page: number; total: number; per_page: number }
+}
+
+export type ActivityFilters = {
+  log_name?: string
+  event?: string
+  subject_type?: string
+  causer_id?: string
+  from?: string
+  to?: string
+  page?: number
+}
+
 export type ProvisionUserInput = { email: string; password: string; name: string }
 
 // POST /admin/employees/{id}/user returns UserResource.
@@ -1050,6 +1086,24 @@ export const api = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         }),
+    },
+    // The audit viewer (M8c), sysadmin-gated. Every filter is optional — only non-empty
+    // values are sent, mirroring `offices.list`'s query-string construction — and `page`
+    // is a number rather than a string, so it's coerced with `String()` rather than `set`.
+    activity: {
+      list: (filters?: ActivityFilters) => {
+        const query = new URLSearchParams()
+        if (filters?.log_name !== undefined && filters.log_name !== '') query.set('log_name', filters.log_name)
+        if (filters?.event !== undefined && filters.event !== '') query.set('event', filters.event)
+        if (filters?.subject_type !== undefined && filters.subject_type !== '')
+          query.set('subject_type', filters.subject_type)
+        if (filters?.causer_id !== undefined && filters.causer_id !== '') query.set('causer_id', filters.causer_id)
+        if (filters?.from !== undefined && filters.from !== '') query.set('from', filters.from)
+        if (filters?.to !== undefined && filters.to !== '') query.set('to', filters.to)
+        if (filters?.page !== undefined) query.set('page', String(filters.page))
+        const qs = query.toString()
+        return request<ActivityPage>(`/admin/activity${qs !== '' ? `?${qs}` : ''}`)
+      },
     },
   },
 }

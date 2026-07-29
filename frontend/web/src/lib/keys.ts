@@ -8,7 +8,7 @@
  * endpoints that don't exist yet.
  */
 
-import type { AdminDepartmentListParams, AdminEmployeeListParams, AdminOfficeListParams } from './api'
+import type { ActivityFilters, AdminDepartmentListParams, AdminEmployeeListParams, AdminOfficeListParams } from './api'
 
 export const keys = {
   session: () => ['session'] as const,
@@ -74,5 +74,11 @@ export const keys = {
     employees: (params?: AdminEmployeeListParams) =>
       params !== undefined ? (['admin', 'employees', params] as const) : (['admin', 'employees'] as const),
     employee: (id: string) => ['admin', 'employee', id] as const,
+    // The audit viewer (M8c). Unlike offices/employees/departments above, there is no
+    // no-params form to invalidate against — the viewer is read-only, nothing ever writes
+    // through it — so every distinct filter set (page included) gets its own cache entry
+    // rather than sharing a prefix meant for invalidation.
+    activity: (filters?: ActivityFilters) =>
+      filters !== undefined ? (['admin', 'activity', filters] as const) : (['admin', 'activity'] as const),
   },
 }
