@@ -3,6 +3,11 @@
 /.env
 /.env.*
 !/.env.example
+!/.env.prod.example
+# Backups are real payroll data — the dumps and attachment tars `make backup` writes
+# stay on the host and out of git. The directory itself is kept by .gitkeep.
+/backups/*
+!/backups/.gitkeep
 /backend/storage/*.key
 /backend/public/build
 /frontend/*/.next
