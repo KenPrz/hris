@@ -25,6 +25,7 @@ import type {
   EmploymentRecord,
   ProvisionedUser,
   ProvisionUserInput,
+  SetHrOfficesInput,
 } from '@/lib/api'
 import { api } from '@/lib/api'
 import { keys } from '@/lib/keys'
@@ -89,6 +90,21 @@ export function useRecordEmployment() {
 
   return useMutation<EmploymentRecord, unknown, { id: string; body: EmploymentInput }>({
     mutationFn: ({ id, body }) => api.admin.employees.recordEmployment(id, body),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: keys.admin.employees() })
+      void queryClient.invalidateQueries({ queryKey: keys.admin.employee(id) })
+    },
+  })
+}
+
+// M8c: office admin access. Syncs hr_admin_offices + the HR Admin role in one write;
+// the response is the refreshed detail, so invalidating (rather than merging locally)
+// is enough for the panel to reflect the new office list + role membership.
+export function useSetHrOffices() {
+  const queryClient = useQueryClient()
+
+  return useMutation<AdminEmployeeDetail, unknown, { id: string; body: SetHrOfficesInput }>({
+    mutationFn: ({ id, body }) => api.admin.employees.setHrOffices(id, body),
     onSuccess: (_data, { id }) => {
       void queryClient.invalidateQueries({ queryKey: keys.admin.employees() })
       void queryClient.invalidateQueries({ queryKey: keys.admin.employee(id) })

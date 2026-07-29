@@ -659,6 +659,10 @@ export type AdminEmployeeDetail = {
   full_name: string
   hired_at: string | null // YYYY-MM-DD
   has_user: boolean
+  // M8c: HR-Admin office scope + role membership, both derived from the employee's
+  // `user` row (empty for a login-less employee — there is nothing to report).
+  hr_admin_office_ids: string[]
+  roles: string[]
   current_employment: {
     office_id: string
     department_id: string
@@ -762,6 +766,10 @@ export type EmploymentRecord = {
 }
 
 export type AdminEmployeeListParams = { office?: string }
+
+// POST /admin/employees/{id}/hr-offices — the full replacement set of offices this
+// employee's user is HR-Admin over. An empty array clears the role entirely.
+export type SetHrOfficesInput = { office_ids: string[] }
 
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
@@ -1082,6 +1090,16 @@ export const api = {
         }),
       recordEmployment: (id: string, body: EmploymentInput) =>
         request<EmploymentRecord>(`/admin/employees/${id}/employment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      // Syncs the employee's user's hr_admin_offices pivot + assigns/removes the
+      // HR Admin role in one write, returning the refreshed EmployeeDetailResource
+      // (hr_admin_office_ids + roles included). 422s employee_has_no_login /
+      // invalid_reference for a login-less employee or a bad office id.
+      setHrOffices: (id: string, body: SetHrOfficesInput) =>
+        request<AdminEmployeeDetail>(`/admin/employees/${id}/hr-offices`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
