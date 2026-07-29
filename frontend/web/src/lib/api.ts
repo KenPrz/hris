@@ -724,7 +724,7 @@ export type ActivityEntry = {
   id: string
   log_name: string
   description: string
-  event: string
+  event: string | null
   subject_type: string | null
   subject_id: string | null
   causer_id: string | null
