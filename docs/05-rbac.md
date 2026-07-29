@@ -424,6 +424,32 @@ nonexistent parent surfaces as a `422` from the FK/constraint inside the action,
 `404` — there is no id a caller could probe. `scripts/e2e-admin-org.sh` asserts the
 non-admin `403` live.
 
+## HR-Admin access at runtime, and the audit viewer *(M8c)*
+
+The two axes above (verbs = the `HR Admin` role, scope = the `hr_admin_offices` pivot) are
+what `CompanySeeder` sets by hand at seed time. **M8c makes the same pairing an admin can
+change at runtime.** `POST /admin/employees/{employee}/hr-offices` (`03-api.md`) drives the
+`SetHrAdminOffices` action, which writes *both halves in one transaction*: `sync()` on the
+`hr_admin_offices` pivot **and** `assignRole('HR Admin')` — or, when `office_ids` is `[]`,
+`removeRole('HR Admin')` alongside clearing the pivot. This is the generalization of the
+seeder's `assignRole` + `hrAdminOffices()->attach` pairing to a live surface: because a
+policy needs both and neither alone makes an HR Admin (above), the *only* supported way to
+grant or revoke is together. A login with offices but no role, or a role but no offices, is
+the exact bug this single-write action exists to prevent. The subject is a **login** — an
+employee with no `user_id` is `422 employee_has_no_login`, since there is no `User` to carry
+either half. `is_system_admin`-gated like the whole `/admin` surface: a non-admin gets `403`.
+
+The **audit viewer** (`GET /admin/activity`, `03-api.md`) is the read side. It is a
+filterable, paginated window over the one Spatie `activity_log` table every `LogsActivity`
+model writes to — offices/departments/organizations (M8a), employee edits (M8b) — plus the
+manual `hr_admin_offices_set` event `SetHrAdminOffices` logs. There is no separate audit
+store: the audit trail *is* the activity log everything already writes, and the viewer only
+reads it. `is_system_admin`-gated for the same reason as the org tree above — the log spans
+every subject type company-wide, nothing office-scoped to check, so a non-admin gets `403`,
+not `404`. `scripts/e2e-admin-roles-audit.sh` proves the grant/revoke coupling, the
+login-less `422`, the viewer surfacing both the `hr_admin_offices_set` event and the
+`log_name=office` trail, and the non-admin `403`, against the live stack.
+
 ## Testing
 
 The milestone's proof is the **four-actor scope matrix**, as feature tests
