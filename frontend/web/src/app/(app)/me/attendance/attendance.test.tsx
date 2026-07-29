@@ -30,9 +30,16 @@ afterEach(() => {
   searchParams = new URLSearchParams()
 })
 
+// Ids are unique per call, not a hardcoded 'p1'. Every test builds a day from two or more
+// punches, and a shared id made them collide as React keys — a warning loud enough to hide
+// a genuine key bug behind. Tests that care about a specific id pass one explicitly.
+let punchSeq = 0
+
 function punch(overrides: Partial<AttendanceLog> = {}): AttendanceLog {
+  punchSeq += 1
+
   return {
-    id: 'p1',
+    id: `p${punchSeq}`,
     employee_id: 'e1',
     office_id: 'o1',
     punched_at: `${TODAY}T08:02:00+08:00`,
@@ -456,7 +463,7 @@ describe('/me/attendance — the computed layer', () => {
     expect(screen.queryByText('incomplete')).not.toBeInTheDocument()
   })
 
-  it('shows a hint in the day-detail panel until a day is selected', async () => {
+  it('shows no day detail until a day is selected — the dialog is closed, not an empty panel', async () => {
     searchParams = new URLSearchParams('month=2026-05')
     stubApi({
       attendanceByMonth: {
@@ -474,12 +481,41 @@ describe('/me/attendance — the computed layer', () => {
 
     await screen.findByText('08:00–16:00')
 
-    expect(screen.getByText(/select a day above/i)).toBeInTheDocument()
-    // Nothing from the full breakdown has rendered anywhere yet.
+    // No dialog is mounted, so there is no day detail on the page at all — and nothing from
+    // the full breakdown has rendered anywhere yet.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Day detail')).not.toBeInTheDocument()
     expect(screen.queryByText('Regular (day)')).not.toBeInTheDocument()
   })
 
-  it('clicking a day with a computed summary shows the full breakdown in the day-detail panel, OUTSIDE the gridcell, alongside that day\'s raw punch times', async () => {
+  it('closes the day-detail dialog again, clearing the selection', async () => {
+    searchParams = new URLSearchParams('month=2026-05')
+    stubApi({
+      attendanceByMonth: {
+        '2026-05': {
+          '2026-05-10': [
+            punch({ direction: 'in', punched_at: '2026-05-10T08:00:00+08:00' }),
+            punch({ direction: 'out', punched_at: '2026-05-10T16:00:00+08:00' }),
+          ],
+        },
+      },
+      summariesByMonth: { '2026-05': [summaryFor('2026-05-10')] },
+    })
+
+    renderPage()
+
+    await screen.findByText('08:00–16:00')
+    fireEvent.click(screen.getByRole('button', { name: 'View details for 2026-05-10' }))
+    await screen.findByRole('dialog')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The calendar behind it is untouched — closing the detail never disturbs the ledger.
+    expect(screen.getByText('08:00–16:00')).toBeInTheDocument()
+  })
+
+  it('clicking a day with a computed summary shows the full breakdown in the day-detail DIALOG, OUTSIDE the gridcell, alongside that day\'s raw punch times', async () => {
     searchParams = new URLSearchParams('month=2026-05')
     stubApi({
       attendanceByMonth: {
@@ -499,9 +535,13 @@ describe('/me/attendance — the computed layer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'View details for 2026-05-10' }))
 
-    // The full breakdown — line items DaySummaryDetail alone renders — now shows.
+    // The full breakdown — line items DaySummaryDetail alone renders — now shows, inside a
+    // real dialog (Radix wires role="dialog" + the title), not a panel below the grid.
     const regularLine = await screen.findByText('Regular (day)')
     const overtimeLine = screen.getByText('Overtime (day)')
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('2026-05-10')
+    expect(dialog).toContainElement(regularLine)
 
     // STRUCTURAL assertion: the breakdown is rendered OUTSIDE any gridcell, so a future
     // regression that stuffs it back into the clipped calendar cell is caught even though

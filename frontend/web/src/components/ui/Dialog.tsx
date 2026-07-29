@@ -40,6 +40,12 @@ export function Dialog({ open, onClose, title, children }: DialogProps) {
             gap: 'var(--sp-md)',
             minWidth: '20rem',
             maxWidth: '90vw',
+            // The attendance day-detail dialog stacks punches, the computed breakdown, and
+            // an optional request form — genuinely taller than a short viewport. Without a
+            // cap the overflow is simply unreachable, since the content is centred rather
+            // than page-flowed. Every other caller is shorter than this and unaffected.
+            maxHeight: '85vh',
+            overflowY: 'auto',
           }}
         >
           <RadixDialog.Title style={{ font: 'var(--t-card-title)', color: 'var(--ink)' }}>

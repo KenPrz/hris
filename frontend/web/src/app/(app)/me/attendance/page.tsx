@@ -29,6 +29,7 @@ import { SectionHeader } from '@/components/SectionHeader'
 import { StatTile } from '@/components/StatTile'
 import { EmptyState } from '@/components/EmptyState'
 import { Button } from '@/components/ui/Button'
+import { Dialog } from '@/components/ui/Dialog'
 import { InlineNotification } from '@/components/ui/InlineNotification'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { MonthCalendar } from '@/components/domain/MonthCalendar'
@@ -134,8 +135,11 @@ export default function AttendancePage() {
   const thisMonth = currentMonth(OFFICE_TIME_ZONE)
   const today = todayInZone(OFFICE_TIME_ZONE)
 
-  // The day-detail panel below the calendar — `null` until a day is clicked, so the panel
-  // starts as a hint rather than guessing which day the employee wants to inspect first.
+  // The day-detail dialog — `null` until a day is clicked, which doubles as the dialog's
+  // open state. It used to be a panel rendered below the calendar, but on a month grid that
+  // panel sits below the fold: clicking a day put the answer far from the thing you clicked
+  // and scrolled the calendar out of view. A dialog keeps the result on top of the day you
+  // asked about, and matches what /office/holidays and /office/schedules already do.
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   // The "Request correction" affordance in that panel: `correctionFormOpen` reveals
   // `CorrectionForm`; `correctionSubmitted` flips on once it calls back via `onDone`, to
@@ -170,6 +174,16 @@ export default function AttendancePage() {
 
   function selectDate(nextDate: string): void {
     setSelectedDate(nextDate)
+    setCorrectionFormOpen(false)
+    setCorrectionSubmitted(false)
+    setOvertimeFormOpen(false)
+    setOvertimeSubmitted(false)
+  }
+
+  // Every dismissal path — Escape, overlay click, the Close button — funnels here, so a
+  // reopened day can never inherit the previous day's half-typed draft or success notice.
+  function closeDetail(): void {
+    setSelectedDate(null)
     setCorrectionFormOpen(false)
     setCorrectionSubmitted(false)
     setOvertimeFormOpen(false)
@@ -313,7 +327,10 @@ export default function AttendancePage() {
                   onClick={() => selectDate(date)}
                   aria-label={`View details for ${date}`}
                   aria-pressed={date === selectedDate}
-                  className="flex h-full w-full flex-col text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
+                  // hover:/focus-visible: the day-detail hint that used to sit under the
+                  // calendar ("Select a day above…") is gone with the panel, so the cue that
+                  // a day is clickable has to live on the day itself.
+                  className="flex h-full w-full flex-col text-left hover:bg-[var(--surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--blue)]"
                   style={{ gap: 'var(--sp-xxs)', border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }}
                 >
                   <DayCell
@@ -328,24 +345,14 @@ export default function AttendancePage() {
               )}
             />
 
-            <section
-              aria-label="Day detail"
-              style={{
-                background: 'var(--surface-1)',
-                borderRadius: 'var(--radius)',
-                padding: 'var(--sp-lg)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--sp-md)',
-              }}
-            >
-              {selectedDate === null ? (
-                <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
-                  Select a day above to see its punches and computed breakdown.
-                </span>
-              ) : (
+            <Dialog open={selectedDate !== null} onClose={closeDetail} title={selectedDate ?? ''}>
+              {selectedDate === null ? null : (
                 <>
-                  <SectionHeader title={selectedDate} />
+                  <div
+                    aria-label="Day detail"
+                    className="flex flex-col"
+                    style={{ gap: 'var(--sp-md)' }}
+                  >
 
                   <div className="flex flex-col" style={{ gap: 'var(--sp-xs)' }}>
                     <span
@@ -429,9 +436,16 @@ export default function AttendancePage() {
                       </Button>
                     </div>
                   )}
+                  </div>
+
+                  <div>
+                    <Button variant="ghost" onClick={closeDetail}>
+                      Close
+                    </Button>
+                  </div>
                 </>
               )}
-            </section>
+            </Dialog>
           </>
         )}
       </div>
