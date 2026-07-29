@@ -10,13 +10,22 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Department extends Model
 {
     /** @use HasFactory<DepartmentFactory> */
-    use HasFactory, HasUuids;
+    use HasFactory, HasUuids, LogsActivity;
 
     protected $guarded = [];
+
+    protected function casts(): array
+    {
+        return [
+            'archived_at' => 'datetime',
+        ];
+    }
 
     /** @return BelongsTo<Office, $this> */
     public function office(): BelongsTo
@@ -33,5 +42,13 @@ final class Department extends Model
     public function uniqueIds(): array
     {
         return ['id'];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['office_id', 'name', 'code', 'archived_at'])
+            ->useLogName('department')
+            ->logOnlyDirty();
     }
 }

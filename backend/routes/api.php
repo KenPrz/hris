@@ -3,9 +3,22 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\Attendance\ManualPunchController;
+use App\Http\Controllers\Admin\Departments\ArchiveController as ArchiveDepartmentController;
+use App\Http\Controllers\Admin\Departments\CreateController as CreateDepartmentController;
+use App\Http\Controllers\Admin\Departments\ListController as ListDepartmentsController;
+use App\Http\Controllers\Admin\Departments\UnarchiveController as UnarchiveDepartmentController;
+use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
+use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
+use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
+use App\Http\Controllers\Admin\Offices\UnarchiveController as UnarchiveOfficeController;
+use App\Http\Controllers\Admin\Offices\UpdateController as UpdateOfficeController;
+use App\Http\Controllers\Admin\Organizations\CreateController as CreateOrganizationController;
+use App\Http\Controllers\Admin\Organizations\ListController as ListOrganizationsController;
+use App\Http\Controllers\Admin\Organizations\UpdateController as UpdateOrganizationController;
 use App\Http\Controllers\Admin\PayRules\CreateController as CreatePayRuleController;
 use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleController;
 use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
@@ -157,6 +170,37 @@ Route::prefix('v1')->group(function (): void {
             // PATCH/PUT route. A correction is a new version, never an edit in place.
             Route::get('/pay-rules/{payRule}', ShowPayRuleController::class);
             Route::delete('/pay-rules/{payRule}', DeletePayRuleController::class);
+
+            // The organization tree's root — global config, gated by each FormRequest's
+            // authorize() (is_system_admin) exactly like pay-rules above, not OfficeScope:
+            // there is no office to scope by yet (an organization is the parent an office
+            // belongs to), so a non-admin gets the default 403 rather than 404-not-403.
+            Route::get('/organizations', ListOrganizationsController::class);
+            Route::post('/organizations', CreateOrganizationController::class);
+            Route::patch('/organizations/{organization}', UpdateOrganizationController::class);
+
+            // Offices — the org tree's second tier, same is_system_admin gating as
+            // organizations above (not OfficeScope: you can't scope-check an office by
+            // itself). Archive-never-delete: no DELETE route, only archive/unarchive
+            // toggles on the nullable archived_at column (M8a Task 3). The generic
+            // AlreadyArchived/NotArchived exceptions these two throw are reused verbatim
+            // by departments (Task 4).
+            Route::get('/offices', ListOfficesController::class);
+            Route::post('/offices', CreateOfficeController::class);
+            Route::patch('/offices/{office}', UpdateOfficeController::class);
+            Route::post('/offices/{office}/archive', ArchiveOfficeController::class);
+            Route::post('/offices/{office}/unarchive', UnarchiveOfficeController::class);
+
+            // Departments — the org tree's third tier, same is_system_admin gating and
+            // archive-never-delete shape as offices above (M8a Task 4). code is unique
+            // per (office_id, code), not globally, so DuplicateDepartmentCode's scope
+            // differs from DuplicateOfficeCode; the AlreadyArchived/NotArchived
+            // exceptions are reused verbatim with subjectType 'department'.
+            Route::get('/departments', ListDepartmentsController::class);
+            Route::post('/departments', CreateDepartmentController::class);
+            Route::patch('/departments/{department}', UpdateDepartmentController::class);
+            Route::post('/departments/{department}/archive', ArchiveDepartmentController::class);
+            Route::post('/departments/{department}/unarchive', UnarchiveDepartmentController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each

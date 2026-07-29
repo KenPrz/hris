@@ -405,6 +405,25 @@ gets the default `403 forbidden` from `failedAuthorization()`, exactly like a no
 hitting `POST /admin/employees` — an actor refusal, not a subject one. See `03-api.md` for
 the endpoint detail and `02-data-model.md` for the `pay_rules`/`pay_rule_day_rates` tables.
 
+## The organization tree — System Admin only, the deliberate 404-not-403 exception *(M8a)*
+
+The admin org-tree surface (`/admin/organizations|offices|departments`, `03-api.md`) is
+gated exactly like pay rules: every `FormRequest::authorize()` is the one-line `(bool)
+$this->user()?->is_system_admin`, no `OfficeScope`, no permission verb. It is the same
+reasoning taken one step further, and it is the **one place the 404-not-403 discipline is
+deliberately not applied to a subject.** An out-of-scope employee 404s so the org chart
+never leaks (above) — but the org tree *is* the org chart's container, edited only by the
+one actor (the System Admin) who already sees every office, so there is no narrower scope
+to protect and nothing a non-admin could enumerate: they cannot reach the surface at all.
+An office or department cannot be scope-checked by `OfficeScope` either, because it has no
+*parent* office to gate by — it either is one, or belongs to one. So a non-admin gets the
+plain `403 forbidden` from `failedAuthorization()` on every verb, create through
+archive/unarchive — an actor refusal, never a subject `404`. The create `FormRequest`s
+validate `organization_id`/`office_id` as shape-only `uuid` (never `exists:`), so even a
+nonexistent parent surfaces as a `422` from the FK/constraint inside the action, not a
+`404` — there is no id a caller could probe. `scripts/e2e-admin-org.sh` asserts the
+non-admin `403` live.
+
 ## Testing
 
 The milestone's proof is the **four-actor scope matrix**, as feature tests

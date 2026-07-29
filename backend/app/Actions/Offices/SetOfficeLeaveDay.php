@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
  * i.e. 8h), which the leave subsystem (M6b) will read to convert a leave request's
  * readable units (days/hours) into stored minutes. The office-scope check (does the
  * caller administer this office?) already happened in the controller — this action
- * trusts its input and only writes. Office has no LogsActivity trait, and there is no
- * business rule beyond the write itself, so this stays a plain locked update, mirroring
+ * trusts its input and only writes. Office self-logs via LogsActivity (M8a), and there is
+ * no business rule beyond the write itself, so this stays a plain locked update, mirroring
  * CreateHoliday's office lock.
  */
 final class SetOfficeLeaveDay

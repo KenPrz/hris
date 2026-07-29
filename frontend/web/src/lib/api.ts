@@ -533,6 +533,82 @@ export type CutoffUnresolvedDetails = {
   pending_request_ids: string[]
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/OrganizationResource.php,
+// OfficeResource.php, DepartmentResource.php, and their Create/Update FormRequests
+// (M8a: the org tree). Archive-never-delete: `archived_at` is the only lifecycle field
+// on Office/Department (Organization has none — it is never archived), toggled by the
+// dedicated archive/unarchive endpoints rather than a DELETE route.
+// ---------------------------------------------------------------------------
+
+export type Organization = {
+  id: string
+  name: string
+  legal_name: string | null
+  tin: string | null
+  timezone: string
+}
+
+// Create and update take the identical full-object shape (both FormRequests validate
+// the same fields, PATCH included) — verified against CreateOrganizationRequest and
+// UpdateOrganizationRequest, which mirror each other field-for-field.
+export type OrganizationCreateInput = {
+  name: string
+  legal_name?: string | null
+  tin?: string | null
+  timezone: string
+}
+
+export type OrganizationUpdateInput = OrganizationCreateInput
+
+export type Office = {
+  id: string
+  organization_id: string
+  name: string
+  code: string
+  timezone: string
+  geofence_lat: number | null
+  geofence_lng: number | null
+  geofence_radius_m: number | null
+  ip_allowlist: string[] | null
+  default_shift_template_id: string | null
+  archived_at: string | null // ISO8601, or null while active
+}
+
+// Create and update take the identical full-object shape — verified against
+// CreateOfficeRequest and UpdateOfficeRequest, which mirror each other field-for-field.
+export type OfficeCreateInput = {
+  organization_id: string
+  name: string
+  code: string
+  timezone: string
+  geofence_lat?: number | null
+  geofence_lng?: number | null
+  geofence_radius_m?: number | null
+  ip_allowlist?: string[] | null
+  default_shift_template_id?: string | null
+}
+
+export type OfficeUpdateInput = OfficeCreateInput
+
+export type Department = {
+  id: string
+  office_id: string
+  name: string
+  code: string
+  archived_at: string | null // ISO8601, or null while active
+}
+
+// Create and update take the identical full-object shape — verified against
+// CreateDepartmentRequest and UpdateDepartmentRequest, which mirror each other
+// field-for-field.
+export type DepartmentCreateInput = { office_id: string; name: string; code: string }
+
+export type DepartmentUpdateInput = DepartmentCreateInput
+
+export type AdminOfficeListParams = { include_archived?: boolean; organization?: string }
+export type AdminDepartmentListParams = { include_archived?: boolean; office?: string }
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -748,6 +824,77 @@ export const api = {
       if (input.punched_at !== undefined) form.set('punched_at', input.punched_at)
       if (input.attachment) form.set('attachment', input.attachment)
       return request<RequestRecord>('/attendance/adjustments', { method: 'POST', body: form })
+    },
+  },
+  admin: {
+    // The org tree's root — global config, sysadmin-gated. Mirrors `payRules` above:
+    // no office to scope by, so `list` takes no params.
+    organizations: {
+      list: () => request<Organization[]>('/admin/organizations'),
+      create: (body: OrganizationCreateInput) =>
+        request<Organization>('/admin/organizations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      update: (id: string, body: OrganizationUpdateInput) =>
+        request<Organization>(`/admin/organizations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+    },
+    // The org tree's second tier. Archive-never-delete: no `delete`, only the two
+    // dedicated transitions on `archived_at` — mirrors ArchiveController/UnarchiveController,
+    // both POST with no body.
+    offices: {
+      list: (params?: AdminOfficeListParams) => {
+        const query = new URLSearchParams()
+        if (params?.include_archived) query.set('include_archived', 'true')
+        if (params?.organization !== undefined) query.set('organization', params.organization)
+        const qs = query.toString()
+        return request<Office[]>(`/admin/offices${qs !== '' ? `?${qs}` : ''}`)
+      },
+      create: (body: OfficeCreateInput) =>
+        request<Office>('/admin/offices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      update: (id: string, body: OfficeUpdateInput) =>
+        request<Office>(`/admin/offices/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      archive: (id: string) => request<Office>(`/admin/offices/${id}/archive`, { method: 'POST' }),
+      unarchive: (id: string) => request<Office>(`/admin/offices/${id}/unarchive`, { method: 'POST' }),
+    },
+    // The org tree's third tier — same archive-never-delete shape as offices above, keyed
+    // by `office` (not `organization`) on the list endpoint.
+    departments: {
+      list: (params?: AdminDepartmentListParams) => {
+        const query = new URLSearchParams()
+        if (params?.include_archived) query.set('include_archived', 'true')
+        if (params?.office !== undefined) query.set('office', params.office)
+        const qs = query.toString()
+        return request<Department[]>(`/admin/departments${qs !== '' ? `?${qs}` : ''}`)
+      },
+      create: (body: DepartmentCreateInput) =>
+        request<Department>('/admin/departments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      update: (id: string, body: DepartmentUpdateInput) =>
+        request<Department>(`/admin/departments/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      archive: (id: string) => request<Department>(`/admin/departments/${id}/archive`, { method: 'POST' }),
+      unarchive: (id: string) =>
+        request<Department>(`/admin/departments/${id}/unarchive`, { method: 'POST' }),
     },
   },
 }

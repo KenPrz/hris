@@ -15,9 +15,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Sets the office-wide fallback ScheduleResolver reaches once no employee or department
- * assignment covers a date. Office has no LogsActivity trait (unlike ShiftTemplate,
- * ScheduleAssignment, ScheduleOverride), so this logs manually against the office, the
- * same way CloneHolidays does.
+ * assignment covers a date. Office carries LogsActivity (M8a) now, so the plain
+ * `$office->update()` below is itself the audit trail — no manual `activity()` call needed
+ * (that used to be here, back when Office didn't self-log).
  *
  * There is no SetOfficeDefaultTemplate Action class — this is a single unconditional write
  * with no business rule beyond the scope/office-match checks above, so it stays inline
@@ -43,12 +43,6 @@ final class SetDefaultTemplateController
 
         DB::transaction(function () use ($request, $office, $template): void {
             $office->update(['default_shift_template_id' => $template->id]);
-
-            activity()
-                ->causedBy($request->user())
-                ->performedOn($office)
-                ->withProperties(['default_shift_template_id' => $template->id])
-                ->log('set default shift template');
 
             DB::afterCommit(function () use ($request, $office): void {
                 RecomputeRange::dispatch(

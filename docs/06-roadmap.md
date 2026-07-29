@@ -1576,6 +1576,58 @@ Next: **M8 — admin portal and audit.**
 **Done when:** a company can be configured from an empty database entirely through the
 UI, and the audit log shows every step of it.
 
+**In progress:** M8a (the organization tree — organizations, offices, departments) is
+**done**. The employee profiler, role management, `hr_admin_offices` assignment, and the
+activity-log viewer remain.
+
+## M8a — Organization tree CRUD *(done)*
+
+The first slice of M8: the company's shape — `organizations` → `offices` → `departments`
+(`02-data-model.md`) — made admin-editable at runtime, System-Admin only, with a Carbon
+admin screen per tier. The tables already existed (M2); M8a adds runtime CRUD, the
+archive-never-delete lifecycle, and audit.
+
+- **CRUD, `is_system_admin`-gated, not `OfficeScope`.** `POST/GET/PATCH /admin/organizations`,
+  `/admin/offices`, `/admin/departments`, each an Action-class-per-route behind a
+  `FormRequest::authorize()` that is the one-line `(bool) $this->user()?->is_system_admin` —
+  the same idiom as pay rules (M4c). An office/organization cannot scope-check itself, so
+  there is no `OfficeScope` to apply. Lists filter by parent (`?organization`, `?office`).
+- **Archive-never-delete, non-cascading.** No `DELETE` route on any tier (the M8-wide rule).
+  Retiring an office/department stamps a nullable `archived_at` — `POST
+  /admin/{offices,departments}/{id}/archive|unarchive` — and nothing else: the row, its
+  children, and every `employment_record`/`current_*` snapshot pointing at it stay intact, so
+  a closed office's payroll history and inspector-facing ledger survive. Lists hide archived
+  rows by default and reveal them with `?include_archived=1`. Re-archiving is `409
+  already_archived`; un-archiving a live row is `409 not_archived`. Organizations have no
+  archive (nothing sits above them). Duplicate codes are clean `422`s
+  (`duplicate_office_code`, global; `duplicate_department_code`, per-office) — a pre-check
+  plus a caught unique-violation backstop, never a raw `500`.
+- **The deliberate 403-not-404 exception.** A non-admin gets `403 forbidden` on every verb,
+  not the `404`-not-`403` treatment the office-scoped HR endpoints use — the org tree is
+  global config with no subject to scope by, so there is nothing to hide behind a `404`
+  (`05-rbac.md`).
+- **Audited.** `Organization`/`Office`/`Department` carry spatie's `LogsActivity` (log names
+  `organization`/`office`/`department`); every create/update/archive/unarchive writes an
+  `activity_log` row — the acting admin the causer — so a runtime change to the company's
+  shape is auditable even before the M8 activity-log viewer ships.
+- **Frontend.** A Carbon admin nav + a screen per tier (create/edit, the archived toggle,
+  archive/un-archive), reusing the M4c pay-rules screen's data-layer and table patterns.
+
+**Done when:** a System Admin can build an organization → office → department subtree,
+archive and un-archive a node, and see the audit rows — entirely through the API/UI.
+`scripts/e2e-admin-org.sh` proves it live against the seeded stack: the seeded System Admin
+creates an organization, an office under it (a duplicate office code refused `422
+duplicate_office_code`), and a department under that — each appearing in its own `GET` list;
+the office and department creates each write an `activity_log` row (asserted via `psql`,
+there being no viewer yet); archiving the department drops it from the default list while
+`?include_archived=1` still shows it, re-archiving is refused `409 already_archived`, and
+un-archiving brings it back; and a plain employee's `POST /admin/offices` is refused `403`.
+**742 backend tests (19 of them Arch) + 488 frontend tests**, all green.
+
+Next: **M8b — the employee profiler** (the multi-step `<Wizard>`: identity, employment,
+login provisioning), then role management, `hr_admin_offices` assignment, and the
+activity-log viewer.
+
 ## M9 — Containerization and production
 
 - `compose.prod.yml`: single FrankenPHP edge, host-routed TLS, no-CORS preserved end to
