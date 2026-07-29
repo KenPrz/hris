@@ -71,3 +71,14 @@ jobs:
         working-directory: frontend/web
       - run: npm run build
         working-directory: frontend/web
+
+  # The production images are outside every other job's path — nothing else here builds
+  # them, so they are exactly the thing that rots silently. Build both on every PR and
+  # push nowhere: there is no registry and no deploy target yet, so a push would be
+  # ceremony. Building is the part with value today.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build --target prod -t hris-api:ci backend
+      - run: docker build --target runner -t hris-web:ci frontend/web

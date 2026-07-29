@@ -10,7 +10,7 @@ Design-first. Read in order; each assumes the one before it.
 | [03-api.md](03-api.md) | REST surface, auth flows, the `/me` session envelope, error codes. |
 | [04-backend-conventions.md](04-backend-conventions.md) | Action-class architecture: controller → request → action → resource. Rules, layering, worked example, configuration. |
 | [05-rbac.md](05-rbac.md) | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. |
-| [06-roadmap.md](06-roadmap.md) | Milestones M0–M8, the invariants they're measured against, and the deferred table. |
+| [06-roadmap.md](06-roadmap.md) | Milestones M0–M9, the invariants they're measured against, and the deferred table. |
 
 Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; M3 extended
 `02` (the `attendance_logs` ledger and `idempotency_keys`), `03` (the punch and read
@@ -29,6 +29,10 @@ browser, the clock-in/out screen, the month ledger). All seven docs exist today.
 | [superpowers/specs/2026-07-23-hris-foundation-design.md](superpowers/specs/2026-07-23-hris-foundation-design.md) | The decisions v1 is built on, and where HRIS deliberately diverges from POS. |
 | [superpowers/specs/2026-07-24-m3-timekeeping-ingestion-design.md](superpowers/specs/2026-07-24-m3-timekeeping-ingestion-design.md) | M3: turning a punch into an append-only ledger row. |
 | [superpowers/specs/2026-07-24-attendance-adjustments-design.md](superpowers/specs/2026-07-24-attendance-adjustments-design.md) | M3.6: the shared `requests` spine, the annulment model, and the effective ledger. |
+| [superpowers/specs/2026-07-29-m9-containerization-production-design.md](superpowers/specs/2026-07-29-m9-containerization-production-design.md) | M9: the production stack, the single TLS edge, backups, and the first login on an empty database. |
+
+`docs/superpowers/specs/` holds one of these per milestone from M3 onward; the table above
+names only the ones that define structure the whole system inherits.
 
 ## The five-line version
 
@@ -55,21 +59,26 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-M0 through M3.5 are complete — the skeleton boots, the DOLE premium matrix is a green
-table-driven unit test, the schema/auth/office-scoped RBAC are proven by the four-actor
-scope matrix, timekeeping **ingestion** turns a punch into an append-only, forensically
-intact `attendance_logs` row, an employee can **correct their own attendance** through a
-request a manager or HR approves — `add`/`void`/`amend`, a required note, an optional
-RustFS-backed attachment via Media Library, the correction superseding the ledger via an
-append-only annulment record rather than ever editing a punch (`02-data-model.md`,
-`03-api.md`) — and all of it now has a real screen: an employee signs in, clocks in and
-out from one button that always knows what happens next, and sees their month as a
-calendar of actual punch times, not an invented total (`06-roadmap.md`, M3.5). There is
-still no adjustments UI, no roster, and no office/admin screens. `migrate:fresh --seed`
-produces a Manila/Cebu company you can log into as each of the four scopes (with a seeded
-punch pair ready to void or amend), `scripts/e2e-timekeeping.sh` walks the punch path end
-to end, and `scripts/e2e-adjustments.sh` walks a correction from submission through
-approval to the ledger. **165 frontend tests, 267 backend tests, 17 arch tests.** Next is
-**M4 — Configuration spine** in [06-roadmap.md](06-roadmap.md): holiday calendars, shift
-templates, and `pay_rules`, all admin-editable per office, which M3.5's frontend and M5's
-compute engine will both read.
+**M0 through M9 are complete, and the roadmap is done.** The system does the whole path it
+set out to own: a punch lands in an append-only, forensically intact `attendance_logs` row;
+an employee corrects their own attendance through a request a manager or HR approves, the
+correction superseding the ledger via an append-only annulment rather than ever editing a
+punch; holidays, shift templates, and `pay_rules` are admin-editable per office; the
+compute engine resolves a schedule, overlays the holiday calendar, applies the DOLE premium
+matrix behind `is_art82_exempt`, and writes a daily summary; leave and overtime run through
+the shared approval spine; a cutoff locks a period and exports payroll; the admin portal
+configures a company from an empty database and the activity log shows every step; and M9
+puts all of it behind a single TLS edge, with a first-login command for an empty database
+and a backup whose restore has actually been drilled. **776 backend tests (19 of them Arch)
++ 541 frontend tests**, plus a `scripts/e2e-*.sh` per milestone that walks its flow against
+a live stack.
+
+No milestone is open. [06-roadmap.md](06-roadmap.md)'s **Deferred** table is the list of
+what comes next and what would revive each item — gross-to-net payroll, biometric device
+ingestion, a mobile app with GPS geofence, rotating rosters, tenure-based leave accrual,
+recursive manager scope, and multi-tenancy (the one flagged expensive-to-change: revisit
+early or not at all).
+
+The one honest gap outside that table: **there is no browser-level e2e harness.** Every
+`e2e-*.sh` drives the API or the booted stack, never a rendered page, and M3.5's screens
+have never been visually confirmed in a real browser.

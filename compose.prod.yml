@@ -1,0 +1,124 @@
+# compose.prod.yml — single-host production: one FrankenPHP edge, TLS, host routing.
+# Requires an .env beside this file — see .env.prod.example. `make prod-up`.
+#
+# `name: hris` (not `hris-dev`) claims its own `hris_*` volume/network namespace, so the
+# production database can never attach to the dev stack's pgdata.
+name: hris
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hris
+      POSTGRES_USER: hris
+      # Soft default, not `:?required` — a required var with no default fails
+      # interpolation for the WHOLE file on EVERY compose command, including `down -v`
+      # and `config`. The postgres image itself refuses to start without a password,
+      # which is the loud failure this relies on.
+      POSTGRES_PASSWORD: ${HRIS_DB_PASSWORD:-}
+      # Deterministic collation. Left to the host locale, index ordering can differ
+      # between machines (and a glibc upgrade can silently corrupt text indexes even on
+      # one machine). Only takes effect on a fresh volume — initdb args are read once,
+      # at first cluster creation.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # Depends on the DB accepting queries, not just the port being open — pg_isready
+      # returns true during recovery, before it can serve anything.
+      test: ["CMD-SHELL", "pg_isready -U hris -d hris -q && psql -U hris -d hris -qtAc 'select 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build: { context: backend, target: prod }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${HRIS_APP_KEY:-}
+      APP_URL: https://${HRIS_DOMAIN:-}
+      # The Global Constraint. A Laravel app defaulted to Asia/Manila writes local times
+      # into timestamptz and is wrong the moment a second office opens in another zone;
+      # AppServiceProvider::assertConfigured() refuses to boot otherwise.
+      APP_TIMEZONE: UTC
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: hris
+      DB_USERNAME: hris
+      DB_PASSWORD: ${HRIS_DB_PASSWORD:-}
+      MIGRATE_ON_BOOT: ${HRIS_MIGRATE_ON_BOOT:-1}
+      HRIS_CURRENCY: ${HRIS_CURRENCY:-PHP}
+      HRIS_ORGANIZATION_NAME: ${HRIS_ORGANIZATION_NAME:-}
+      HRIS_DOMAIN: ${HRIS_DOMAIN:-}
+      HRIS_TLS_ISSUER: ${HRIS_TLS_ISSUER:-acme}
+      ATTACHMENTS_S3_KEY: ${HRIS_RUSTFS_KEY:-}
+      ATTACHMENTS_S3_SECRET: ${HRIS_RUSTFS_SECRET:-}
+      ATTACHMENTS_S3_REGION: us-east-1
+      ATTACHMENTS_S3_BUCKET: hris-attachments
+      ATTACHMENTS_S3_ENDPOINT: http://rustfs:9000
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  web:
+    build: { context: frontend/web, target: runner }
+    restart: unless-stopped
+    # No published ports and no API_ORIGIN: Caddy is the only thing that talks to this
+    # (reverse_proxy web:3000), and it splits /api/* off to PHP before Next sees it, so
+    # Next's own /api rewrite never fires in production.
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${HRIS_RUSTFS_KEY:-}
+      RUSTFS_SECRET_KEY: ${HRIS_RUSTFS_SECRET:-}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_VOLUMES: /data
+    # Deliberately no `ports:`. Attachments are downloaded app-mediated, never as a
+    # direct object URL (M3.6), so nothing outside this network needs to reach RustFS.
+    # The dev stack publishes 9100/9101 for its console; production publishes nothing.
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      # Not `/`: an unauthenticated GET / is a valid S3 request RustFS answers 403, which
+      # `curl -f` treats as failure forever — wedging rustfs-init, which waits on healthy.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  rustfs-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      rustfs: { condition: service_healthy }
+    environment:
+      AWS_ACCESS_KEY_ID: ${HRIS_RUSTFS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${HRIS_RUSTFS_SECRET:-}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh","-c"]
+    # Create the bucket if absent, then exit.
+    command:
+      - |
+        aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket hris-attachments 2>/dev/null \
+          || aws --endpoint-url http://rustfs:9000 s3 mb s3://hris-attachments
+    restart: "no"
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  rustfs_data:

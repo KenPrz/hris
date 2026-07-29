@@ -1727,7 +1727,7 @@ their admins), and the audit log shows every step of it.
 
 Next: **M9 — containerization and production.**
 
-## M9 — Containerization and production
+## M9 — Containerization and production *(complete)*
 
 - `compose.prod.yml`: single FrankenPHP edge, host-routed TLS, no-CORS preserved end to
   end. Production images for API and web.
@@ -1735,6 +1735,72 @@ Next: **M9 — containerization and production.**
 - CI building images on every PR; all suites green inside the stack via `make test`.
 
 **Done when:** `make prod-up` and `make restore-drill` are both green.
+
+**Status: complete — and this completes the roadmap.** See
+`docs/superpowers/specs/2026-07-29-m9-containerization-production-design.md`.
+`scripts/e2e-prod-boot.sh` proves it live: it builds both production images, boots
+`compose.prod.yml` under its own compose project, serves the API *and* the app over HTTPS
+from one edge at `hris.localhost`, bootstraps the first System Admin on an empty database,
+signs in with the printed password through the public domain, confirms a second superuser
+is refused, takes a `pg_dump` of the live production database, and runs `make restore-drill`
+against it — then tears the whole stack down, volumes included. **776 backend tests (19 of
+them Arch) + 541 frontend tests**, all green, plus `typecheck` and `build`.
+
+- **Ported from `../pos`, not invented.** That stack's production topology — one FrankenPHP
+  container terminating TLS and routing by host, multi-stage prod images, the
+  `backup`/`restore`/`restore-drill` trio — was already argued and already deployed.
+  `docs/README.md`'s "does not invent a second house style" applies to infrastructure too.
+  HRIS diverges in three places only: **one domain, not two** (one frontend, on purpose),
+  **RustFS joins the stack** (attachments are a shipped feature — with no published ports,
+  since M3.6 made every attachment an app-mediated download rather than an object URL), and
+  **a bootstrap-admin command exists**.
+- **The genuine gap M9 had to close was not infrastructure: a fresh production database had
+  no way to log in.** `DatabaseSeeder` pairs `RbacSeeder` (the permission catalog and the
+  `HR Admin` role — real configuration, required in production, and `SetHrAdminOffices`
+  throws without it) with `CompanySeeder` (the Manila/Cebu demo company, which must never
+  touch production). They cannot run together, and running neither leaves **M8's done-when
+  unreachable** — you cannot configure a company from an empty database entirely through the
+  UI if you cannot sign in to start. `php artisan hris:bootstrap-admin {email}` runs the
+  first half and mints exactly one System Admin.
+  - It creates a `users` row and **nothing else**. A System Admin needs no employee record —
+    `SessionResource` already renders `employee: null` and the seeded `sysadmin@hris.test`
+    has none — which is what sidesteps the chicken-and-egg: an employee needs an
+    organization, and creating that organization is the first thing this admin does.
+  - It **refuses** when a system admin already exists, rather than upserting. A command that
+    quietly mints a second superuser, or resets the first one's password, is a
+    privilege-escalation path wearing a helpful face.
+- **`.dockerignore` is a security boundary here, not tidiness — and the e2e proved why.**
+  The prod stage is `COPY . .`. Without the ignore file the host's `backend/.env` (a real
+  `APP_KEY` and database password) is baked into an image layer, and the host's dev
+  `vendor/` lands on top of the `--no-dev` tree. It also caught a failure no review would
+  have: **`bootstrap/cache/*.php`, the package-discovery cache written by a *dev* `composer
+  install`, was being copied in** — and since it names `Laravel\Pail\PailServiceProvider`
+  from a `require-dev` package, every production boot died with `Class ... not found`. The
+  glob excludes the generated files while keeping the directory the prod stage chowns.
+- **Next's `/api` rewrite does not run in production.** It exists for the dev topology,
+  where the browser talks to Next and Next forwards to the API. In production Caddy is the
+  only thing the browser talks to and it splits `/api/*` off before Next ever sees it. One
+  origin either way, CORS a non-issue either way — by two different mechanisms, which is
+  worth knowing before someone "cleans up" the now-unused rewrite.
+- **Required production variables are guarded at boot in `entrypoint.sh`, never with compose
+  `:?`.** A required variable with no default fails interpolation for the *whole* file on
+  *every* command — including the `down -v` and `config` you reach for when something is
+  already wrong. This is M0's `APP_KEY` reasoning extended to `HRIS_DOMAIN`.
+- **A backup nobody has restored is a rumor, so the drill restores into a throwaway
+  container and asserts, not just prints.** `users >= 1` is the assertion that can actually
+  fail: it is the one row even a freshly bootstrapped production database is guaranteed to
+  hold, and a database with no users is not one anybody backed up on purpose. `make backup`
+  captures the RustFS attachments tar alongside the dump — an approved adjustment whose
+  evidence cannot be produced is precisely the failure this system exists to prevent —
+  though **the tar has no automated drill**, which is a recorded gap, not an oversight.
+- **The e2e boots under its own compose project name (`hris-e2e-prod`), never `hris`.**
+  `compose.prod.yml`'s `name: hris` would otherwise attach to a real production stack's
+  `pgdata`, and the script ends in `down -v`. That override is the only thing between a
+  smoke test and someone's payroll history.
+- **The e2e's first honest run exited 0 while printing `FAIL`.** The `EXIT` trap's last
+  command was deciding the script's exit status. `cleanup()` now captures `$?` first and
+  re-raises it — a proof script that lies about passing is worse than no proof script, and
+  this one nearly shipped that way.
 
 ## Deferred
 
