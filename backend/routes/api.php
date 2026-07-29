@@ -9,8 +9,11 @@ use App\Http\Controllers\Admin\Departments\ListController as ListDepartmentsCont
 use App\Http\Controllers\Admin\Departments\UnarchiveController as UnarchiveDepartmentController;
 use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
+use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Employees\ShowController as ShowEmployeeAdminController;
+use App\Http\Controllers\Admin\Employees\UpdateEmployeeController;
 use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
 use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
 use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
@@ -151,7 +154,15 @@ Route::prefix('v1')->group(function (): void {
         // because "you may not create employees at all" is an actor check, not the
         // out-of-scope-subject case the 404-not-403 rule protects.
         Route::prefix('admin')->group(function (): void {
+            // The profiler read surface (M8b Task 4) — company-wide, not scope-filtered
+            // like the plain GET /employees above. Gated by ListEmployeesRequest /
+            // ShowEmployeeRequest's is_system_admin authorize(), same 403-not-404 shape as
+            // offices/departments/pay-rules/organizations below: nothing office-scoped to
+            // 404 against, so a non-admin gets the default forbidden response.
+            Route::get('/employees', ListEmployeesAdminController::class);
+            Route::get('/employees/{employee}', ShowEmployeeAdminController::class);
             Route::post('/employees', CreateEmployeeController::class);
+            Route::patch('/employees/{employee}', UpdateEmployeeController::class);
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
 

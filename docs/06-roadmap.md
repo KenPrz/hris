@@ -1576,9 +1576,8 @@ Next: **M8 — admin portal and audit.**
 **Done when:** a company can be configured from an empty database entirely through the
 UI, and the audit log shows every step of it.
 
-**In progress:** M8a (the organization tree — organizations, offices, departments) is
-**done**. The employee profiler, role management, `hr_admin_offices` assignment, and the
-activity-log viewer remain.
+**In progress:** M8a (the organization tree) and M8b (the employee profiler) are **done**.
+Role management, `hr_admin_offices` assignment, and the activity-log viewer remain (M8c).
 
 ## M8a — Organization tree CRUD *(done)*
 
@@ -1627,6 +1626,53 @@ un-archiving brings it back; and a plain employee's `POST /admin/offices` is ref
 Next: **M8b — the employee profiler** (the multi-step `<Wizard>`: identity, employment,
 login provisioning), then role management, `hr_admin_offices` assignment, and the
 activity-log viewer.
+
+## M8b — Employee profiler *(done)*
+
+The second slice of M8: onboarding a **person**, System-Admin only. Through M8a an employee
+was an `employee_no` and a set of foreign keys — every screen that wanted a human label fell
+back to `MNL-0001` (the gap M7b's payroll export and M8a's org screens both hit). M8b gives
+the employee a name and a full onboarding surface.
+
+- **The employee now has a name.** Four columns — `first_name`, `middle_name`, `last_name`,
+  `name_suffix` (Filipino convention: middle is the mother's maiden surname, suffix carries
+  Jr./III) — plus one read model, the `Employee::full_name` accessor that composes them and
+  collapses the gaps a null middle/suffix leaves (`02-data-model.md`). Every API name field
+  reads that one accessor, closing the `employee_no`-fallback gap left open since M7b/M8a.
+- **CRUD, `is_system_admin`-gated, Action-class-per-route.** `POST /admin/employees` (onboard,
+  now with the name fields + an optional first `employment` block recorded through
+  `RecordEmploymentChange` in the same transaction), `GET /admin/employees[?office=]` (the
+  company-wide roster, each row carrying `full_name` and `has_user`), `GET
+  /admin/employees/{id}` (name + `has_user` + the `EmploymentResolver`-resolved current
+  employment — office/department/base_rate — never the raw cache), `PATCH /admin/employees/{id}`
+  (edit the name only), and `POST /admin/employees/{id}/user` (provision a login) — same
+  `(bool) $this->user()?->is_system_admin` idiom as M8a/pay rules (`03-api.md`).
+- **`employee_no` is immutable.** The PATCH surface has no `employee_no` field: identity is
+  set once at creation and never renamed — a change to who a person *works as* is an
+  employment change, not an edit.
+- **The 403-vs-404 split.** A non-admin gets `403 forbidden` on the subject-less verbs
+  (`POST`/`GET`/`PATCH /admin/employees`) — the global-admin exception to 404-not-403, as on
+  the org tree — but `404` on `POST …/{id}/user`, whose subject id sits in the URL, so a
+  status split would leak which employee ids exist (`03-api.md`).
+- **Audited.** `Employee` now carries spatie's `LogsActivity` (log name `employee`, logging
+  the name fields, `employee_no`, `organization_id`, `hired_at`, `separated_at`): onboarding
+  and every rename write an `activity_log` row, the acting admin the causer.
+- **Frontend.** The multi-step `<Wizard>` — identity → employment → optional login — plus the
+  roster list and the name-edit screen, reusing the M8a admin nav and data-layer patterns.
+
+**Done when:** a System Admin can onboard an employee by name through the wizard, find them
+in the roster, inspect their current employment, give them a login, and rename them —
+entirely through the API/UI. `scripts/e2e-employee-profiler.sh` proves it live against the
+seeded stack: the seeded System Admin onboards "Juan Santos Cruz Jr." (`201`, `full_name`
+composed) with a first employment block; the employee appears in `GET /admin/employees` with
+that `full_name` and `has_user:false`; the detail shows the resolved current employment;
+provisioning a login flips `has_user` to `true` and the new account logs in; a name edit
+(Cruz → Delacruz) returns the updated `full_name` while `employee_no` stays immutable; and a
+plain employee's `POST /admin/employees` is refused `403`. **764 backend tests (19 of them
+Arch) + 523 frontend tests**, all green.
+
+Next: **M8c — role management, `hr_admin_offices` assignment, and the activity-log viewer**
+(filters by actor, subject, and action), the last slice of M8.
 
 ## M9 — Containerization and production
 

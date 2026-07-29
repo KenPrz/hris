@@ -24,6 +24,10 @@ final class CreateEmployee
                 'employee_no' => $in->employeeNo,
                 'organization_id' => $in->organizationId,
                 'hired_at' => $in->hiredAt,
+                'first_name' => $in->firstName,
+                'middle_name' => $in->middleName,
+                'last_name' => $in->lastName,
+                'name_suffix' => $in->nameSuffix,
             ]);
 
             if ($in->firstEmployment !== null) {

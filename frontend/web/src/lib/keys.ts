@@ -8,7 +8,7 @@
  * endpoints that don't exist yet.
  */
 
-import type { AdminDepartmentListParams, AdminOfficeListParams } from './api'
+import type { AdminDepartmentListParams, AdminEmployeeListParams, AdminOfficeListParams } from './api'
 
 export const keys = {
   session: () => ['session'] as const,
@@ -68,5 +68,11 @@ export const keys = {
       params !== undefined
         ? (['admin', 'departments', params] as const)
         : (['admin', 'departments'] as const),
+    // The employee profiler (M8b). Same prefix-invalidation shape as offices/departments:
+    // every write invalidates the no-params `employees()` key, which by array-prefix match
+    // catches every params-filtered list too. `employee(id)` is the single-detail key.
+    employees: (params?: AdminEmployeeListParams) =>
+      params !== undefined ? (['admin', 'employees', params] as const) : (['admin', 'employees'] as const),
+    employee: (id: string) => ['admin', 'employee', id] as const,
   },
 }

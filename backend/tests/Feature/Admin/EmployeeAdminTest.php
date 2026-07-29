@@ -22,6 +22,10 @@ it('lets a system admin create an employee with a first employment record', func
         'employee_no' => 'EMP-1001',
         'organization_id' => $org->id,
         'hired_at' => '2026-02-01',
+        'first_name' => 'Juan',
+        'middle_name' => 'Santos',
+        'last_name' => 'Dela Cruz',
+        'name_suffix' => 'Jr.',
         'employment' => [
             'effective_from' => '2026-02-01',
             'office_id' => $office->id,
@@ -121,6 +125,8 @@ it('forbids a non-admin from creating employees', function (): void {
         'employee_no' => 'EMP-9999',
         'organization_id' => Organization::factory()->create()->id,
         'hired_at' => '2026-02-01',
+        'first_name' => 'Juan',
+        'last_name' => 'Dela Cruz',
     ])->assertStatus(403)->assertJsonPath('error.code', 'forbidden');
 });
 

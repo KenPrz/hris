@@ -609,6 +609,124 @@ export type DepartmentUpdateInput = DepartmentCreateInput
 export type AdminOfficeListParams = { include_archived?: boolean; organization?: string }
 export type AdminDepartmentListParams = { include_archived?: boolean; office?: string }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/EmployeeListResource.php,
+// EmployeeDetailResource.php, EmployeeResource.php, EmploymentRecordResource.php,
+// and their Create/Update/RecordEmployment/ProvisionUser FormRequests + controllers
+// (M8b: the employee profiler). All is_system_admin-gated. The three name-carrying
+// resources share id/employee_no/{first,middle,last,suffix}_name/full_name; the list
+// adds current_office_id/current_department_id/has_user, the detail adds hired_at +
+// a resolved current_employment block (or null for a brand-new hire with no record yet).
+// ---------------------------------------------------------------------------
+
+// The three employment types the wizard offers. The backend validates `employment_type`
+// as a free string, so this is the frontend's own closed set, not a server-enforced enum.
+export type EmploymentType = 'regular' | 'probationary' | 'contractual'
+
+export type AdminEmployee = {
+  id: string
+  employee_no: string
+  first_name: string
+  middle_name: string | null
+  last_name: string
+  name_suffix: string | null
+  full_name: string
+  current_office_id: string | null
+  current_department_id: string | null
+  has_user: boolean
+}
+
+// One employment segment — the body POST /employees/{id}/employment (RecordEmployment)
+// takes, and the `employment` sub-block CreateEmployee nests. `reports_to_id` is optional
+// (nullable on the wire); everything else is required to price a day.
+export type EmploymentInput = {
+  effective_from: string // YYYY-MM-DD
+  office_id: string
+  department_id: string
+  reports_to_id?: string | null
+  employment_type: string
+  is_art82_exempt: boolean
+  base_rate_cents: number
+}
+
+export type AdminEmployeeDetail = {
+  id: string
+  employee_no: string
+  first_name: string
+  middle_name: string | null
+  last_name: string
+  name_suffix: string | null
+  full_name: string
+  hired_at: string | null // YYYY-MM-DD
+  has_user: boolean
+  current_employment: {
+    office_id: string
+    department_id: string
+    employment_type: string
+    is_art82_exempt: boolean
+    base_rate_cents: number
+    reports_to_id: string | null
+    effective_from: string | null // YYYY-MM-DD
+  } | null
+}
+
+// POST /admin/employees returns EmployeeResource — a wider name+current-pointers shape
+// than the list resource (it carries current_reports_to_id + hired_at, but no has_user).
+// The wizard only reads `.id`, but the type stays faithful to the endpoint's real payload.
+export type CreatedEmployee = {
+  id: string
+  employee_no: string
+  first_name: string
+  middle_name: string | null
+  last_name: string
+  name_suffix: string | null
+  full_name: string
+  current_office_id: string | null
+  current_department_id: string | null
+  current_reports_to_id: string | null
+  hired_at: string | null // YYYY-MM-DD
+}
+
+export type AdminEmployeeCreateInput = {
+  employee_no: string
+  organization_id: string
+  hired_at: string // YYYY-MM-DD
+  first_name: string
+  middle_name?: string | null
+  last_name: string
+  name_suffix?: string | null
+  employment: EmploymentInput
+}
+
+// No employee_no/organization — employee_no is immutable after creation and this endpoint
+// only edits the name fields (UpdateEmployeeRequest).
+export type AdminEmployeeUpdateInput = {
+  first_name: string
+  middle_name?: string | null
+  last_name: string
+  name_suffix?: string | null
+}
+
+export type ProvisionUserInput = { email: string; password: string; name: string }
+
+// POST /admin/employees/{id}/user returns UserResource.
+export type ProvisionedUser = { id: string; name: string; email: string }
+
+// The employment segment POST /employees/{id}/employment returns (EmploymentRecordResource).
+export type EmploymentRecord = {
+  id: string
+  employee_id: string
+  effective_from: string | null // YYYY-MM-DD
+  office_id: string
+  department_id: string
+  reports_to_id: string | null
+  employment_type: string
+  is_art82_exempt: boolean
+  base_rate_cents: number
+}
+
+export type AdminEmployeeListParams = { office?: string }
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -895,6 +1013,43 @@ export const api = {
       archive: (id: string) => request<Department>(`/admin/departments/${id}/archive`, { method: 'POST' }),
       unarchive: (id: string) =>
         request<Department>(`/admin/departments/${id}/unarchive`, { method: 'POST' }),
+    },
+    // The employee profiler (M8b), sysadmin-gated. Distinct from the top-level
+    // self-service `api.employees` (the actor's own visible roster): this is the admin
+    // roster, keyed by `office`, plus the create/update/provision-user/record-employment
+    // write paths. Mirrors the JSON-POST style of `offices` above.
+    employees: {
+      list: (params?: AdminEmployeeListParams) => {
+        const query = new URLSearchParams()
+        if (params?.office !== undefined) query.set('office', params.office)
+        const qs = query.toString()
+        return request<AdminEmployee[]>(`/admin/employees${qs !== '' ? `?${qs}` : ''}`)
+      },
+      show: (id: string) => request<AdminEmployeeDetail>(`/admin/employees/${id}`),
+      create: (body: AdminEmployeeCreateInput) =>
+        request<CreatedEmployee>('/admin/employees', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      update: (id: string, body: AdminEmployeeUpdateInput) =>
+        request<CreatedEmployee>(`/admin/employees/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      provisionUser: (id: string, body: ProvisionUserInput) =>
+        request<ProvisionedUser>(`/admin/employees/${id}/user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      recordEmployment: (id: string, body: EmploymentInput) =>
+        request<EmploymentRecord>(`/admin/employees/${id}/employment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
     },
   },
 }

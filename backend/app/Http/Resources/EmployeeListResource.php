@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /** @mixin Employee */
-final class EmployeeResource extends JsonResource
+final class EmployeeListResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
@@ -23,8 +23,7 @@ final class EmployeeResource extends JsonResource
             'full_name' => $this->full_name,
             'current_office_id' => $this->current_office_id,
             'current_department_id' => $this->current_department_id,
-            'current_reports_to_id' => $this->current_reports_to_id,
-            'hired_at' => $this->hired_at?->toDateString(),
+            'has_user' => $this->user_id !== null,
         ];
     }
 }

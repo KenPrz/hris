@@ -118,27 +118,76 @@ GET /api/v1/employees/{employee}      # auth:sanctum — show
 id — "this exists but isn't yours" leaks the org chart, and for salary and disciplinary
 records that leak is the disclosure (`05-rbac.md`).
 
-## Admin — onboarding (System Admin only)
+## Admin — the employee profiler (System Admin only) *(M8b)*
 
-System Admin owns employee creation and login provisioning in M2; there is no self-serve
-path. Each `FormRequest::authorize()` is the entire boundary, and a non-admin actor gets
-`403 forbidden` — an actor check, not the out-of-scope-subject case above.
+System Admin owns employee onboarding, the company-wide roster, name edits, and login
+provisioning; there is no self-serve path. Each `FormRequest::authorize()` is the entire
+boundary, and a non-admin actor gets `403 forbidden` — an actor check, not the
+out-of-scope-subject case above. (The one exception is `POST …/{employee}/user`, which
+`404`s a non-admin instead of `403` — see its note; its subject id is in the URL, so a
+status split would leak which employee ids exist.)
+
+Every response carries the employee's **name** as of M8b: the four columns
+(`first_name`, `middle_name`, `last_name`, `name_suffix`) plus the composed read model
+`full_name` (`02-data-model.md`). `employee_no` is the immutable identity.
 
 ```
-POST /api/v1/admin/employees          # create employee (+ optional first employment)
+GET /api/v1/admin/employees[?office=<uuid>]     # the company-wide roster
+  → { data: [ { id, employee_no, first_name, middle_name, last_name, name_suffix,
+                full_name, current_office_id, current_department_id, has_user }, … ] }
+```
+
+The profiler roster is global (every employee, any office), distinct from the scope-filtered
+`GET /employees` above; `?office=<uuid>` narrows it to one office by the `current_office_id`
+cache. `has_user` is `user_id !== null` — whether the person has a login yet.
+
+```
+GET /api/v1/admin/employees/{employee}          # one employee's profile
+  → { data: { id, employee_no, first_name, middle_name, last_name, name_suffix, full_name,
+              hired_at, has_user,
+              current_employment: {           # null until the first employment record
+                office_id, department_id, employment_type, is_art82_exempt,
+                base_rate_cents, reports_to_id, effective_from } } }
+```
+
+`current_employment` is resolved through `EmploymentResolver` — the effective-dated record
+whose `effective_from` is the latest on or before today (`02-data-model.md`), the same way
+the pay engine reads it — never the denormalized cache. A brand-new employee with no
+employment record yet gets `null`, not an error.
+
+```
+POST /api/v1/admin/employees          # onboard an employee (+ optional first employment)
   { "employee_no": "MNL-0007", "organization_id": "0199…", "hired_at": "2026-07-23",
+    "first_name": "Juan", "middle_name": "Santos" | null,   # middle/suffix OPTIONAL
+    "last_name": "Cruz", "name_suffix": "Jr." | null,
     "employment": {                    # OPTIONAL — omit to create a bare identity
       "effective_from": "2026-07-23", "office_id": "0199…", "department_id": "0199…",
       "reports_to_id": "0199…" | null, "employment_type": "regular",
       "is_art82_exempt": false, "base_rate_cents": 61000 } }
-  → 201 { data: { id, employee_no, current_office_id, current_department_id,
+  → 201 { data: { id, employee_no, first_name, middle_name, last_name, name_suffix,
+                  full_name, current_office_id, current_department_id,
                   current_reports_to_id, hired_at } }
 ```
 
-When `employment` is present, `CreateEmployee` records it through `RecordEmploymentChange`
-in the same transaction, so the `current_*` cache is populated on day one — the one legal
-way it is ever written (`02-data-model.md`). Omit it and the employee exists with a null
-cache until the first employment change.
+`first_name` and `last_name` are required; `middle_name` and `name_suffix` are optional
+(a null collapses cleanly in `full_name`). When `employment` is present, `CreateEmployee`
+records it through `RecordEmploymentChange` in the same transaction, so the `current_*`
+cache is populated on day one — the one legal way it is ever written (`02-data-model.md`).
+Omit it and the employee exists with a null cache until the first employment change.
+
+```
+PATCH /api/v1/admin/employees/{employee}        # edit the name (identity fields only)
+  { "first_name": "Juan", "middle_name": "Santos" | null,
+    "last_name": "Delacruz", "name_suffix": "Jr." | null }
+  → 200 { data: { id, employee_no, first_name, middle_name, last_name, name_suffix,
+                  full_name, current_office_id, current_department_id,
+                  current_reports_to_id, hired_at } }
+```
+
+PATCH edits only the name. There is **no `employee_no` field** on this surface —
+`employee_no` is immutable, set once at creation and never editable; a correction to who a
+person *works as* is an employment change, not a rename. The edit is stamped to
+`activity_log` (`log_name 'employee'`, `02-data-model.md`).
 
 ```
 POST /api/v1/admin/employees/{employee}/user      # provision a login

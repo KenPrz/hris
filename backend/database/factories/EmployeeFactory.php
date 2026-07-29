@@ -20,6 +20,10 @@ final class EmployeeFactory extends Factory
             'user_id' => null,
             'organization_id' => Organization::factory(),
             'hired_at' => $this->faker->dateTimeBetween('-5 years', 'now')->format('Y-m-d'),
+            'first_name' => $this->faker->firstName(),
+            'last_name' => $this->faker->lastName(),
+            'middle_name' => null,
+            'name_suffix' => null,
         ];
     }
 }
