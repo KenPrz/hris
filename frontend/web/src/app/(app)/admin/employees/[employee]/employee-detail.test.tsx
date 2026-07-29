@@ -17,6 +17,7 @@ vi.mock('@/hooks/useAdminEmployees', () => ({
   useUpdateEmployee: vi.fn(),
   useRecordEmployment: vi.fn(),
   useProvisionUser: vi.fn(),
+  useSetHrOffices: vi.fn(),
 }))
 vi.mock('@/hooks/useAdminOrgTree', () => ({
   useOffices: vi.fn(),
@@ -28,6 +29,7 @@ import {
   useAdminEmployees,
   useProvisionUser,
   useRecordEmployment,
+  useSetHrOffices,
   useUpdateEmployee,
 } from '@/hooks/useAdminEmployees'
 import { useDepartments, useOffices } from '@/hooks/useAdminOrgTree'
@@ -41,6 +43,7 @@ const mockedUseAdminEmployees = vi.mocked(useAdminEmployees)
 const mockedUseUpdateEmployee = vi.mocked(useUpdateEmployee)
 const mockedUseRecordEmployment = vi.mocked(useRecordEmployment)
 const mockedUseProvisionUser = vi.mocked(useProvisionUser)
+const mockedUseSetHrOffices = vi.mocked(useSetHrOffices)
 const mockedUseOffices = vi.mocked(useOffices)
 const mockedUseDepartments = vi.mocked(useDepartments)
 
@@ -98,6 +101,8 @@ function detail(overrides: Partial<AdminEmployeeDetail> = {}): AdminEmployeeDeta
     full_name: 'Ada Lovelace',
     hired_at: '2026-01-01',
     has_user: false,
+    hr_admin_office_ids: [],
+    roles: [],
     current_employment: {
       office_id: 'o1',
       department_id: 'd1',
@@ -167,6 +172,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -184,6 +190,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -197,6 +204,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -210,6 +218,7 @@ describe('/admin/employees/[employee] — detail', () => {
     const update = stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -229,6 +238,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -243,6 +253,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -257,6 +268,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     const provision = stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 
@@ -270,6 +282,58 @@ describe('/admin/employees/[employee] — detail', () => {
     })
   })
 
+  it('shows the office admin access panel prefilled with the granted offices and roles', () => {
+    stubSession()
+    stubDetail({
+      data: detail({ has_user: true, hr_admin_office_ids: ['o2'], roles: ['HR Admin'] }),
+    })
+    stubSupportingData({ offices: [office(), office({ id: 'o2', name: 'Cebu Branch' })] })
+    stubMutation(mockedUseUpdateEmployee)
+    stubMutation(mockedUseRecordEmployment)
+    stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
+
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Office admin access' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Manila HQ')).not.toBeChecked()
+    expect(screen.getByLabelText('Cebu Branch')).toBeChecked()
+    expect(screen.getByText('HR Admin')).toBeInTheDocument()
+  })
+
+  it('saving the office admin access panel calls useSetHrOffices with the selected office ids', () => {
+    stubSession()
+    stubDetail({ data: detail({ has_user: true, hr_admin_office_ids: [], roles: [] }) })
+    stubSupportingData({ offices: [office(), office({ id: 'o2', name: 'Cebu Branch' })] })
+    stubMutation(mockedUseUpdateEmployee)
+    stubMutation(mockedUseRecordEmployment)
+    stubMutation(mockedUseProvisionUser)
+    const setHrOffices = stubMutation(mockedUseSetHrOffices)
+
+    renderPage()
+
+    expect(screen.getByText('No roles')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Cebu Branch'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save access' }))
+
+    expect(setHrOffices).toHaveBeenCalledWith({ id: 'e1', body: { office_ids: ['o2'] } })
+  })
+
+  it('shows a note instead of the panel when the employee has no login', () => {
+    stubSession()
+    stubDetail({ data: detail({ has_user: false }) })
+    stubSupportingData()
+    stubMutation(mockedUseUpdateEmployee)
+    stubMutation(mockedUseRecordEmployment)
+    stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
+
+    renderPage()
+
+    expect(screen.getByText('Provision a login first to grant office-admin access.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save access' })).not.toBeInTheDocument()
+  })
+
   it('a non-sysadmin sees a refusal notice instead of the profile', () => {
     stubSession({ is_system_admin: false })
     stubDetail()
@@ -277,6 +341,7 @@ describe('/admin/employees/[employee] — detail', () => {
     stubMutation(mockedUseUpdateEmployee)
     stubMutation(mockedUseRecordEmployment)
     stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
 
     renderPage()
 

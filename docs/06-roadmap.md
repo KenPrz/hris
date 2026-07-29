@@ -1576,8 +1576,12 @@ Next: **M8 — admin portal and audit.**
 **Done when:** a company can be configured from an empty database entirely through the
 UI, and the audit log shows every step of it.
 
-**In progress:** M8a (the organization tree) and M8b (the employee profiler) are **done**.
-Role management, `hr_admin_offices` assignment, and the activity-log viewer remain (M8c).
+**Status: complete.** All three slices shipped — M8a (the organization tree), M8b (the
+employee profiler), and M8c (HR-admin roles/scope + the audit viewer). The done-when is
+met: a System Admin can build a company from an empty database through the org-tree and
+profiler UIs, grant office-admin access to the people who run it, and read the whole audit
+trail — every create, edit, archive, and grant — through the activity-log viewer. **771
+backend tests (19 of them Arch) + 541 frontend tests**, all green.
 
 ## M8a — Organization tree CRUD *(done)*
 
@@ -1673,6 +1677,55 @@ Arch) + 523 frontend tests**, all green.
 
 Next: **M8c — role management, `hr_admin_offices` assignment, and the activity-log viewer**
 (filters by actor, subject, and action), the last slice of M8.
+
+## M8c — Roles, scope & the audit viewer *(done)*
+
+The third and final slice of M8, and the one that **completes M8**. M8a made the company's
+shape editable and M8b made a person onboardable; M8c makes *who administers whom* editable
+at runtime and opens the audit trail everything has been writing to a read surface.
+
+- **HR-Admin access is two coupled halves, set in one write.** `POST
+  /admin/employees/{id}/hr-offices` (`03-api.md`) drives the `SetHrAdminOffices` action,
+  which `sync()`s the `hr_admin_offices` pivot (the *offices*) **and** `assignRole('HR
+  Admin')` (the *verbs*) in one transaction — or, when `office_ids` is `[]`, clears the
+  pivot and `removeRole`s. Because a policy needs both and neither alone makes an HR Admin
+  (`05-rbac.md`), grant and revoke are only ever done together; this is the seeder's
+  hand-paired `assignRole` + `hrAdminOffices()->attach` generalized to a live surface. The
+  subject is a **login** — a login-less employee is `422 employee_has_no_login`; a
+  nonexistent office is the controller's own `422 invalid_reference` (shape-only `uuid`
+  validation, the M8a convention), never a `404`. `EmployeeDetailResource` now carries
+  `hr_admin_office_ids` and `roles` so the grant's effect is visible without a re-fetch.
+- **The audit viewer.** `GET /admin/activity` (`03-api.md`) is a read-only, filterable,
+  paginated (`{data, meta}`, 50/page, newest-first) window over the one Spatie
+  `activity_log` every `LogsActivity` model writes to — offices/departments/organizations
+  (M8a), employee edits (M8b) — plus the manual `hr_admin_offices_set` event this slice
+  logs. Filters (`log_name`, `event`, `subject_type`, `causer_id`, `from`/`to`) are optional
+  and AND-combined. There is no separate audit store: the trail *is* the log, and the viewer
+  only reads it.
+- **`is_system_admin`-gated, 403-not-404.** Both surfaces gate on the one-line `(bool)
+  $this->user()?->is_system_admin`, no `OfficeScope` — the same global-admin exception as the
+  org tree (`05-rbac.md`). A non-admin gets `403`.
+- **Frontend.** An office-admin access panel on the employee-detail page (grant/revoke the
+  offices a login administers) and a filterable activity-log viewer screen, reusing the M8a/M8b
+  admin nav and data-layer patterns.
+
+**Done when:** a System Admin can grant an employee-with-login office-admin access, see the
+role and pivot appear together, revoke them together, and browse a filterable activity log
+that shows every audited change — entirely through the API/UI.
+`scripts/e2e-admin-roles-audit.sh` proves it live against the seeded stack: the seeded System
+Admin grants HR-Admin over an office to an employee-with-login (`200`; the detail then shows
+that office in `hr_admin_office_ids` **and** `HR Admin` in `roles`); the audit viewer surfaces
+both the `hr_admin_offices_set` event (cross-checked at the DB via `psql`) and the wider
+`log_name=office` trail; revoking with `office_ids:[]` clears the pivot and the role together;
+a login-less employee is refused `422 employee_has_no_login`; and a plain employee's `GET
+/admin/activity` is refused `403`. **771 backend tests (19 of them Arch) + 541 frontend
+tests**, all green.
+
+**This completes M8** — the admin portal and audit trail. A company can now be configured
+from an empty database entirely through the UI (org tree → offices → departments → people →
+their admins), and the audit log shows every step of it.
+
+Next: **M9 — containerization and production.**
 
 ## M9 — Containerization and production
 

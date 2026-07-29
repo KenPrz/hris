@@ -30,6 +30,10 @@ final class EmployeeDetailResource extends JsonResource
             'full_name' => $this->full_name,
             'hired_at' => $this->hired_at?->toDateString(),
             'has_user' => $this->user_id !== null,
+            // Both empty for a login-less employee: HR-Admin access and role membership
+            // live on the User row, not the Employee, so there is nothing to report.
+            'hr_admin_office_ids' => $this->user_id === null ? [] : $this->user->hrAdminOffices()->pluck('offices.id')->all(),
+            'roles' => $this->user_id === null ? [] : $this->user->getRoleNames()->all(),
             'current_employment' => $current === null ? null : [
                 'office_id' => $current->office_id,
                 'department_id' => $current->department_id,

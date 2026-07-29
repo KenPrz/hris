@@ -167,6 +167,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/admin/offices', label: 'Offices' },
       { href: '/admin/departments', label: 'Departments' },
       { href: '/admin/employees', label: 'Employees' },
+      { href: '/admin/activity', label: 'Activity log' },
     ])
   })
 })
@@ -267,6 +268,20 @@ describe('SideNav — rendered', () => {
 
     const employeesLink = await screen.findByRole('link', { name: 'Employees' })
     expect(employeesLink).toHaveAttribute('href', '/admin/employees')
+  })
+
+  it('a sysadmin sees the Activity log link (M8c)', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ is_system_admin: true }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    const activityLink = await screen.findByRole('link', { name: 'Activity log' })
+    expect(activityLink).toHaveAttribute('href', '/admin/activity')
   })
 
   it('a non-sysadmin does not see the Admin group or the Pay rules link', async () => {

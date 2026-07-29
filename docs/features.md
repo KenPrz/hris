@@ -586,5 +586,34 @@ bring a new hire onto the system, System-Administrator only.
   global, system-administrator-only surface — an HR admin or plain employee who tries is
   refused. Onboarding and every name edit write an audit-log entry naming who did it.
 
-**Still to come in M8:** role management, assigning which offices an HR admin covers, and the
-activity-log viewer.
+## Granting office-admin access, and reading the audit trail *(M8c)*
+
+M8a and M8b let a system administrator build the company and bring people onto it; M8c lets
+them decide **who runs each office** and then **see everything that was done**. It completes
+the admin portal.
+
+- **A system administrator grants an employee office-admin access.** Open an
+  employee-with-login's profile and pick the offices they should administer. In one action
+  the person becomes an **HR admin** — the role that says *what* they may do — scoped to
+  exactly those offices — the pivot that says *whom* they may do it to. The two are always set
+  together: there is no half-granted state where someone has the role but no offices, or
+  offices but not the role.
+- **Revoking is just as clean.** Clearing all the offices removes HR-admin access entirely —
+  both the role and the scope go at once, never left dangling. The panel always shows the
+  current state (which offices, and whether the person holds the role) so a grant or revoke is
+  visible immediately.
+- **Access is granted to a login, not a bare record.** A punch-only worker with no account
+  can't be made an HR admin — there's nothing to attach the access to — and the app says so
+  plainly rather than failing obscurely.
+- **A filterable activity log of everything that happened.** The system administrator can
+  browse one company-wide audit log — every office and department created or archived, every
+  employee onboarded or renamed, every office-admin grant and revoke — newest first, paged,
+  and filterable by the kind of thing changed, the kind of change, and the date range. It's a
+  read-only window over the same trail every admin action has been quietly writing all along.
+- **Only a system administrator.** Both the access panel and the audit log are
+  global, system-administrator-only surfaces — an HR admin or plain employee who tries is
+  refused.
+
+**M8 is complete.** A company can be configured from an empty database entirely through the
+app — its org tree, its people, and the admins who run each office — and the audit log shows
+every step of it. Next is production hardening and containerization (M9).

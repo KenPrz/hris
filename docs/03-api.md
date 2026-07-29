@@ -221,6 +221,39 @@ A second change on the same `effective_from` is a domain failure, not a silent s
 `422 employment_record_exists`, with `employee_id` and `effective_from` in `details`
 (`02-data-model.md`).
 
+### HR-Admin access — grant / revoke office-admin *(M8c)*
+
+```
+POST /api/v1/admin/employees/{employee}/hr-offices    # set the offices this login administers
+  { "office_ids": [ "<uuid>", … ] }                   # PRESENT (may be []); [] revokes entirely
+  → 200 { data: { …EmployeeDetailResource…, hr_admin_office_ids: [ … ], roles: [ … ] } }
+  → 400 validation_failed          # office_ids absent, or a member not a uuid
+  → 403 forbidden                  # a non-admin actor
+  → 422 employee_has_no_login      # employee has no user_id; details: { employee_id }
+  → 422 invalid_reference          # an office_id that does not exist; details: { reference_type, reference_id }
+```
+
+HR-Admin access is **two coupled halves set in one write** (`SetHrAdminOffices`): the
+`hr_admin_offices` pivot (the *offices* this login administers) and the Spatie `HR Admin`
+**role** (the *verbs* it may perform). They are never set one without the other — a login
+with offices but no role, or a role but no offices, is a bug this action exists to prevent
+(`05-rbac.md`). `office_ids: []` **revokes HR-Admin entirely** — the pivot is cleared *and*
+the role removed, never left dangling with an empty scope; `office_ids` is validated
+`present` (not `required`) precisely so `[]` is a legitimate, meaningful payload rather than
+a missing field.
+
+The subject is a **login, not an employee record** — a login-less employee (no `user_id`)
+is `422 employee_has_no_login`, because there is no `User` row to attach the pivot/role to.
+`office_ids` is shape-only (`uuid`), so a well-formed-but-nonexistent office id is the
+controller's own `422 invalid_reference` (the same M8a convention as the org tree below),
+never a `404`. The response is the full `EmployeeDetailResource`, now carrying
+`hr_admin_office_ids` and `roles` so a client sees the new state without a re-fetch; the
+write is stamped to `activity_log` (`log_name 'default'`, `description hr_admin_offices_set`,
+`properties.office_ids`), which the audit viewer below surfaces. `is_system_admin`-gated
+like the rest of the `/admin` surface — a non-admin gets `403`, not `404` (nothing
+office-scoped to hide). `scripts/e2e-admin-roles-audit.sh` proves the whole grant/revoke
+cycle plus the two `422` guards against the live stack.
+
 ## Attendance *(M3)*
 
 The append-only punch ledger (`02-data-model.md`): every punch is a new row, nothing is ever
@@ -988,6 +1021,38 @@ same generic pair, distinguished only by `details.subject_type`, is reused acros
 `scripts/e2e-admin-org.sh` proves the whole surface — create/list each tier, the duplicate
 `422`, the `activity_log` writes, the archive/list-hide/`include_archived`/re-archive `409`/
 unarchive cycle, and the non-admin `403` — against the live stack.
+
+## Admin — the audit viewer *(M8c)*
+
+A read-only, filterable, paginated window over the one Spatie `activity_log` every
+`LogsActivity` model already writes to (offices, departments, organizations, employees) plus
+the manual `hr_admin_offices_set` event above — the audit trail of who changed what, in one
+place. `is_system_admin`-gated like the rest of the `/admin` surface: the log spans every
+subject type company-wide, so there is nothing office-scoped to check, and a non-admin gets
+`403`, not `404`.
+
+```
+GET /api/v1/admin/activity          # auth:sanctum — System Admin only
+  ?log_name=<string>                # e.g. office · department · employee · default
+  ?event=<string>                   # created · updated · deleted (blank for manual logs)
+  ?subject_type=<fqcn>              # e.g. App\Models\Office
+  ?causer_id=<uuid>                 # the acting user's id
+  ?from=YYYY-MM-DD  &to=YYYY-MM-DD  # inclusive created_at date bounds
+  ?page=<n>                         # 1-based; 50 rows per page, newest first
+  → { data: [ { id, log_name, description, event, subject_type, subject_id,
+                causer_id, properties, created_at }, … ],
+      meta: { current_page, last_page, total, per_page } }
+  → 403 forbidden                   # a non-admin actor
+```
+
+Every filter is optional and **AND-combined**; omit them all for the whole log. `from`/`to`
+bound `created_at` by date (inclusive). The envelope is **hand-built, not Laravel's default
+paginated-resource shape** — `{ data, meta }` with a terse four-field `meta`
+(`current_page`, `last_page`, `total`, `per_page`), deliberately without the absolute
+container URLs and HTML-entity `meta.links` array Laravel's default carries, which nothing
+else in this API uses. Rows are ordered newest-first (`latest()`), 50 to a page.
+`scripts/e2e-admin-roles-audit.sh` proves the viewer surfaces both the `hr_admin_offices_set`
+event and the `log_name=office` trail, and the non-admin `403`, against the live stack.
 
 ## Leave — foundation *(M6b-a)*
 

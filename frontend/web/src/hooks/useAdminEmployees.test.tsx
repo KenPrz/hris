@@ -64,6 +64,8 @@ function detail(overrides: Partial<AdminEmployeeDetail> = {}): AdminEmployeeDeta
     hired_at: '2026-01-01',
     has_user: false,
     current_employment: null,
+    hr_admin_office_ids: [],
+    roles: [],
     ...overrides,
   }
 }

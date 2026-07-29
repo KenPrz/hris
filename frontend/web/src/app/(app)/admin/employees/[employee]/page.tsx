@@ -32,6 +32,7 @@ import {
   useAdminEmployees,
   useProvisionUser,
   useRecordEmployment,
+  useSetHrOffices,
   useUpdateEmployee,
 } from '@/hooks/useAdminEmployees'
 import { useDepartments, useOffices } from '@/hooks/useAdminOrgTree'
@@ -342,6 +343,93 @@ function ProvisionForm({ initialName, submitting, submitError, onSubmit }: Provi
   )
 }
 
+interface HrOfficesFormProps {
+  offices: Array<{ id: string; name: string }>
+  initialOfficeIds: string[]
+  roles: string[]
+  submitting: boolean
+  submitError: boolean
+  onSubmit: (officeIds: string[]) => void
+}
+
+/** The office-admin access panel (M8c) — a checkbox per office (mirrors
+ * `CheckboxToggle`'s existing raw-checkbox treatment rather than a new tier-1
+ * multi-select), prefilled from `hr_admin_office_ids`. Submitting always sends the
+ * FULL selected set — the backend syncs the pivot and assigns/removes the HR Admin
+ * role from that one list, so there is no separate add/remove call. */
+function HrOfficesForm({ offices, initialOfficeIds, roles, submitting, submitError, onSubmit }: HrOfficesFormProps) {
+  const [selected, setSelected] = useState<string[]>(initialOfficeIds)
+
+  function toggleOffice(officeId: string, checked: boolean): void {
+    setSelected((current) =>
+      checked ? [...current, officeId] : current.filter((id) => id !== officeId),
+    )
+  }
+
+  function handleSubmit(event: FormEvent): void {
+    event.preventDefault()
+    onSubmit(selected)
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col" style={{ gap: 'var(--sp-md)' }}>
+      <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
+        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-subtle)' }}>
+          Offices
+        </span>
+        {offices.length === 0 ? (
+          <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+            No offices to grant.
+          </span>
+        ) : (
+          <div className="flex flex-col" style={{ gap: 'var(--sp-xs)' }}>
+            {offices.map((office) => (
+              <CheckboxToggle
+                key={office.id}
+                id={`hr-office-${office.id}`}
+                label={office.name}
+                checked={selected.includes(office.id)}
+                onChange={(checked) => toggleOffice(office.id, checked)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
+        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-subtle)' }}>
+          Roles
+        </span>
+        <div className="flex items-center" style={{ gap: 'var(--sp-xs)' }}>
+          {roles.length === 0 ? (
+            <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+              No roles
+            </span>
+          ) : (
+            roles.map((role) => (
+              <Tag key={role} kind="neutral">
+                {role}
+              </Tag>
+            ))
+          )}
+        </div>
+      </div>
+
+      {submitError ? (
+        <InlineNotification kind="error" title="That didn't save.">
+          Check your connection and try again.
+        </InlineNotification>
+      ) : null}
+
+      <div>
+        <Button type="submit" loading={submitting} disabled={submitting}>
+          Save access
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 interface CurrentEmploymentCardProps {
   employment: NonNullable<AdminEmployeeDetail['current_employment']>
   officeName: string
@@ -396,6 +484,7 @@ export default function EmployeeDetailPage() {
   const updateMutation = useUpdateEmployee()
   const recordEmploymentMutation = useRecordEmployment()
   const provisionMutation = useProvisionUser()
+  const setHrOfficesMutation = useSetHrOffices()
 
   const detail = employeeQuery.data ?? null
   const offices = officesQuery.data ?? []
@@ -424,6 +513,11 @@ export default function EmployeeDetailPage() {
   function handleProvision(body: ProvisionUserInput): void {
     if (id === null) return
     provisionMutation.mutate({ id, body })
+  }
+
+  function handleSetHrOffices(officeIds: string[]): void {
+    if (id === null) return
+    setHrOfficesMutation.mutate({ id, body: { office_ids: officeIds } })
   }
 
   return (
@@ -534,6 +628,24 @@ export default function EmployeeDetailPage() {
                 />
               </div>
             ) : null}
+
+            <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+              <SectionHeader title="Office admin access" level={2} />
+              {!detail.has_user ? (
+                <InlineNotification kind="info" title="No login yet.">
+                  Provision a login first to grant office-admin access.
+                </InlineNotification>
+              ) : (
+                <HrOfficesForm
+                  offices={offices.filter((office) => office.archived_at === null)}
+                  initialOfficeIds={detail.hr_admin_office_ids}
+                  roles={detail.roles}
+                  submitting={setHrOfficesMutation.isPending}
+                  submitError={setHrOfficesMutation.isError}
+                  onSubmit={handleSetHrOffices}
+                />
+              )}
+            </div>
           </>
         )}
       </div>

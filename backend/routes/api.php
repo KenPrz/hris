@@ -12,8 +12,10 @@ use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
 use App\Http\Controllers\Admin\Employees\RecordEmploymentController;
+use App\Http\Controllers\Admin\Employees\SetHrAdminOfficesController;
 use App\Http\Controllers\Admin\Employees\ShowController as ShowEmployeeAdminController;
 use App\Http\Controllers\Admin\Employees\UpdateEmployeeController;
+use App\Http\Controllers\Admin\ListActivityController;
 use App\Http\Controllers\Admin\Offices\ArchiveController as ArchiveOfficeController;
 use App\Http\Controllers\Admin\Offices\CreateController as CreateOfficeController;
 use App\Http\Controllers\Admin\Offices\ListController as ListOfficesController;
@@ -166,6 +168,12 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/employees/{employee}/user', ProvisionUserController::class);
             Route::post('/employees/{employee}/employment', RecordEmploymentController::class);
 
+            // HR-Admin access management (M8c Task 2): couples the hr_admin_offices
+            // pivot with the spatie 'HR Admin' role in one write (SetHrAdminOffices).
+            // Same is_system_admin gating as the rest of this group; office_ids=[]
+            // revokes HR-Admin entirely rather than leaving a dangling role/pivot.
+            Route::post('/employees/{employee}/hr-offices', SetHrAdminOfficesController::class);
+
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
             Route::post('/attendance/punch', ManualPunchController::class);
@@ -212,6 +220,12 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/departments/{department}', UpdateDepartmentController::class);
             Route::post('/departments/{department}/archive', ArchiveDepartmentController::class);
             Route::post('/departments/{department}/unarchive', UnarchiveDepartmentController::class);
+
+            // The read-only audit viewer (M8c Task 1) — a filterable, paginated window
+            // over the Spatie activity log every LogsActivity model already writes to.
+            // Same is_system_admin gating as the rest of this group: the log spans every
+            // subject type company-wide, nothing to scope-check against a single office.
+            Route::get('/activity', ListActivityController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
