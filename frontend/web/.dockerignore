@@ -1,0 +1,12 @@
+# Kept out of the build context. node_modules/ especially: the `deps` stage runs
+# `npm ci` for the image's own platform, and copying the host's tree over it ships
+# whatever the host happened to have (including native binaries built for the host).
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+.git/
+.gitignore
+Dockerfile
+.dockerignore

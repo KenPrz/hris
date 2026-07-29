@@ -1,0 +1,38 @@
+# backend/docker/Caddyfile.prod — one public entrypoint: TLS + host routing.
+#
+# HRIS_DOMAIN comes from the prod .env via compose. One domain, not two: HRIS has a
+# single frontend on purpose (every admin is also an employee — docs/00-overview.md),
+# which is where this diverges from ../pos's register/admin split.
+#
+# HRIS_TLS_ISSUER lets a domainless smoke test use Caddy's internal CA:
+#   HRIS_TLS_ISSUER=internal  →  self-signed, no ACME attempts.
+{
+    frankenphp
+}
+
+# Internal health listener: the container healthcheck curls 127.0.0.1:8000, which the
+# public vhost below can't serve (it answers on a hostname, over TLS). Not published.
+:8000 {
+    root * /app/public
+    php_server
+}
+
+{$HRIS_DOMAIN} {
+    tls {
+        issuer {$HRIS_TLS_ISSUER:acme}
+    }
+    encode zstd gzip
+
+    # /api/* is served by PHP directly; everything else proxies to Next. The browser
+    # therefore still sees exactly one origin and CORS never comes up — but by a
+    # different mechanism than in dev, where Next's own rewrite forwards /api to the
+    # API. That rewrite is bypassed here: Caddy splits /api/* off before Next sees it.
+    @api path /api/*
+    handle @api {
+        root * /app/public
+        php_server
+    }
+    handle {
+        reverse_proxy web:3000
+    }
+}
