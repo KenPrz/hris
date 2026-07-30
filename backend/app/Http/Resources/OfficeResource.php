@@ -19,6 +19,7 @@ final class OfficeResource extends JsonResource
             'name' => $this->name,
             'code' => $this->code,
             'timezone' => $this->timezone,
+            'region' => $this->region,
             'geofence_lat' => $this->geofence_lat,
             'geofence_lng' => $this->geofence_lng,
             'geofence_radius_m' => $this->geofence_radius_m,

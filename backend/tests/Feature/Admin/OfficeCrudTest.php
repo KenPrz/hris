@@ -29,6 +29,7 @@ function createOfficePayload(string $organizationId, array $overrides = []): arr
         'name' => 'Main Branch',
         'code' => 'MB-01',
         'timezone' => 'Asia/Manila',
+        'region' => 'NCR',
         'geofence_lat' => 14.5995,
         'geofence_lng' => 120.9842,
         'geofence_radius_m' => 100,
@@ -51,6 +52,7 @@ it('lets a system admin create an office, and logs it', function (): void {
         ->and($response->json('data.name'))->toBe('Main Branch')
         ->and($response->json('data.code'))->toBe('MB-01')
         ->and($response->json('data.timezone'))->toBe('Asia/Manila')
+        ->and($response->json('data.region'))->toBe('NCR')
         ->and($response->json('data.geofence_radius_m'))->toBe(100)
         ->and($response->json('data.ip_allowlist'))->toBe(['203.0.113.10'])
         ->and($response->json('data.archived_at'))->toBeNull();
@@ -107,21 +109,24 @@ it('rejects updating an office to a nonexistent organization_id with a clean 422
 it('lets a system admin update an office, and logs it', function (): void {
     $admin = User::factory()->create(['is_system_admin' => true]);
     $org = Organization::factory()->create();
-    $office = Office::factory()->create(['organization_id' => $org->id, 'name' => 'Old Name', 'code' => 'OLD-01']);
+    $office = Office::factory()->create(['organization_id' => $org->id, 'name' => 'Old Name', 'code' => 'OLD-01', 'region' => 'NCR']);
     Sanctum::actingAs($admin);
 
     $response = $this->patchJson("/api/v1/admin/offices/{$office->id}", createOfficePayload($org->id, [
         'name' => 'New Name',
         'code' => 'NEW-01',
+        'region' => 'VII',
     ]))->assertOk();
 
     expect($response->json('data.name'))->toBe('New Name')
-        ->and($response->json('data.code'))->toBe('NEW-01');
+        ->and($response->json('data.code'))->toBe('NEW-01')
+        ->and($response->json('data.region'))->toBe('VII');
 
     $this->assertDatabaseHas('offices', [
         'id' => $office->id,
         'name' => 'New Name',
         'code' => 'NEW-01',
+        'region' => 'VII',
     ]);
 
     $activity = Activity::query()
@@ -131,7 +136,10 @@ it('lets a system admin update an office, and logs it', function (): void {
 
     expect($activity)->not->toBeNull()
         ->and($activity->causer_id)->toBe($admin->id)
-        ->and($activity->subject_type)->toBe(Office::class);
+        ->and($activity->subject_type)->toBe(Office::class)
+        // region is in the logOnly allowlist, same as every other writable column — a
+        // region change must leave an audit trail, not silently vanish.
+        ->and($activity->properties->get('attributes'))->toHaveKey('region', 'VII');
 });
 
 it('rejects an update whose code collides with another office', function (): void {
