@@ -81,4 +81,14 @@ export const keys = {
     activity: (filters?: ActivityFilters) =>
       filters !== undefined ? (['admin', 'activity', filters] as const) : (['admin', 'activity'] as const),
   },
+  // The personnel file (M10a). `mine` and `forEmployee` are separate cache entries on
+  // purpose: they are different RESOURCES (self-read vs HR-admin read), and a profile
+  // mutation invalidates only the employee whose profile it wrote.
+  profile: {
+    mine: () => ['profile', 'mine'] as const,
+    forEmployee: (id: string) => ['profile', 'employee', id] as const,
+    // Static company-wide reference data. Nothing invalidates it — no endpoint writes it,
+    // it is seeded by ProfileCatalogSeeder — so it can safely carry a long staleTime.
+    catalog: () => ['profile', 'catalog'] as const,
+  },
 }

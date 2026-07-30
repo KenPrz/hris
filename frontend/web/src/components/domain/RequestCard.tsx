@@ -19,9 +19,9 @@
 import { useState } from 'react'
 
 import type { AttendanceAdjustmentDetail, LeaveRequestDetail, OvertimeRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
+import { authedBlobUrl } from '@/lib/authedBlobUrl'
 import { formatDateSpan, timeInZone } from '@/lib/date'
 import { formatDuration } from '@/lib/duration'
-import { getToken } from '@/lib/session'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import type { TagKind } from '@/components/Tag'
 import { Tag } from '@/components/Tag'
@@ -139,19 +139,19 @@ function summarize(request: RequestRecord): string {
 
 /**
  * `GET /requests/{id}/attachment` is an authenticated stream, not a public URL — a plain
- * `<a href>` would navigate without the bearer token and 401. Fetches it with the same
- * `Authorization` header `lib/api.ts`'s `request()` adds, then hands the browser a
- * same-origin blob URL to save.
+ * `<a href>` would navigate without the bearer token and 401. `authedBlobUrl` fetches it
+ * with the bearer header and hands back a same-origin blob URL to save. A failed fetch
+ * (network error or non-ok response) is swallowed here — there is nowhere on this card to
+ * surface it, and the prior behaviour was the same silent no-op on a non-ok response.
  */
 async function downloadAttachment(requestId: string): Promise<void> {
-  const token = getToken()
-  const response = await fetch(`/api/v1/requests/${requestId}/attachment`, {
-    headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!response.ok) return
+  let url: string
+  try {
+    url = await authedBlobUrl(`/api/v1/requests/${requestId}/attachment`)
+  } catch {
+    return
+  }
 
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
   link.download = ''
