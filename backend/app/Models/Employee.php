@@ -90,6 +90,12 @@ final class Employee extends Model
         return $this->hasOne(EmployeeProfile::class);
     }
 
+    /** @return HasMany<EmployeeDependent, $this> */
+    public function dependents(): HasMany
+    {
+        return $this->hasMany(EmployeeDependent::class);
+    }
+
     /** Composes first/middle/last/suffix, collapsing extra whitespace from a null middle/suffix. */
     protected function fullName(): Attribute
     {
