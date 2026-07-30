@@ -142,7 +142,48 @@ it('streams the scan to the employee themself', function (): void {
 
     $this->actingAs($this->selfUser->fresh())
         ->get("/api/v1/employees/{$this->employee->id}/identifications/{$identification->id}/scan")
-        ->assertOk();
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+});
+
+it('404s the scan stream when the identification belongs to a different employee', function (): void {
+    // The attack: an ordinary employee is authorized against THEIR OWN employee id (which
+    // self-grants viewFullProfile), then pairs it in the URL with a victim's identification
+    // id instead of their own. Without the employee_id === $employee->id check in
+    // DownloadScanController, this streams the victim's scan straight back.
+    //
+    // The victim's identification MUST carry a real scan here — otherwise the "no media"
+    // branch 404s regardless of the ownership check, and this test would pass vacuously
+    // even with the ownership check deleted.
+    $victim = Employee::factory()->create(['current_office_id' => $this->office->id]);
+    $victimIdentification = EmployeeIdentification::factory()->create([
+        'employee_id' => $victim->id,
+        'category_id' => $this->tin->id,
+    ]);
+    $victimIdentification->addMedia(UploadedFile::fake()->createWithContent('tin.pdf', str_repeat('%PDF-1.4'.PHP_EOL, 20)))
+        ->toMediaCollection('scan');
+
+    $this->actingAs($this->selfUser->fresh())
+        ->get("/api/v1/employees/{$this->employee->id}/identifications/{$victimIdentification->id}/scan")
+        ->assertNotFound();
+});
+
+it('404s the scan stream for an HR Admin of a different office', function (): void {
+    $otherOffice = Office::factory()->create(['code' => 'MNL']);
+    $otherHr = User::factory()->create();
+    $otherHr->assignRole('HR Admin');
+    $otherHr->hrAdminOffices()->attach($otherOffice->id);
+
+    $identification = EmployeeIdentification::factory()->create([
+        'employee_id' => $this->employee->id,
+        'category_id' => $this->tin->id,
+    ]);
+    $identification->addMedia(UploadedFile::fake()->createWithContent('tin.pdf', str_repeat('%PDF-1.4'.PHP_EOL, 20)))
+        ->toMediaCollection('scan');
+
+    $this->actingAs($otherHr->fresh())
+        ->get("/api/v1/employees/{$this->employee->id}/identifications/{$identification->id}/scan")
+        ->assertNotFound();
 });
 
 it('404s the scan stream for a manager, who never sees identifications at all', function (): void {
