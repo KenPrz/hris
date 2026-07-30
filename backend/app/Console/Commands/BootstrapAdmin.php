@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\User;
+use Database\Seeders\ProfileCatalogSeeder;
 use Database\Seeders\RbacSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
@@ -66,6 +67,11 @@ final class BootstrapAdmin extends Command
         // Idempotent (findOrCreate throughout), so running this on a database that already
         // has the catalog is a no-op rather than an error.
         $this->callSilent('db:seed', ['--class' => RbacSeeder::class, '--force' => true]);
+
+        // The profile catalog is production configuration too, exactly like the permission
+        // catalog above — an HR Admin cannot record a TIN against a category that does not
+        // exist, and no UI creates categories. Idempotent, so re-running is safe.
+        $this->callSilent('db:seed', ['--class' => ProfileCatalogSeeder::class, '--force' => true]);
 
         $password = Str::password(24);
 
