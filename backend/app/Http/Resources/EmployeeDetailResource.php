@@ -38,6 +38,8 @@ final class EmployeeDetailResource extends JsonResource
                 'office_id' => $current->office_id,
                 'department_id' => $current->department_id,
                 'employment_type' => $current->employment_type,
+                'designation' => $current->designation,
+                'labor_type' => $current->labor_type,
                 'is_art82_exempt' => $current->is_art82_exempt,
                 'base_rate_cents' => $current->base_rate_cents,
                 'reports_to_id' => $current->reports_to_id,

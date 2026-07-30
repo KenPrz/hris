@@ -46,6 +46,8 @@ final class RecordEmploymentChange
                 'employment_type' => $in->employmentType,
                 'is_art82_exempt' => $in->isArt82Exempt,
                 'base_rate_cents' => $in->baseRateCents,
+                'designation' => $in->designation,
+                'labor_type' => $in->laborType,
                 'created_by' => $in->actorId,
             ]);
 

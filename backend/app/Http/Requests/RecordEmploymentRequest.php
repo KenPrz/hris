@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Domain\Profile\LaborType;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 final class RecordEmploymentRequest extends FormRequest
@@ -34,6 +36,8 @@ final class RecordEmploymentRequest extends FormRequest
             'employment_type' => ['required', 'string'],
             'is_art82_exempt' => ['required', 'boolean'],
             'base_rate_cents' => ['required', 'integer', 'min:0'],
+            'designation' => ['nullable', 'string', 'max:255'],
+            'labor_type' => ['nullable', Rule::enum(LaborType::class)],
         ];
     }
 }

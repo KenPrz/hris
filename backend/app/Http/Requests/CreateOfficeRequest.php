@@ -30,6 +30,7 @@ final class CreateOfficeRequest extends FormRequest
             'name' => ['required', 'string'],
             'code' => ['required', 'string'],
             'timezone' => ['required', 'string', 'timezone'],
+            'region' => ['nullable', 'string', 'max:32'],
             'geofence_lat' => ['nullable', 'numeric'],
             'geofence_lng' => ['nullable', 'numeric'],
             'geofence_radius_m' => ['nullable', 'integer'],
