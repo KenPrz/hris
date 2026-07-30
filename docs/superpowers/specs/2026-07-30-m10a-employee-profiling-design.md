@@ -156,12 +156,30 @@ manager must get the redacted view. The policy therefore checks the HR office pi
 viewFull    = self  OR  is_system_admin
                     OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices)
 viewRedacted= EmployeeScope::visibleTo(user) contains employee     -- catches the manager
-update      = is_system_admin
-                    OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices)
+update      = NOT self                                             -- separation of duties, see below
+              AND ( is_system_admin
+                    OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices) )
 ```
 
 Note the consequence: an HR Admin of Cebu who *manages* someone in Manila gets the redacted
 view of that report, not the full one. Authority follows the office pivot, not the org chart.
+
+**`update` denies self explicitly, and that denial outranks the HR grant.** Stating the rule as
+"the full-read check minus the self branch" — as an earlier draft of this spec did — is not
+enough: dropping the self branch blocks only *ordinary* employees. An HR Admin whose own
+employee row sits in an office they administer would pass the pivot check and be able to
+rewrite their own TIN, SSS number, and bank account. That is a self-approval hole in
+payroll-adjacent data, and it is closed the same way the requests spine already stops a
+requester approving their own request: an explicit self-denial evaluated first.
+
+The operational consequence is deliberate — two HR Admins in an office maintain each other's
+files, and a lone HR Admin's own file is a System Admin's job. Reading your own file is still
+allowed; only editing it is not.
+
+Both self-comparisons test `employee.user_id === user.id` with an explicit non-null guard,
+never `user->employee?->id === employee->id`. The latter evaluates `null === null` to **true**
+for an actor with no employee row against an unsaved `Employee`, which fails *open* in
+`viewFull` — the one check standing between an arbitrary user and a personnel file.
 
 ### 8. `employee_dependents.employee_id` is nullable, deliberately
 
