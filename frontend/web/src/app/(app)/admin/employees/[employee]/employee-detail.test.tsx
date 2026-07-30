@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AdminEmployee, AdminEmployeeDetail, Department, Office, Session } from '@/lib/api'
+import type { AdminEmployee, AdminEmployeeDetail, Department, EmployeeProfile, Office, ProfileCatalog, Session } from '@/lib/api'
 import { Providers } from '@/components/Providers'
 
 vi.mock('next/navigation', () => ({
@@ -23,6 +23,12 @@ vi.mock('@/hooks/useAdminOrgTree', () => ({
   useOffices: vi.fn(),
   useDepartments: vi.fn(),
 }))
+// The Profile tab (Task 14): mocked the same way as every other data hook this page
+// calls, so mounting the page in these tests never fires a real fetch. A single
+// `beforeEach` below gives every test a stable, loaded-but-empty personnel file — none of
+// these tests exercise the Profile tab's own content, that's `ProfileForm.test.tsx`'s job.
+vi.mock('@/hooks/useEmployeeProfile', () => ({ useEmployeeProfile: vi.fn() }))
+vi.mock('@/hooks/useProfileCatalog', () => ({ useProfileCatalog: vi.fn() }))
 
 import {
   useAdminEmployee,
@@ -33,6 +39,8 @@ import {
   useUpdateEmployee,
 } from '@/hooks/useAdminEmployees'
 import { useDepartments, useOffices } from '@/hooks/useAdminOrgTree'
+import { useEmployeeProfile } from '@/hooks/useEmployeeProfile'
+import { useProfileCatalog } from '@/hooks/useProfileCatalog'
 import { useSession } from '@/hooks/useSession'
 
 import EmployeeDetailPage from './page'
@@ -46,6 +54,8 @@ const mockedUseProvisionUser = vi.mocked(useProvisionUser)
 const mockedUseSetHrOffices = vi.mocked(useSetHrOffices)
 const mockedUseOffices = vi.mocked(useOffices)
 const mockedUseDepartments = vi.mocked(useDepartments)
+const mockedUseEmployeeProfile = vi.mocked(useEmployeeProfile)
+const mockedUseProfileCatalog = vi.mocked(useProfileCatalog)
 
 beforeAll(() => {
   Element.prototype.hasPointerCapture = vi.fn()
@@ -55,6 +65,19 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+})
+
+beforeEach(() => {
+  mockedUseEmployeeProfile.mockReturnValue({
+    data: profile(),
+    isLoading: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useEmployeeProfile>)
+  mockedUseProfileCatalog.mockReturnValue({
+    data: catalog(),
+    isLoading: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useProfileCatalog>)
 })
 
 function session(overrides: Partial<Session> = {}): Session {
@@ -114,6 +137,34 @@ function detail(overrides: Partial<AdminEmployeeDetail> = {}): AdminEmployeeDeta
     },
     ...overrides,
   }
+}
+
+function profile(overrides: Partial<EmployeeProfile> = {}): EmployeeProfile {
+  return {
+    employee_id: 'e1',
+    employee_no: 'E-001',
+    full_name: 'Ada Lovelace',
+    details: {
+      salutation: null, first_name: 'Ada', middle_name: null,
+      last_name: 'Lovelace', name_suffix: null, nickname: null,
+    },
+    contact: { home_address: null, personal_email: null, phone: null, fax: null, mobile: null, emergency_contact: null },
+    personal: {
+      gender: null, birth_date: null, age: null, birthplace: null,
+      marital_status: null, citizenship: null, religion: null, blood_type: null,
+    },
+    assignment: {
+      designation: null, business_unit: null, reports_to: null, employment_status: null,
+      location: null, region: null, labor_type: null, hired_at: null, work_shift: null,
+    },
+    dependents: [],
+    identifications: [],
+    ...overrides,
+  }
+}
+
+function catalog(overrides: Partial<ProfileCatalog> = {}): ProfileCatalog {
+  return { relationships: [], identification_categories: [], ...overrides }
 }
 
 function stubSession(overrides: Partial<Session> = {}): void {

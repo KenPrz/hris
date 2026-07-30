@@ -36,6 +36,8 @@ import {
   useUpdateEmployee,
 } from '@/hooks/useAdminEmployees'
 import { useDepartments, useOffices } from '@/hooks/useAdminOrgTree'
+import { useEmployeeProfile } from '@/hooks/useEmployeeProfile'
+import { useProfileCatalog } from '@/hooks/useProfileCatalog'
 import { useSession } from '@/hooks/useSession'
 import { formatCentavos } from '@/lib/money'
 import { AppShell } from '@/components/AppShell'
@@ -47,6 +49,8 @@ import { Select } from '@/components/ui/Select'
 import type { SelectOption } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { TextInput } from '@/components/ui/TextInput'
+import { ProfileForm } from '@/components/domain/ProfileForm'
+import { ProfileSections } from '@/components/domain/ProfileSections'
 
 const EMPLOYMENT_TYPE_OPTIONS: SelectOption[] = [
   { value: 'regular', label: 'Regular' },
@@ -480,6 +484,8 @@ export default function EmployeeDetailPage() {
   const officesQuery = useOffices()
   const departmentsQuery = useDepartments()
   const employeesQuery = useAdminEmployees()
+  const profileQuery = useEmployeeProfile(id ?? '')
+  const catalogQuery = useProfileCatalog()
 
   const updateMutation = useUpdateEmployee()
   const recordEmploymentMutation = useRecordEmployment()
@@ -645,6 +651,26 @@ export default function EmployeeDetailPage() {
                   onSubmit={handleSetHrOffices}
                 />
               )}
+            </div>
+
+            <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
+              <SectionHeader title="Profile" level={2} />
+              {profileQuery.isLoading || catalogQuery.isLoading ? (
+                <Skeleton height="16rem" />
+              ) : profileQuery.isError || catalogQuery.isError ? (
+                <InlineNotification kind="error" title="Couldn't load this employee's personnel file.">
+                  Check your connection and try again.
+                </InlineNotification>
+              ) : profileQuery.data !== undefined && catalogQuery.data !== undefined ? (
+                <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
+                  <ProfileSections profile={profileQuery.data} />
+                  <ProfileForm
+                    profile={profileQuery.data}
+                    relationships={catalogQuery.data.relationships}
+                    categories={catalogQuery.data.identification_categories}
+                  />
+                </div>
+              ) : null}
             </div>
           </>
         )}

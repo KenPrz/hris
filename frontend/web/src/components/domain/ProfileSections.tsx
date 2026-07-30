@@ -25,8 +25,11 @@ export function DefinitionList({ items }: { items: Array<[string, string | numbe
         margin: 0,
       }}
     >
-      {items.map(([label, raw]) => (
-        <div key={label} style={{ display: 'contents' }}>
+      {items.map(([label, raw], index) => (
+        // Index alongside the label, not the label alone: two dependents sharing a
+        // relationship (e.g. two children) — or two identifications with no resolved
+        // category name — produce duplicate labels, and `key={label}` on its own collides.
+        <div key={`${index}-${label}`} style={{ display: 'contents' }}>
           <dt style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
             {label}
           </dt>
