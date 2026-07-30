@@ -103,6 +103,29 @@ it('404s for an HR Admin of another office', function (): void {
         ->assertNotFound();
 });
 
+it('replaces the whole profile — an omitted field becomes null, not its old value', function (): void {
+    // This test catches a partial-merge regression that the create-path test cannot.
+    // Write the full payload so the row exists and is populated.
+    $this->actingAs($this->hr)
+        ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile", $this->payload)
+        ->assertOk();
+
+    // Now PUT with only nickname, omitting several fields that were previously populated.
+    // All omitted fields must become null; they must not retain their old values.
+    $this->actingAs($this->hr)
+        ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile", ['nickname' => 'KEN'])
+        ->assertOk()
+        ->assertJsonPath('data.details.nickname', 'KEN')
+        ->assertJsonPath('data.contact.home_address', null)
+        ->assertJsonPath('data.contact.mobile', null)
+        ->assertJsonPath('data.personal.birth_date', null)
+        ->assertJsonPath('data.personal.marital_status', null)
+        ->assertJsonPath('data.personal.blood_type', null);
+
+    // The row still exists (not deleted); it was replaced.
+    expect(EmployeeProfile::query()->count())->toBe(1);
+});
+
 it('writes an activity log entry under the employee_profile log name', function (): void {
     $this->actingAs($this->hr)
         ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile", $this->payload)
