@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -81,6 +82,12 @@ final class Employee extends Model
     public function employmentRecords(): HasMany
     {
         return $this->hasMany(EmploymentRecord::class);
+    }
+
+    /** The 1:1 personnel file (M10a). @return HasOne<EmployeeProfile, $this> */
+    public function profile(): HasOne
+    {
+        return $this->hasOne(EmployeeProfile::class);
     }
 
     /** Composes first/middle/last/suffix, collapsing extra whitespace from a null middle/suffix. */
