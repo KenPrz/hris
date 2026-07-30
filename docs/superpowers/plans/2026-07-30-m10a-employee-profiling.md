@@ -21,6 +21,7 @@ Copied from the spec and `CLAUDE.md`. Every task's requirements implicitly inclu
 - `App\Domain` may not use `config`, `env`, `app`, `resolve`, or facades. Eloquent is allowed.
 - **One system action = one route = one controller = one Action class.**
 - Success responses are `{"data": ...}`; errors are `{"error": ...}`. Never both.
+- **A failed FormRequest validation is HTTP `400`, not Laravel's default `422`.** `bootstrap/app.php` maps `ValidationException` to `400` with `error.code = 'validation_failed'`, because `docs/03-api.md` reserves `422` for requests that are structurally fine but *semantically* rejected. Every existing test asserts `400` for form validation — match them.
 - Calendar dates on the wire are `YYYY-MM-DD` strings, never `Date` objects.
 - Money is integer centavos; worked time is integer minutes. Never a float.
 - Tests run against **real PostgreSQL**, never SQLite.
@@ -2747,13 +2748,13 @@ it('rejects a value outside a closed set', function (): void {
     $this->actingAs($this->hr)
         ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile",
             [...$this->payload, 'blood_type' => 'Z+'])
-        ->assertStatus(422)
+        ->assertStatus(400)
         ->assertJsonStructure(['error']);
 
     $this->actingAs($this->hr)
         ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile",
             [...$this->payload, 'gender' => 'Male'])   // capitalised: not the backed value
-        ->assertStatus(422);
+        ->assertStatus(400);
 });
 
 it('accepts a fully empty payload — every profile field is optional', function (): void {
@@ -3143,7 +3144,7 @@ it('rejects an unknown relationship id', function (): void {
                 ['name' => 'Ghost', 'relationship_id' => '0199a000-0000-7000-8000-000000000000'],
             ],
         ])
-        ->assertStatus(422)
+        ->assertStatus(400)
         ->assertJsonStructure(['error']);
 });
 
@@ -3450,7 +3451,7 @@ it('rejects a scan that is not a pdf or image', function (): void {
             'number' => '111111111111',
             'scan' => UploadedFile::fake()->create('payload.exe', 20, 'application/x-msdownload'),
         ])
-        ->assertStatus(422)
+        ->assertStatus(400)
         ->assertJsonStructure(['error']);
 });
 
