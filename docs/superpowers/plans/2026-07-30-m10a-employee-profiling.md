@@ -26,8 +26,8 @@ Copied from the spec and `CLAUDE.md`. Every task's requirements implicitly inclu
 - Tests run against **real PostgreSQL**, never SQLite.
 - Frontend tokens: every color/spacing/radius reads a `var(--*)` from `carbon.css`. A raw hex or literal pixel value in a component is a bug.
 - Commit messages carry **no attribution trailers** — no `Co-Authored-By`, no `Generated with`, no session URL. Message body only.
-- Every new PHP model uses `HasUuids` with `newUniqueId(): string { return (string) Str::uuid7(); }` and `uniqueIds(): array { return ['id']; }`, matching `app/Models/Employee.php`.
-- Migration primary keys are `$table->uuid('id')->primary()->default(DB::raw('uuidv7()'));`.
+- Every new PHP model **that has a surrogate `id`** uses `HasUuids` with `newUniqueId(): string { return (string) Str::uuid7(); }` and `uniqueIds(): array { return ['id']; }`, matching `app/Models/Employee.php`. **Exception:** `EmployeeProfile` (Task 1) has no surrogate id — its primary key IS `employee_id`, supplied by the caller — so it uses neither `HasUuids` nor those two methods. That is correct, not an oversight.
+- Migration primary keys are `$table->uuid('id')->primary()->default(DB::raw('uuidv7()'));`, with the same `employee_profiles` exception: `$table->foreignUuid('employee_id')->primary()->constrained()->cascadeOnDelete();`.
 
 ## Commands
 
@@ -42,9 +42,22 @@ cd backend && ./vendor/bin/pest --filter=SomeTest
 # Migrations
 docker compose -f compose.dev.yml exec --user hris api php artisan migrate
 
-# Frontend
-cd frontend/web && npm test && npm run typecheck && npm run build
+# Frontend — ALWAYS use this form. A bare `npm test` runs 84 files at full
+# parallelism and times out ~16 of them at 5s on a loaded machine; those failures
+# are worker contention, not breakage (verified 2026-07-30 against a clean tree).
+docker compose -f compose.dev.yml exec -T --user node web \
+  sh -c 'npx vitest run --maxWorkers=4 --testTimeout=20000'
+
+# Single frontend file
+docker compose -f compose.dev.yml exec -T --user node web \
+  sh -c 'npx vitest run --testTimeout=20000 <path>'
+
+# Typecheck / lint / build
+docker compose -f compose.dev.yml exec -T --user node web \
+  sh -c 'npm run typecheck && npm run lint && npm run build'
 ```
+
+**Baseline at branch point (`m10a-employee-profiling`, commit `49dbcc1`): 776 backend tests and 541 frontend tests, all passing.** Any failure beyond those is yours.
 
 ## File Structure
 
