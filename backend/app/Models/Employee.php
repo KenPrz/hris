@@ -96,6 +96,12 @@ final class Employee extends Model
         return $this->hasMany(EmployeeDependent::class);
     }
 
+    /** @return HasMany<EmployeeIdentification, $this> */
+    public function identifications(): HasMany
+    {
+        return $this->hasMany(EmployeeIdentification::class);
+    }
+
     /** Composes first/middle/last/suffix, collapsing extra whitespace from a null middle/suffix. */
     protected function fullName(): Attribute
     {
