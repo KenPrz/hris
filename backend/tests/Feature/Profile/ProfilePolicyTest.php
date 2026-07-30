@@ -34,6 +34,7 @@ it('lets an employee read their own profile in full but not edit it', function (
     $this->subject->update(['user_id' => $self->id]);
 
     expect($self->fresh()->can('viewFullProfile', $this->subject->fresh()))->toBeTrue()
+        ->and($self->fresh()->can('viewRedactedProfile', $this->subject->fresh()))->toBeTrue()
         ->and($self->fresh()->can('updateProfile', $this->subject->fresh()))->toBeFalse();
 });
 
@@ -41,6 +42,7 @@ it('lets an in-scope HR Admin read in full and edit', function (): void {
     $hr = hrAdminFor($this->cebu);
 
     expect($hr->can('viewFullProfile', $this->subject))->toBeTrue()
+        ->and($hr->can('viewRedactedProfile', $this->subject))->toBeTrue()
         ->and($hr->can('updateProfile', $this->subject))->toBeTrue();
 });
 
@@ -112,4 +114,45 @@ it('denies an actor holding the office pivot but not the permission', function (
 
     expect($user->fresh()->can('viewFullProfile', $this->subject))->toBeFalse()
         ->and($user->fresh()->can('updateProfile', $this->subject))->toBeFalse();
+});
+
+// The role alone grants nothing without at least one office pivot row — the verb and the
+// scope are both required, and an HR Admin freshly assigned the role but not yet scoped to
+// any office is scoped to nothing.
+it('denies an HR Admin holding the role but no office pivot rows at all', function (): void {
+    $hr = User::factory()->create();
+    $hr->assignRole('HR Admin');
+    $hr = $hr->fresh();
+
+    expect($hr->can('viewFullProfile', $this->subject))->toBeFalse()
+        ->and($hr->can('viewRedactedProfile', $this->subject))->toBeFalse()
+        ->and($hr->can('updateProfile', $this->subject))->toBeFalse();
+});
+
+// Fix round 1, finding 2 — the spec owner's ruling: separation of duties applies to HR
+// Admins too. Administering your own office is not license to edit your own PII; reading
+// it in full is still fine, and editing a colleague in the same office is still fine.
+it('blocks an HR Admin from editing their own PII even in their own administered office, but not from reading it in full or editing a colleague there', function (): void {
+    $hrUser = hrAdminFor($this->cebu);
+    $hrEmployee = Employee::factory()->create([
+        'user_id' => $hrUser->id,
+        'current_office_id' => $this->cebu->id,
+    ]);
+
+    $hrUser = $hrUser->fresh();
+
+    expect($hrUser->can('updateProfile', $hrEmployee->fresh()))->toBeFalse()
+        ->and($hrUser->can('viewFullProfile', $hrEmployee->fresh()))->toBeTrue()
+        ->and($hrUser->can('updateProfile', $this->subject))->toBeTrue();
+});
+
+// Fix round 1, finding 1 regression — the old self-check was `$user->employee?->id ===
+// $employee->id`, which is `null === null` for an actor with no employee row against an
+// unsaved Employee (HasUuids assigns the id on `creating`, so `new Employee` has a null id).
+// That failed open. The fix compares on `employees.user_id`, which is null on an unsaved row
+// and therefore can never match, so this must stay false.
+it('denies viewFullProfile to an actor with no employee row, against an unsaved Employee', function (): void {
+    $stranger = User::factory()->create();
+
+    expect($stranger->can('viewFullProfile', new Employee()))->toBeFalse();
 });

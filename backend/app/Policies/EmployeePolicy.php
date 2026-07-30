@@ -37,7 +37,7 @@ final class EmployeePolicy
      */
     public function viewFullProfile(User $user, Employee $employee): bool
     {
-        if ($user->employee?->id === $employee->id) {
+        if ($employee->user_id !== null && $employee->user_id === $user->id) {
             return true;
         }
 
@@ -54,11 +54,17 @@ final class EmployeePolicy
     }
 
     /**
-     * HR Admins configure; employees do not edit their own personal data (spec, decision 7).
-     * Same check as viewFullProfile MINUS the self branch — that omission is the whole rule.
+     * HR Admins configure; nobody edits their own PII, HR Admin included — separation of
+     * duties on payroll-adjacent data, the same logic that stops a requester approving their
+     * own request. This is an explicit self-denial that outranks the HR-office grant: a lone
+     * HR Admin's own file is a System Admin's job.
      */
     public function updateProfile(User $user, Employee $employee): bool
     {
+        if ($employee->user_id !== null && $employee->user_id === $user->id) {
+            return false;
+        }
+
         return $this->administersOfficeOf($user, $employee);
     }
 
