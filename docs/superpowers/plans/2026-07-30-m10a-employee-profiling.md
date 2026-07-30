@@ -3350,7 +3350,7 @@ Three routes. The save is a **`POST`, not a `PUT`**, despite being an upsert: PH
 - Consumes: `EmployeePolicy::updateProfile` / `viewFullProfile` (Task 6), `App\Models\EmployeeIdentification` with its `scan` collection (Task 3).
 - Produces: `SaveEmployeeIdentification::execute(SaveEmployeeIdentificationInput $in): EmployeeIdentification` — Input carries `employeeId`, `categoryId`, `number`, `?issuedOn`, `?expiresOn`, `?notes`, `?UploadedFile $scan`. `DeleteEmployeeIdentification::execute(DeleteEmployeeIdentificationInput $in): void` — Input carries `identificationId`.
 
-> **Note on the action-purity arch rule:** actions may not use `Illuminate\Http`. `UploadedFile` lives in `Illuminate\Http\UploadedFile`, so **run `cd backend && ./vendor/bin/pest tests/Arch` immediately after Step 3** and, if the rule rejects it, type the property as `Symfony\Component\HttpFoundation\File\UploadedFile` (Laravel's class extends it) or `?string $scanPath`. Check how `App\Actions\Attendance\SubmitAdjustment` already handles its `attachment` parameter and copy that exact approach — it solved this problem in M3.6.
+> **Note on the action-purity arch rule — resolved, no workaround needed.** The rule (`tests/Arch/ConventionsTest.php`, "actions never touch HTTP") bars exactly five classes: `Illuminate\Http\Request`, `Response`, `JsonResponse`, `Resources\Json\JsonResource`, and `Foundation\Http\FormRequest`. **`Illuminate\Http\UploadedFile` is not among them**, and two existing Input DTOs already type it that way — `App\Actions\Attendance\SubmitAttendanceAdjustmentInput:20` and `App\Actions\Leave\SubmitLeaveRequestInput:19`. Use `Illuminate\Http\UploadedFile` and match the house pattern. Do **not** reach for `Symfony\Component\HttpFoundation\File\UploadedFile`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3555,12 +3555,13 @@ declare(strict_types=1);
 
 namespace App\Actions\Profile;
 
-use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Illuminate\Http\UploadedFile;
 
 /**
- * `$scan` is typed against the SYMFONY UploadedFile, not Illuminate's, because the arch
- * rule bars App\Actions from using Illuminate\Http. Laravel's UploadedFile extends this
- * one, so a controller passes its own instance straight through.
+ * `$scan` is `Illuminate\Http\UploadedFile`, matching SubmitAttendanceAdjustmentInput and
+ * SubmitLeaveRequestInput. The "actions never touch HTTP" arch rule names Request, Response,
+ * JsonResponse, JsonResource, and FormRequest — not UploadedFile — so this is the house
+ * pattern, not an exception to it.
  */
 final readonly class SaveEmployeeIdentificationInput
 {
