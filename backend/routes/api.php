@@ -28,6 +28,7 @@ use App\Http\Controllers\Admin\PayRules\CreateController as CreatePayRuleControl
 use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleController;
 use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
 use App\Http\Controllers\Admin\PayRules\ShowController as ShowPayRuleController;
+use App\Http\Controllers\Admin\Profile\ShowController as ShowProfileAdminController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\Cutoff\ListCutoffsController;
 use App\Http\Controllers\Cutoff\ReopenCutoffController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
+use App\Http\Controllers\Employees\ShowProfileController;
 use App\Http\Controllers\Leave\GrantController as GrantLeaveController;
 use App\Http\Controllers\Leave\ListEmployeeLeaveController;
 use App\Http\Controllers\Leave\ListMyLeaveController;
@@ -70,6 +72,8 @@ use App\Http\Controllers\Office\Schedules\UpdateOverrideController;
 use App\Http\Controllers\Office\Schedules\UpdateTemplateController;
 use App\Http\Controllers\Office\SetLeaveDayController;
 use App\Http\Controllers\Overtime\SubmitOvertimeRequestController;
+use App\Http\Controllers\Profile\ShowCatalogController;
+use App\Http\Controllers\Profile\ShowMyProfileController;
 use App\Http\Controllers\Requests\ApproveController;
 use App\Http\Controllers\Requests\CancelController;
 use App\Http\Controllers\Requests\DownloadAttachmentController;
@@ -101,9 +105,18 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/employees/{employee}/attendance', ListEmployeeAttendanceController::class);
         Route::get('/employees/{employee}/leave', ListEmployeeLeaveController::class);
 
+        // The manager-facing redacted personnel file (M10a). Same prefix as the full read
+        // under /admin below, deliberately different policy: contact and assignment only.
+        Route::get('/employees/{employee}/profile', ShowProfileController::class);
+
         Route::get('/me/attendance', ListMyAttendanceController::class);
         Route::get('/me/attendance/summary', ListMySummaryController::class);
         Route::get('/me/leave', ListMyLeaveController::class);
+        Route::get('/me/profile', ShowMyProfileController::class);
+
+        // Static reference data for the profile dropdowns — not scoped, not admin-gated.
+        Route::get('/profile/catalog', ShowCatalogController::class);
+
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // Any employee may file for their own attendance — deliberately not admin-gated
@@ -173,6 +186,13 @@ Route::prefix('v1')->group(function (): void {
             // Same is_system_admin gating as the rest of this group; office_ids=[]
             // revokes HR-Admin entirely rather than leaving a dangling role/pivot.
             Route::post('/employees/{employee}/hr-offices', SetHrAdminOfficesController::class);
+
+            // The personnel file (M10a). Unlike every other route in this group, these are
+            // NOT is_system_admin-gated: the requirement is that HR ADMINS configure
+            // profiles, so authorization runs through EmployeePolicy's viewFullProfile /
+            // updateProfile, which pair the `employee.pii.edit` permission with the
+            // hr_admin_offices pivot. Gate::before still grants a system admin everything.
+            Route::get('/employees/{employee}/profile', ShowProfileAdminController::class);
 
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
