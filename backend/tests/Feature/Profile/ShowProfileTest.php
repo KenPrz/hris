@@ -72,9 +72,22 @@ it('returns an empty-but-valid profile when no profile row exists yet', function
     $user = User::factory()->create();
     Employee::factory()->create(['user_id' => $user->id, 'current_office_id' => $this->office->id]);
 
+    // assertJsonPath('data.details.nickname', null) alone would also pass if `details`
+    // were missing entirely — Arr::get() returns null for an absent path just as readily
+    // as for a present-but-null one. assertJsonStructure below proves the keys actually
+    // exist before the assertJsonPath calls claim they're null-but-present.
     $this->actingAs($user)
         ->getJson('/api/v1/me/profile')
         ->assertOk()
+        ->assertJsonStructure(['data' => [
+            'employee_id', 'employee_no', 'full_name',
+            'details' => ['salutation', 'first_name', 'middle_name', 'last_name', 'name_suffix', 'nickname'],
+            'contact' => ['home_address', 'personal_email', 'phone', 'fax', 'mobile', 'emergency_contact'],
+            'personal' => ['gender', 'birth_date', 'age', 'birthplace', 'marital_status', 'citizenship', 'religion', 'blood_type'],
+            'assignment' => ['designation', 'business_unit', 'reports_to', 'employment_status', 'location', 'region', 'labor_type', 'hired_at', 'work_shift'],
+            'dependents',
+            'identifications',
+        ]])
         ->assertJsonPath('data.details.nickname', null)
         ->assertJsonPath('data.personal.age', null)
         ->assertJsonPath('data.dependents', [])
@@ -124,6 +137,16 @@ it('gives a manager contact and assignment but no address, personal block, or ID
         ->and($body)->not->toHaveKey('dependents')
         ->and($body)->not->toHaveKey('identifications')
         ->and($body['contact'])->not->toHaveKey('home_address');
+
+    // Exact key sets, not just the handful of forbidden names above. A mutation that adds
+    // an unexpected key anywhere in the payload (e.g. a field copy-pasted from the full
+    // resource's `personal` block straight onto the top level) would pass every
+    // not->toHaveKey() check above yet still leak — this is what actually pins the
+    // "separate class, not a filtered one" invariant, which is otherwise only a docblock
+    // claim. Without this, a refactor that merges the two resources behind a boolean flag
+    // would pass this whole test as long as it remembered the four names above.
+    expect(array_keys($body))->toBe(['employee_id', 'employee_no', 'full_name', 'contact', 'assignment'])
+        ->and(array_keys($body['contact']))->toBe(['personal_email', 'phone', 'mobile']);
 
     // Belt and braces: the raw payload must not contain the TIN anywhere at all.
     expect($response->getContent())->not->toContain('653536955000')
