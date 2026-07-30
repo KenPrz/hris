@@ -21,7 +21,13 @@ final class ReplaceEmployeeDependents
     public function execute(ReplaceEmployeeDependentsInput $in): Collection
     {
         return DB::transaction(function () use ($in): Collection {
-            EmployeeDependent::query()->where('employee_id', $in->employeeId)->delete();
+            // Deliberately row-by-row, not a query-builder bulk delete. A query-builder
+            // `delete()` fires no model events, so LogsActivity never records the removal.
+            // The max:20 validation bound on dependents makes N individual deletes acceptable.
+            EmployeeDependent::query()
+                ->where('employee_id', $in->employeeId)
+                ->get()
+                ->each(fn (EmployeeDependent $dependent): bool => $dependent->delete());
 
             return collect($in->dependents)->map(fn (array $row): EmployeeDependent => EmployeeDependent::query()->create([
                 'employee_id' => $in->employeeId,

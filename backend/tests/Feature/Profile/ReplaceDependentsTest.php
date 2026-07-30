@@ -9,6 +9,7 @@ use App\Models\Relationship;
 use App\Models\User;
 use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Activitylog\Models\Activity;
 
 uses(RefreshDatabase::class);
 
@@ -109,4 +110,36 @@ it('404s for an HR Admin of another office', function (): void {
     $this->actingAs($hr->fresh())
         ->putJson("/api/v1/admin/employees/{$this->employee->id}/dependents", ['dependents' => []])
         ->assertNotFound();
+});
+
+it('logs each deletion to the activity log for audit trail', function (): void {
+    EmployeeDependent::factory()->count(2)->create([
+        'employee_id' => $this->employee->id,
+        'relationship_id' => $this->child->id,
+    ]);
+
+    $this->actingAs($this->hr)
+        ->putJson("/api/v1/admin/employees/{$this->employee->id}/dependents", ['dependents' => []])
+        ->assertOk();
+
+    $deletions = Activity::query()
+        ->where('log_name', 'employee_profile')
+        ->where('subject_type', EmployeeDependent::class)
+        ->where('event', 'deleted')
+        ->get();
+
+    expect($deletions->count())->toBe(2)
+        ->and($deletions->every(fn (Activity $a): bool => $a->causer_id === $this->hr->id))->toBeTrue();
+});
+
+it('rejects more than 20 dependents', function (): void {
+    $dependents = collect(range(1, 21))->map(fn (int $i): array => [
+        'name' => "Dependent $i",
+        'relationship_id' => $this->child->id,
+    ])->toArray();
+
+    $this->actingAs($this->hr)
+        ->putJson("/api/v1/admin/employees/{$this->employee->id}/dependents", ['dependents' => $dependents])
+        ->assertStatus(400)
+        ->assertJsonStructure(['error']);
 });
