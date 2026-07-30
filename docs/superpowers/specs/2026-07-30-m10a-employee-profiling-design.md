@@ -135,7 +135,35 @@ rules, no redaction, and a much longer retention than anyone reasoned about when
 it. The log records that the identification was created, updated, or deleted, by whom, and
 when. The value lives in exactly one table, reachable through exactly one policy.
 
-### 7. `employee_dependents.employee_id` is nullable, deliberately
+### 7. Authorization is `employee.pii.edit` + office scope, not `is_system_admin`
+
+Every existing route under `/admin/employees/*` gates on `is_system_admin` inside its
+FormRequest's `authorize()`. M10a's writes deliberately do **not**, because the requirement is
+that *HR Admins* configure profiles, and an HR Admin is not a system admin.
+
+`RbacSeeder` already ships an **unused** `employee.pii.edit` permission on the `HR Admin`
+role. It was catalogued in M2 and no endpoint has ever read it. That is precisely this
+milestone's verb, so M10a activates it rather than inventing a new one or overloading
+`employee.manage` (which means "onboard/transfer/rename", a different act from "edit personal
+data").
+
+The full-read check needs one thing office scope alone cannot give it. `EmployeeScope`
+composes self + direct reports + HR offices additively, so a **manager is inside the scope of
+their own report** — an `inScope` test cannot tell a manager apart from an HR Admin, and the
+manager must get the redacted view. The policy therefore checks the HR office pivot directly:
+
+```
+viewFull    = self  OR  is_system_admin
+                    OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices)
+viewRedacted= EmployeeScope::visibleTo(user) contains employee     -- catches the manager
+update      = is_system_admin
+                    OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices)
+```
+
+Note the consequence: an HR Admin of Cebu who *manages* someone in Manila gets the redacted
+view of that report, not the full one. Authority follows the office pivot, not the org chart.
+
+### 8. `employee_dependents.employee_id` is nullable, deliberately
 
 An orphan dependent row is unreachable by every query in the system, and this was raised as a
 concern. The user chose to keep it nullable. The column carries a `ponytail:` comment saying
@@ -217,18 +245,19 @@ shape and limits `Request`'s `attachment` collection already uses.
 
 ## API
 
-Eight routes, four actions. One action = one route = one controller
-(`04-backend-conventions.md`); the scan stream is a controller-only read with no action, the
-same as `DownloadAttachmentController`.
+Nine routes, four actions. One action = one route = one controller
+(`04-backend-conventions.md`); the scan stream and the catalog read are controller-only reads
+with no action, the same as `DownloadAttachmentController`.
 
 | Route | Actor | Action |
 | --- | --- | --- |
 | `GET /me/profile` | self | — (read) |
+| `GET /profile/catalog` | any authenticated user | — (read) |
 | `GET /admin/employees/{employee}/profile` | HR Admin, scoped | — (read) |
 | `GET /employees/{employee}/profile` | manager of `{employee}` | — (read, redacted) |
 | `PUT /admin/employees/{employee}/profile` | HR Admin, scoped | `UpsertEmployeeProfile` |
 | `PUT /admin/employees/{employee}/dependents` | HR Admin, scoped | `ReplaceEmployeeDependents` |
-| `PUT /admin/employees/{employee}/identifications` | HR Admin, scoped | `SaveEmployeeIdentification` |
+| `POST /admin/employees/{employee}/identifications` | HR Admin, scoped | `SaveEmployeeIdentification` |
 | `DELETE /admin/employees/{employee}/identifications/{identification}` | HR Admin, scoped | `DeleteEmployeeIdentification` |
 | `GET /employees/{employee}/identifications/{identification}/scan` | self or HR Admin | — (stream) |
 
@@ -237,10 +266,21 @@ that employee. It is a zero-to-five row list nothing else references, so three r
 (`POST`/`PATCH`/`DELETE`) and the client-side id bookkeeping they require buy nothing over one.
 
 **Identifications are per-row**, because each owns a media file. A replace-all would orphan
-scans in RustFS. `PUT` upserts on `(employee_id, category_id)` and accepts `multipart/form-data`
-so the number and its scan arrive together.
+scans in RustFS. The route upserts on `(employee_id, category_id)` and accepts
+`multipart/form-data` so the number and its scan arrive together.
 
-**Writes are HR Admin only**, per the requirement. An employee cannot edit their own profile —
+It is a `POST`, not a `PUT`, despite being an upsert: **PHP parses a multipart body only on
+`POST`**. A `PUT multipart/form-data` arrives with an empty `$_FILES` and the scan silently
+vanishes — Laravel's `_method` spoofing exists precisely because of this. Profile and
+dependents stay `PUT` because they carry JSON and no file.
+
+**`GET /profile/catalog`** returns the `relationships` and `employee_identification_categories`
+rows. The dependents and identifications writes take a `relationship_id` and a `category_id`,
+and without this route nothing tells a client what those ids are — the write endpoints are
+unusable from a browser. It is neither office-scoped nor admin-gated: static, company-wide
+reference data with nothing sensitive in it, needed by every screen that renders a profile.
+
+**Writes are HR Admin only** (decision 7), per the requirement. An employee cannot edit their own profile —
 including their own address. This is a deliberate consequence of "only HR admin can configure
 the employee details" and should be re-examined if self-service contact updates are ever asked
 for.
