@@ -43,6 +43,9 @@ use App\Http\Controllers\Cutoff\CloseCutoffController;
 use App\Http\Controllers\Cutoff\ExportCutoffController;
 use App\Http\Controllers\Cutoff\ListCutoffsController;
 use App\Http\Controllers\Cutoff\ReopenCutoffController;
+use App\Http\Controllers\Admin\Profile\DeleteIdentificationController;
+use App\Http\Controllers\Admin\Profile\SaveIdentificationController;
+use App\Http\Controllers\Employees\DownloadScanController;
 use App\Http\Controllers\Employees\ListEmployeesController;
 use App\Http\Controllers\Employees\ShowEmployeeController;
 use App\Http\Controllers\Employees\ShowProfileController;
@@ -110,6 +113,12 @@ Route::prefix('v1')->group(function (): void {
         // The manager-facing redacted personnel file (M10a). Same prefix as the full read
         // under /admin below, deliberately different policy: contact and assignment only.
         Route::get('/employees/{employee}/profile', ShowProfileController::class);
+
+        // The scanned government ID, streamed app-mediated — never a public/object URL.
+        // Gated on viewFullProfile (self or the administering HR Admin), not
+        // viewRedactedProfile: a manager's redacted resource never hands them an
+        // identification id, so a manager reaching this route is a guess or an attack.
+        Route::get('/employees/{employee}/identifications/{identification}/scan', DownloadScanController::class);
 
         Route::get('/me/attendance', ListMyAttendanceController::class);
         Route::get('/me/attendance/summary', ListMySummaryController::class);
@@ -197,6 +206,12 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/employees/{employee}/profile', ShowProfileAdminController::class);
             Route::put('/employees/{employee}/profile', UpsertProfileController::class);
             Route::put('/employees/{employee}/dependents', ReplaceDependentsController::class);
+
+            // POST, not PUT, despite being an upsert: PHP parses a multipart body only on
+            // POST. A PUT multipart/form-data arrives with an empty $_FILES and the scan
+            // vanishes silently. See the M10a spec.
+            Route::post('/employees/{employee}/identifications', SaveIdentificationController::class);
+            Route::delete('/employees/{employee}/identifications/{identification}', DeleteIdentificationController::class);
 
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
