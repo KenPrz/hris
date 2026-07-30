@@ -76,6 +76,13 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(me?.items).toContainEqual({ href: '/me/leave', label: 'Leave' })
   })
 
+  it('every user\'s Me group includes /me/profile (M10a) — every employee can read their own personnel file', () => {
+    const groups = navEntriesFor(buildSession())
+    const me = groups.find((g) => g.key === 'me')
+
+    expect(me?.items).toContainEqual({ href: '/me/profile', label: 'Profile' })
+  })
+
   it('has_reports adds Team', () => {
     const groups = navEntriesFor(buildSession({ has_reports: true }))
 
@@ -152,6 +159,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/me/attendance', label: 'Attendance' },
       { href: '/me/requests', label: 'My requests' },
       { href: '/me/leave', label: 'Leave' },
+      { href: '/me/profile', label: 'Profile' },
     ])
     expect(byKey.team?.items).toEqual([{ href: '/team/approvals', label: 'Approvals' }])
     expect(byKey.office?.items).toEqual([
