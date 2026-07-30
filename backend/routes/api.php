@@ -29,6 +29,7 @@ use App\Http\Controllers\Admin\PayRules\DeleteController as DeletePayRuleControl
 use App\Http\Controllers\Admin\PayRules\ListController as ListPayRulesController;
 use App\Http\Controllers\Admin\PayRules\ShowController as ShowPayRuleController;
 use App\Http\Controllers\Admin\Profile\ShowController as ShowProfileAdminController;
+use App\Http\Controllers\Admin\Profile\UpsertProfileController;
 use App\Http\Controllers\Attendance\Adjustments\SubmitController as SubmitAdjustmentController;
 use App\Http\Controllers\Attendance\ListEmployeeAttendanceController;
 use App\Http\Controllers\Attendance\ListMyAttendanceController;
@@ -193,6 +194,7 @@ Route::prefix('v1')->group(function (): void {
             // updateProfile, which pair the `employee.pii.edit` permission with the
             // hr_admin_offices pivot. Gate::before still grants a system admin everything.
             Route::get('/employees/{employee}/profile', ShowProfileAdminController::class);
+            Route::put('/employees/{employee}/profile', UpsertProfileController::class);
 
             // Manual entry is deliberately not behind `idempotent` — HR entering a
             // correction is a considered one-off, not a retryable network event.
