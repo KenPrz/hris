@@ -7,7 +7,6 @@ namespace App\Http\Resources;
 use App\Models\Employee;
 use App\Models\EmploymentRecord;
 use App\Models\ScheduleAssignment;
-use Illuminate\Support\Carbon;
 
 /**
  * The nine "Assignment" fields, rendered identically for the full and redacted resources —
@@ -49,7 +48,8 @@ final class EmployeeAssignmentPresenter
      */
     private static function workShift(Employee $employee): ?string
     {
-        $today = Carbon::today()->toDateString();
+        // Office-local today, not the server's UTC today — see EmployeeLocalToday.
+        $today = EmployeeLocalToday::for($employee)->toDateString();
 
         $assignment = ScheduleAssignment::query()
             ->where('employee_id', $employee->id)

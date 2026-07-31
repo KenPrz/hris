@@ -8,7 +8,6 @@ use App\Domain\Employment\EmploymentResolver;
 use App\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Carbon;
 
 /**
  * What a MANAGER sees of a direct report: how to reach them and where they sit.
@@ -25,7 +24,7 @@ final class EmployeeProfileSummaryResource extends JsonResource
     public function toArray(Request $request): array
     {
         $profile = $this->profile;
-        $current = EmploymentResolver::on($this->resource, Carbon::today());
+        $current = EmploymentResolver::on($this->resource, EmployeeLocalToday::for($this->resource));
 
         return [
             'employee_id' => $this->id,
