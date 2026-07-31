@@ -73,6 +73,7 @@ function office(overrides: Partial<Office> = {}): Office {
     name: 'Manila HQ',
     code: 'MNL',
     timezone: 'Asia/Manila',
+    region: null,
     geofence_lat: null,
     geofence_lng: null,
     geofence_radius_m: null,
@@ -136,6 +137,26 @@ describe('/admin/offices — list', () => {
     expect(screen.getByText('Manila HQ')).toBeInTheDocument()
     expect(screen.getByText(/MNL/)).toBeInTheDocument()
     expect(screen.getByText(/Asia\/Manila/)).toBeInTheDocument()
+  })
+
+  it('renders an office’s region, and an em dash when it has none', () => {
+    stubSession()
+    stubOrganizations()
+    stubOffices({
+      data: [
+        office({ id: 'off-cebu', name: 'Cebu Branch', region: 'VII' }),
+        office({ id: 'off-none', name: 'Manila HQ', region: null }),
+      ],
+    })
+    stubMutation(mockedUseCreateOffice)
+    stubMutation(mockedUseUpdateOffice)
+    stubMutation(mockedUseArchiveOffice)
+    stubMutation(mockedUseUnarchiveOffice)
+
+    renderPage()
+
+    expect(screen.getByText('Region: VII')).toBeInTheDocument()
+    expect(screen.getByText('Region: —')).toBeInTheDocument()
   })
 
   it('hides archived offices until the show-archived toggle is on, badging them when shown', () => {
@@ -226,9 +247,55 @@ describe('/admin/offices — create', () => {
       name: 'Davao Branch',
       code: 'DVO',
       timezone: 'Asia/Manila',
+      region: null,
       geofence_lat: null,
       ip_allowlist: null,
       default_shift_template_id: null,
     })
+  })
+
+  it('a Region typed into the create form is sent on the office body', () => {
+    stubSession()
+    stubOrganizations([organization({ id: 'org-1', name: 'Acme Corp' })])
+    stubOffices({ data: [] })
+    const create = stubMutation(mockedUseCreateOffice)
+    stubMutation(mockedUseUpdateOffice)
+    stubMutation(mockedUseArchiveOffice)
+    stubMutation(mockedUseUnarchiveOffice)
+
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New office' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Davao Branch' } })
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'DVO' } })
+    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'XI' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const [body] = create.mock.calls[0]
+    expect(body).toMatchObject({ region: 'XI' })
+  })
+})
+
+describe('/admin/offices — edit', () => {
+  it('editing an office WITHOUT touching Region still sends its current region, not null', () => {
+    stubSession()
+    stubOrganizations([organization({ id: 'org-1', name: 'Acme Corp' })])
+    stubOffices({ data: [office({ id: 'off-cebu', name: 'Cebu Branch', region: 'VII' })] })
+    stubMutation(mockedUseCreateOffice)
+    const update = stubMutation(mockedUseUpdateOffice)
+    stubMutation(mockedUseArchiveOffice)
+    stubMutation(mockedUseUnarchiveOffice)
+
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    // Untouched — only the name changes, exactly like the reported regression: an
+    // unrelated field edit must not silently NULL out region on the next PATCH.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Cebu HQ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(update).toHaveBeenCalledTimes(1)
+    const [{ body }] = update.mock.calls[0]
+    expect(body).toMatchObject({ name: 'Cebu HQ', region: 'VII' })
   })
 })

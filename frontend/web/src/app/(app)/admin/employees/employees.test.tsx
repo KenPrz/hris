@@ -53,6 +53,7 @@ function office(overrides: Partial<Office> = {}): Office {
     name: 'Manila HQ',
     code: 'MNL',
     timezone: 'Asia/Manila',
+    region: null,
     geofence_lat: null,
     geofence_lng: null,
     geofence_radius_m: null,

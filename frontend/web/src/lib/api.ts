@@ -567,6 +567,11 @@ export type Office = {
   name: string
   code: string
   timezone: string
+  // 'VII' — DOLE region, free text, always optional (CreateOfficeRequest/
+  // UpdateOfficeRequest validate it 'nullable', unlike timezone). Read by
+  // ProfileAssignment's "Region" row (M10a); an office has exactly one, so it lives here,
+  // never on the employee (see the M10a spec, decision 3).
+  region: string | null
   geofence_lat: number | null
   geofence_lng: number | null
   geofence_radius_m: number | null
@@ -582,6 +587,7 @@ export type OfficeCreateInput = {
   name: string
   code: string
   timezone: string
+  region?: string | null
   geofence_lat?: number | null
   geofence_lng?: number | null
   geofence_radius_m?: number | null
