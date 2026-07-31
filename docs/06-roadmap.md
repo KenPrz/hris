@@ -2068,7 +2068,7 @@ The final whole-branch review triaged 29 recorded items: none blocked the merge,
 were accepted as recorded, and twelve were judged worth doing, listed below in the original
 value order. All twelve were cleared on the `m10a-followups` branch, plus a thirteenth —
 `CompanySeeder` shipping ten employees with entirely empty personnel files — found and fixed
-alongside them though it was never on this table. Thirteen commits, `git log --oneline
+alongside them though it was never on this table. Fourteen commits, `git log --oneline
 main..m10a-followups`; **865 backend tests (20 of them Arch) + 577 frontend tests**, up from
 854/574, all green.
 
@@ -2118,3 +2118,28 @@ Next: no milestone is open. **M10b — document management** is the nearest uncl
 | **Tenure-based leave accrual** | A leave policy with year-based tiers (12 days at year 1, 15 at year 5). M5's ledger supports it; only the accrual job changes. |
 | **Recursive manager scope** | An org chart deep enough that direct reports aren't sufficient. Costs a materialized path on `employees` plus cycle detection, and makes the scope check the most expensive query in the system — which is why it isn't in v1. |
 | **Multi-tenancy** | Selling this to a second company. **Expensive to change**, exactly as POS flagged. Revisit early or not at all. |
+
+### Still open after the follow-up branch
+
+Four things the final review surfaced that were deliberately left, so the next reader does
+not rediscover them:
+
+- **The self-view notice is imprecise for one viewer class.** `/employees/{id}/profile` hides
+  the edit form when `session.employee.id` matches the route param, and tells you your own
+  details are changed by someone else. That is true for an HR Admin — but `Gate::before`
+  grants a **System Admin** everything, so `updateProfile`'s self-denial never runs for them
+  and the backend *would* have allowed the edit. Unreachable today (`hris:bootstrap-admin`
+  creates a System Admin with no employee row, and `is_system_admin` is in `User::$guarded`),
+  so it is a latent mismatch rather than a live bug. It becomes real the first time someone
+  grants `is_system_admin` to a user who is also an employee.
+- **The arch authorization guard covers `Http/Controllers/Profile/` but not
+  `Http/Controllers/Admin/Profile/`** — the two *read* controllers, not the five that
+  actually mutate a personnel file. Those authorize inside their FormRequests, which none of
+  the guard's grep patterns would match anyway, so extending it means teaching the rule about
+  FormRequest-based gating rather than just widening a path. A future ungated
+  `Admin/Profile/*` controller gets no CI backstop.
+- **The arch exemption matches on filename, not relative path.** A future
+  `Http/Controllers/Profile/Something/ShowCatalogController.php` would be silently exempt.
+- **`make restore-drill` still does not verify the attachments tar restores.** M9's recorded
+  gap, unchanged — and identification scans now ride in that same tar, so it covers more
+  than it did.

@@ -1875,6 +1875,17 @@ old object is already unrecoverable — the ordering makes each half of the writ
 independently instead of coupling a RustFS side effect to a Postgres commit that a Postgres
 rollback cannot see.
 
+The trade is deliberate but not free, and the residual is worth knowing. If `addMedia()` now
+fails *after* the commit — RustFS unreachable, or a file that satisfies
+`SaveIdentificationRequest`'s rules but not medialibrary's own mime check — the row is
+durable with the **new** `number` while the **old** scan is still attached: a record reading
+`TIN 222…` over a scanned card reading `TIN 111…`, surfaced as a generic 500 that looks to
+the user like nothing saved. That is strictly the better half of the trade (the alternative
+lost the scan outright, permanently), and retrying is safe because the write is an upsert on
+`(employee_id, category_id)`. But it means **a 500 from this endpoint does not mean "nothing
+happened"** — the number may have changed. Anyone adding a reconciliation or import path
+here should verify the scan matches the number rather than assuming the pair is atomic.
+
 **`number` is deliberately excluded from `EmployeeIdentification`'s `logOnly()`, and the
 profile's contact fields from `EmployeeProfile`'s.** All three new models carry spatie's
 `LogsActivity` under `log_name 'employee_profile'`, matching the trait `employees` and the

@@ -192,7 +192,9 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-267 backend tests + 17 arch tests, and 165 frontend tests today.
+865 backend tests (20 of them Arch) + 577 frontend tests today. The **Status** section
+below carries the same figures — if these two ever disagree, one of them was not updated
+with a milestone and both should be re-measured rather than guessed.
 
 The test database is created once:
 
