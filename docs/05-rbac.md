@@ -90,6 +90,18 @@ because the org chart or `hr_admin_offices` says they may, not because they hold
 `leave.approve`. It stays cataloged for the same future role-management reason
 `leave.manage`/`holiday.manage`/`schedule.manage` do.
 
+**`employee.pii.edit` is the third of these seven to leave "catalogued but unread," landing
+in M10a — and unlike `leave.manage`/`leave.approve` above, this one became a real gate a
+controller actually checks, not just a name a future UI will display.** `RbacSeeder`
+has carried it on the `HR Admin` role since M2; no endpoint read it until
+`App\Policies\EmployeePolicy::viewFullProfile`/`updateProfile` (below) started calling
+`$user->can('employee.pii.edit')`, paired with the `hr_admin_offices` pivot — the same
+two-axis shape (verb via spatie, scope via a pivot) this whole document argues for.
+`employee.manage` remains in the state it was in through M2: referenced only in
+`EmployeePolicy::update()`, which nothing calls. M10a activates `employee.pii.edit` rather
+than overloading `employee.manage`, because "edit personal data" (an address, a TIN) and
+"onboard/transfer/rename" are different acts that happen to share a subject.
+
 ### Request approval authority — `RequestAuthority` and the two-hop leave routing *(M3.6, generalized M6a, widened M6b-b, overtime M6c)*
 
 A third scope, purpose-built to a **request's current decision hop** rather than "who sees
@@ -449,6 +461,87 @@ every subject type company-wide, nothing office-scoped to check, so a non-admin 
 not `404`. `scripts/e2e-admin-roles-audit.sh` proves the grant/revoke coupling, the
 login-less `422`, the viewer surfacing both the `hr_admin_offices_set` event and the
 `log_name=office` trail, and the non-admin `403`, against the live stack.
+
+## Employee profiling — three abilities on `EmployeePolicy` *(M10a)*
+
+The personnel file (`02-data-model.md`, `03-api.md`) needed a third shape of authorization
+that neither `EmployeeScope` alone nor a plain permission check could express: `who sees
+what`, not just `who sees whom`. `App\Policies\EmployeePolicy` grows three abilities beyond
+`view`/`update`:
+
+- **`viewFullProfile`** — the whole personnel file, including national IDs and dependents.
+  Self, or an HR Admin who administers *this employee's specific office*.
+- **`viewRedactedProfile`** — contact and assignment only. Anyone `EmployeeScope` already
+  admits — which is what lets a manager in.
+- **`updateProfile`** — HR Admin only, and **never the subject themselves**, HR Admin
+  included.
+
+**`viewFullProfile`/`updateProfile` deliberately do NOT use `EmployeeScope`.** `EmployeeScope`
+composes self + direct reports + HR offices *additively* (above), so a manager is always
+inside their own direct report's scope — which is exactly the case that must **not** unlock
+the full file. The HR branch instead reads the `hr_admin_offices` pivot directly against
+`employee.current_office_id`, not `EmployeeScope::visibleTo()`:
+
+```
+viewFullProfile     = self  OR  is_system_admin
+                            OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices)
+viewRedactedProfile = EmployeeScope::visibleTo(user) contains employee    -- admits the manager
+updateProfile       = NOT self
+                            AND ( is_system_admin
+                                  OR (can('employee.pii.edit') AND employee.current_office_id ∈ user's hr_admin_offices) )
+```
+
+**Authority follows the office pivot, not the org chart — a consequence worth stating
+plainly, because it is easy to assume the opposite.** An HR Admin who administers Cebu and
+who *also* happens to manage a direct report stationed in Manila (the org chart, not the
+pivot, put that Manila employee under a Cebu-based manager) gets the **redacted** view of
+that report, not the full one. `viewFullProfile` never asks "do you manage this person,"
+only "do you administer the office they currently sit in" — `viewRedactedProfile`, by
+contrast, *is* `EmployeeScope` membership, which is what admits the manager relationship at
+all. Two different questions, two different checks, and a reviewer who conflates them will
+predict the wrong response for exactly this case.
+
+**`updateProfile` denies self for EVERYONE, including an HR Admin editing their own
+record — separation of duties on payroll-adjacent data, the same logic that already stops a
+requester approving their own request.** The self-branch is checked **first** and outranks
+the HR-office grant: an HR Admin whose own `employees` row happens to sit in an office they
+themselves administer would otherwise pass the pivot check and be free to rewrite their own
+TIN, SSS number, and bank account. Stating the rule as "the full-read check minus the self
+branch" is not enough — an earlier draft of the spec said exactly that, and dropping only the
+self branch blocks an *ordinary* employee from self-editing but not an HR Admin doing the
+same to their own record, which is the actual hole a review caught during implementation.
+The operational consequence is deliberate: two HR Admins in the same office maintain each
+other's files, and a *lone* HR Admin's own file is a System Admin's job. **Reading your own
+file is still allowed** (`viewFullProfile`'s self branch) — only editing it is not.
+
+**Both self-comparisons test `employee.user_id === user.id`, with an explicit non-null
+guard — never `user->employee?->id === employee->id`.** The latter form evaluates
+`null === null` to **true** whenever the acting user has no `employees` row of their own
+(an HR Admin or System Admin account with no personal employee record) tested against an
+employee reference that also somehow resolves null — a fail-**open** result in
+`viewFullProfile`, the one check standing between an arbitrary authenticated user and
+someone else's TIN. `$employee->user_id !== null && $employee->user_id === $user->id`
+structurally cannot produce that false positive.
+
+**The scan-stream route (`GET /employees/{employee}/identifications/{identification}/scan`,
+`03-api.md`) gates on `viewFullProfile`, deliberately not `viewRedactedProfile`.** A
+manager's redacted resource never hands back an identification id in the first place, so a
+manager reaching this route at all is a guessed id or an attack, not a legitimate
+click-through — and the same 404-not-403 discipline applies: an unauthorized viewer and a
+nonexistent identification are byte-identical `404`s. `DeleteIdentificationRequest` layers a
+second, narrower check beside the policy call: the identification in the URL must actually
+belong to the employee in the URL, or an HR Admin authorized over one employee could delete
+an unrelated identification by pairing mismatched ids — checked in addition to
+`updateProfile`, not instead of it.
+
+**Testing.** `tests/Feature/Profile/ProfileScopeMatrixTest.php` runs six actors — self, the
+subject's manager, an in-scope HR Admin, an out-of-scope HR Admin, an unrelated stranger,
+and a System Admin — against all eight authenticated M10a routes (`GET /profile/catalog` is
+excluded on purpose: it is ungated reference data, and a row of eight `true`s would be
+noise), asserting `2xx`-or-`404` against a hand-written expectation table for all 48 cells —
+the same "assert the shape, not just that some test exists" discipline the four-actor
+`EmployeeScope` matrix below already established. `tests/Feature/Profile/ProfilePolicyTest.php`
+exercises `EmployeePolicy` directly, including the fail-open null-guard case above.
 
 ## Testing
 

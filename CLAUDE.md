@@ -283,6 +283,15 @@ Found while building M0. Each one cost real time.
   not a shortcut. The CSS `font` shorthand `carbon.css` uses for its `--t-*` type tokens
   cannot express `letter-spacing`, so DESIGN.md's tracking rides alongside as separate
   `--ls-*` companion tokens — set both together or the shorthand silently drops tracking.
+- **PHP parses a multipart body only on `POST`.** A `PUT multipart/form-data` arrives with an
+  empty `$_FILES` and the uploaded file vanishes with no error — which is why Laravel ships
+  `_method` spoofing. M10a's identification save is a `POST` despite being an upsert for exactly
+  this reason; the profile and dependents writes stay `PUT` because they carry JSON and no file.
+- **`tsgo` does not excess-property-check an object literal returned from `.map()`** unless the
+  callback carries an explicit return-type annotation. `rows.map((row): DependentWrite => ({…}))`
+  type-checks its keys; `rows.map((row) => ({…}))` assigned to `DependentWrite[]` does not. A
+  misspelled wire field (`birthDate` for `birth_date`) then passes both the typechecker and the
+  tests, and Laravel coerces the missing key to `null` — silent data loss, not a 400.
 
 ## Where things are
 
@@ -296,28 +305,34 @@ Found while building M0. Each one cost real time.
 
 ## Status
 
-**M0 through M9 complete — the roadmap is done.** The skeleton boots; the DOLE premium
-matrix is a table-driven unit test; schema/auth/office-scoped RBAC are proven by a
+**M0 through M9 complete, plus M10a — employee profiling.** The skeleton boots; the DOLE
+premium matrix is a table-driven unit test; schema/auth/office-scoped RBAC are proven by a
 four-actor scope matrix; timekeeping ingestion turns a punch into an append-only
 `attendance_logs` row; an employee corrects their own attendance through a request a
 manager or HR approves; holidays, shift templates, and `pay_rules` are admin-editable per
 office; the compute engine turns punches and config into a defensible daily summary;
 leave and overtime run through the approval spine; cutoffs lock a period and export
 payroll; the admin portal configures a company from empty and shows the audit trail
-behind every step; and M9 puts all of it behind a single TLS edge with a backup whose
-restore has actually been drilled. **776 backend tests (19 of them Arch) + 541 frontend
+behind every step; M9 puts all of it behind a single TLS edge with a backup whose
+restore has actually been drilled; and M10a gives every employee a personnel file —
+contact and personal details, dependents, and government/financial IDs with a scanned copy
+of each — that an HR Admin configures per office, an employee reads for themselves, and a
+manager sees a redacted view of. **853 backend tests (19 of them Arch) + 560 frontend
 tests.** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
 what a user can actually do today.
 
 One caveat worth knowing before you trust the UI: the frontend is covered by component
 tests and live API walkthroughs, but **there is still no browser-level e2e harness** —
 every `scripts/e2e-*.sh` drives the API (and, for M9, the booted production stack), not a
-rendered page. M3.5's screens were never visually confirmed in a real browser, and nothing
-since has closed that gap. Load it yourself before assuming it looks right; see the M3.5
-status block in `docs/06-roadmap.md`.
+rendered page. M3.5's screens were never visually confirmed in a real browser, and M10a's
+`/me/profile` and the admin Profile section carry the identical gap — nothing since M3.5
+has closed it. Load it yourself before assuming it looks right; see the M3.5 and M10a
+status blocks in `docs/06-roadmap.md`.
 
-Next: no milestone is open. `docs/06-roadmap.md`'s **Deferred** table lists what is
-waiting and, for each item, the trigger that revives it — gross-to-net payroll, biometric
-device ingestion, a mobile app with GPS geofence, rotating rosters, tenure-based accrual,
-recursive manager scope, and multi-tenancy. The nearest unclaimed work that is *not* on
-that table is a frontend e2e harness.
+Next: no milestone is open. **M10b — document management** (a `Document`/`DocumentBucket`/
+`DocumentCategory` module and a polymorphic file table) was deliberately split out of
+M10a's brainstorm rather than built alongside it, and is the nearest open follow-on —
+`docs/06-roadmap.md`'s M10a section has the detail. Beyond that, `docs/06-roadmap.md`'s
+**Deferred** table lists what is waiting and, for each item, the trigger that revives it —
+gross-to-net payroll, biometric device ingestion, a mobile app with GPS geofence, rotating
+rosters, tenure-based accrual, recursive manager scope, and multi-tenancy.

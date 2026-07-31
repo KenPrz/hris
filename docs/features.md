@@ -617,3 +617,44 @@ the admin portal.
 **M8 is complete.** A company can be configured from an empty database entirely through the
 app — its org tree, its people, and the admins who run each office — and the audit log shows
 every step of it. Next is production hardening and containerization (M9).
+
+## Your personnel file *(M10a)*
+
+Through M9 an employee record was identity plus employment history plus a name — it
+couldn't answer the questions an HR department actually opens a personnel file for: a
+mobile number, an emergency contact, a TIN, an age. M10a adds that file — for everyone to
+read their own, for HR to configure, and for a manager to see just enough of a direct
+report's to reach them.
+
+- **See your own personnel file.** `/me/profile` shows five sections: your details
+  (salutation, name, nickname), contact (address, personal email, phone, mobile, emergency
+  contact), personal details (gender, birth date and current age, birthplace, marital
+  status, citizenship, religion, blood type), your assignment (designation, department,
+  manager, employment status, office, region, labor type, hire date, and current work
+  shift), and every dependent and government/financial ID HR has recorded for you, each ID
+  showing whether a scanned copy is on file. It's read-only from here — you look, you don't
+  edit.
+- **HR Admins fill it in, for the offices they administer.** A Profile section on an
+  employee's admin page lets HR set every field above, add or remove dependents (the whole
+  list is replaced each save — a dependent list is short and doesn't need its own separate
+  add/edit/remove buttons), and record a government or financial ID — a TIN, an SSS number,
+  a PhilHealth number, a bank account, a passport, and more — each with an issue date, an
+  expiry, notes, and an optional scanned copy of the document itself, previewable right on
+  the page. Saving a second ID of the same kind (say, a corrected TIN) updates the existing
+  one rather than adding a duplicate.
+- **Nobody edits their own file, HR Admins included.** Even an HR Admin who administers
+  their own office cannot change their own contact details, dependents, or IDs — that's a
+  System Admin's job, or another HR Admin's. Two HR Admins in the same office cover for each
+  other; a lone HR Admin's own file waits for someone else. You can still always *read* your
+  own file at `/me/profile` — only editing your own is off-limits.
+- **A manager sees how to reach a direct report, and where they sit — nothing more.**
+  Opening a report's profile from a manager's own screens shows their contact email/phone
+  and their assignment (designation, department, office, manager, work shift) — never their
+  home address, birth date, marital status, dependents, or any government ID. This holds
+  even when the manager and the report work in different offices, and even if the manager
+  happens to also be an HR Admin somewhere else entirely: what unlocks the *full* file is
+  administering the report's specific office, not managing them.
+- **A scanned ID is a private, streamed document, never a public link.** Only the employee
+  themselves and the HR Admin who administers their office can ever open a scan — a manager,
+  even one who can see the rest of a redacted profile, never gets a link to a report's IDs
+  at all.
