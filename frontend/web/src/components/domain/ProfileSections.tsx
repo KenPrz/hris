@@ -29,7 +29,7 @@ export function DefinitionList({ items }: { items: Array<[string, string | numbe
     <dl
       className="grid"
       style={{
-        gridTemplateColumns: 'minmax(8rem, 14rem) 1fr',
+        gridTemplateColumns: 'var(--dl-label-col) 1fr',
         gap: 'var(--sp-xs) var(--sp-md)',
         margin: 0,
       }}

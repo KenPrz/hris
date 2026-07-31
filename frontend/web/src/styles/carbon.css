@@ -32,6 +32,13 @@
   --radius-xs: 2px;
   --radius-sm: 4px;
 
+  /*
+   * layout — like --field-border above, not in DESIGN.md's front-matter (its schema covers
+   * colors/typography/rounded/spacing/components, not grid-track sizing), but carbon.css is
+   * still the one place it may enter code rather than living as a literal in a component.
+   */
+  --dl-label-col: minmax(8rem, 14rem); /* DefinitionList's label column (ProfileSections) */
+
   /* spacing */
   --sp-xxs: 4px;  --sp-xs: 8px;   --sp-sm: 12px;  --sp-md: 16px;
   --sp-lg: 24px;  --sp-xl: 32px;  --sp-xxl: 48px; --sp-section: 96px;
