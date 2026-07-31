@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Models\EmployeeIdentificationCategory;
+use App\Models\Relationship;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -62,6 +64,24 @@ it('refuses to mint a second System Admin', function (): void {
     expect($exit)->not->toBe(0)
         ->and(Artisan::output())->toContain('already exists')
         ->and(User::query()->where('email', 'second@example.test')->exists())->toBeFalse();
+});
+
+it('still seeds the RBAC and profile catalogs against a database that already has a System Admin', function (): void {
+    // Every M9 production install already has a System Admin by the time M10a deploys, so
+    // the catalogs must be reachable even though this run is refused for minting a second
+    // superuser. Without the seed calls hoisted above the guard, employee_identification_
+    // categories and relationships would stay empty forever on an upgraded install.
+    User::factory()->create(['is_system_admin' => true]);
+
+    $exit = Artisan::call('hris:bootstrap-admin', ['email' => 'second@example.test']);
+
+    expect($exit)->not->toBe(0);
+
+    expect(Role::query()->where('name', 'HR Admin')->exists())->toBeTrue()
+        ->and(Permission::query()->where('name', 'holiday.manage')->exists())->toBeTrue();
+
+    expect(EmployeeIdentificationCategory::query()->count())->toBe(8)
+        ->and(Relationship::query()->count())->toBe(5);
 });
 
 it('refuses an email already taken by a non-admin user', function (): void {

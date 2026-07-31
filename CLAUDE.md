@@ -135,6 +135,18 @@ That seeds the RBAC catalog and creates one `is_system_admin` user, printing a g
 password **once**. It refuses to run a second time — recovering a lost admin password is a
 deliberate, separate act, not something a bootstrap command does quietly.
 
+**The RBAC and profile catalogs seed unconditionally, even on that second run.** The guard
+only stops a second superuser from being minted; both `db:seed` calls run first, every
+time, so an M10a deploy onto an already-bootstrapped production database still gains
+`employee_identification_categories` and `relationships` (idempotent — a no-op if already
+seeded). If you deployed M10a onto a production database bootstrapped *before* this fix
+landed, run the profile catalog seeder manually once:
+
+```bash
+docker compose -f compose.prod.yml exec --user hris api \
+  php artisan db:seed --class=Database\\Seeders\\ProfileCatalogSeeder --force
+```
+
 | Target | Does |
 | --- | --- |
 | `make prod-up` / `make prod-down` | Boot / stop the production stack (volumes survive) |
