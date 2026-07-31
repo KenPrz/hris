@@ -17,7 +17,7 @@
 import { EmptyState } from '@/components/EmptyState'
 import { SectionHeader } from '@/components/SectionHeader'
 import type { EmployeeProfile, EmployeeProfileSummary } from '@/lib/api'
-import { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, labelForOption, MARITAL_STATUS_OPTIONS } from '@/lib/profileOptions'
+import { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, LABOR_TYPE_OPTIONS, labelForOption, MARITAL_STATUS_OPTIONS } from '@/lib/profileOptions'
 
 /** Null renders as an em dash, never as blank space — "we have no value" must be visible. */
 function value(raw: string | number | null | undefined): string {
@@ -59,10 +59,14 @@ function assignmentItems(assignment: EmployeeProfile['assignment']): Array<[stri
     ['Designation', assignment.designation],
     ['Business Unit', assignment.business_unit],
     ['Reporting To', assignment.reports_to],
+    // `employment_status` (EmploymentRecord.employment_type) is rendered raw, deliberately
+    // — RecordEmploymentRequest validates it as a free string, not a Rule::enum() backed
+    // set, so there is no closed set on the backend for a frontend label list to claim
+    // authority over. `labor_type` IS one (see LABOR_TYPE_OPTIONS' own doc comment).
     ['Employment Status', assignment.employment_status],
     ['Location', assignment.location],
     ['Region', assignment.region],
-    ['Labor Type', assignment.labor_type],
+    ['Labor Type', labelForOption(LABOR_TYPE_OPTIONS, assignment.labor_type)],
     ['Date Hired', assignment.hired_at],
     ['Work Shift', assignment.work_shift],
   ]

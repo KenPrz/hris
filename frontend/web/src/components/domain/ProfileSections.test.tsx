@@ -152,6 +152,28 @@ describe('ProfileSections — display labels for backed values (Task 16)', () =>
     expect(screen.getByText('O+')).toBeInTheDocument()
   })
 
+  // M10a final-fixes round: labor_type is a Rule::enum()-backed value on the wire
+  // ('direct'/'indirect') just like gender/marital_status/blood_type, and used to render
+  // raw. employment_status looks like the same shape but is validated backend-side as a
+  // free string (RecordEmploymentRequest), not a backed enum — there is no closed set to
+  // label it against, so it stays raw deliberately.
+  it('renders labor type as a human label, but leaves employment status raw (no backend-enforced closed set)', () => {
+    const profile = buildProfile({
+      assignment: {
+        designation: 'Backend Software Developer', business_unit: 'MIS',
+        reports_to: null, employment_status: 'regular', location: 'Cebu',
+        region: 'VII', labor_type: 'indirect', hired_at: '2025-06-16', work_shift: null,
+      },
+    })
+
+    render(<ProfileSections profile={profile} />)
+
+    expect(screen.getByText('Indirect')).toBeInTheDocument()
+    expect(screen.queryByText('indirect')).not.toBeInTheDocument()
+    // employment_status stays exactly what the wire sent.
+    expect(screen.getByText('regular')).toBeInTheDocument()
+  })
+
   // A value with no matching option (stale data from a removed catalog entry, or simply
   // absent) must still render something rather than going blank.
   it('falls back to the raw value when a dependent has no relationship_label', () => {

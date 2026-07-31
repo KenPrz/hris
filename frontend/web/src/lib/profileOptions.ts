@@ -1,7 +1,14 @@
 /**
- * The three closed sets `Rule::enum()` validates on the backend — verified against
- * app/Domain/Profile/{Gender,MaritalStatus,BloodType}.php. Case names cannot contain '+'/
- * '-', so BloodType's backed values carry the real notation directly.
+ * The closed sets `Rule::enum()` validates on the backend — verified against
+ * app/Domain/Profile/{Gender,MaritalStatus,BloodType,LaborType}.php. Case names cannot
+ * contain '+'/'-', so BloodType's backed values carry the real notation directly.
+ *
+ * `LABOR_TYPE_OPTIONS` labels `EmploymentRecord.labor_type` (`RecordEmploymentRequest`
+ * validates it with the same `Rule::enum(LaborType::class)` treatment). `employment_type`
+ * (rendered as "Employment Status" on the profile) is deliberately NOT here even though it
+ * looks like the same shape — `RecordEmploymentRequest` validates it as a free string, not
+ * a backed enum, so there is no closed set on the backend for a frontend label list to
+ * claim authority over; `ProfileSections` renders it raw.
  *
  * Shared by `ProfileForm` (the `Select` options offered when editing) and `ProfileSections`
  * (the read view's label for an already-stored backed value) — ONE place a backed value's
@@ -35,6 +42,11 @@ export const BLOOD_TYPE_OPTIONS: SelectOption[] = [
   { value: 'AB-', label: 'AB-' },
   { value: 'O+', label: 'O+' },
   { value: 'O-', label: 'O-' },
+]
+
+export const LABOR_TYPE_OPTIONS: SelectOption[] = [
+  { value: 'direct', label: 'Direct' },
+  { value: 'indirect', label: 'Indirect' },
 ]
 
 /**
