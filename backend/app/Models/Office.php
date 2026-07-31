@@ -87,7 +87,7 @@ final class Office extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['organization_id', 'name', 'code', 'timezone', 'geofence_lat', 'geofence_lng', 'geofence_radius_m', 'ip_allowlist', 'default_shift_template_id', 'archived_at'])
+            ->logOnly(['organization_id', 'name', 'code', 'timezone', 'region', 'geofence_lat', 'geofence_lng', 'geofence_radius_m', 'ip_allowlist', 'default_shift_template_id', 'archived_at'])
             ->useLogName('office')
             ->logOnlyDirty();
     }

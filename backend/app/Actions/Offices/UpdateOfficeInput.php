@@ -12,6 +12,7 @@ final readonly class UpdateOfficeInput
         public string $name,
         public string $code,
         public string $timezone,
+        public ?string $region,
         public ?float $geofenceLat,
         public ?float $geofenceLng,
         public ?int $geofenceRadiusM,

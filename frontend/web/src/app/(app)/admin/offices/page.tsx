@@ -12,8 +12,11 @@
  * client-side — so an archived row that's already in the cache disappears the instant the
  * toggle flips, without waiting on a refetch. Archived rows are badged with `<Tag>`.
  *
- * `geofence_*`, `ip_allowlist`, and `default_shift_template_id` are all optional; a blank
- * field is sent as `null` (or an empty allowlist as `null`), never `''` or `NaN`.
+ * `region`, `geofence_*`, `ip_allowlist`, and `default_shift_template_id` are all
+ * optional; a blank field is sent as `null` (or an empty allowlist as `null`), never `''`
+ * or `NaN`. `region` (M10a) is always sent explicitly, even when blank — omitting the key
+ * entirely on a PATCH would NULL out whatever region was already stored, since
+ * `UpdateOfficeRequest` treats an absent key the same as an explicit null.
  */
 
 import { useState } from 'react'
@@ -106,6 +109,7 @@ function OfficeForm({ initial, organizationOptions, submitting, submitError, onC
   const [name, setName] = useState(initial.name)
   const [code, setCode] = useState(initial.code)
   const [timezone, setTimezone] = useState(initial.timezone)
+  const [region, setRegion] = useState(initial.region ?? '')
   const [geofenceLat, setGeofenceLat] = useState(initial.geofence_lat != null ? String(initial.geofence_lat) : '')
   const [geofenceLng, setGeofenceLng] = useState(initial.geofence_lng != null ? String(initial.geofence_lng) : '')
   const [geofenceRadius, setGeofenceRadius] = useState(
@@ -136,6 +140,7 @@ function OfficeForm({ initial, organizationOptions, submitting, submitError, onC
       name,
       code,
       timezone,
+      region: region.trim() === '' ? null : region.trim(),
       geofence_lat: lat.value,
       geofence_lng: lng.value,
       geofence_radius_m: radius.value,
@@ -156,6 +161,7 @@ function OfficeForm({ initial, organizationOptions, submitting, submitError, onC
       <TextInput id="office-name" label="Name" value={name} onChange={setName} required />
       <TextInput id="office-code" label="Code" value={code} onChange={setCode} required />
       <TextInput id="office-timezone" label="Timezone" value={timezone} onChange={setTimezone} required />
+      <TextInput id="office-region" label="Region" value={region} onChange={setRegion} />
       <TextInput
         id="office-geofence-lat"
         label="Geofence latitude"
@@ -254,6 +260,9 @@ function OfficeRow({ office, busy, onEdit, onArchive, onUnarchive }: OfficeRowPr
         <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
           Timezone: {office.timezone}
         </span>
+        <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
+          Region: {office.region ?? '—'}
+        </span>
       </div>
     </li>
   )
@@ -264,6 +273,7 @@ const DEFAULT_OFFICE_INPUT: OfficeCreateInput = {
   name: '',
   code: '',
   timezone: OFFICE_TIME_ZONE,
+  region: null,
   geofence_lat: null,
   geofence_lng: null,
   geofence_radius_m: null,
@@ -277,6 +287,7 @@ function toOfficeInput(office: Office): OfficeCreateInput {
     name: office.name,
     code: office.code,
     timezone: office.timezone,
+    region: office.region,
     geofence_lat: office.geofence_lat,
     geofence_lng: office.geofence_lng,
     geofence_radius_m: office.geofence_radius_m,

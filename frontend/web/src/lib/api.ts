@@ -567,6 +567,11 @@ export type Office = {
   name: string
   code: string
   timezone: string
+  // 'VII' — DOLE region, free text, always optional (CreateOfficeRequest/
+  // UpdateOfficeRequest validate it 'nullable', unlike timezone). Read by
+  // ProfileAssignment's "Region" row (M10a); an office has exactly one, so it lives here,
+  // never on the employee (see the M10a spec, decision 3).
+  region: string | null
   geofence_lat: number | null
   geofence_lng: number | null
   geofence_radius_m: number | null
@@ -582,6 +587,7 @@ export type OfficeCreateInput = {
   name: string
   code: string
   timezone: string
+  region?: string | null
   geofence_lat?: number | null
   geofence_lng?: number | null
   geofence_radius_m?: number | null
@@ -770,6 +776,128 @@ export type AdminEmployeeListParams = { office?: string }
 // POST /admin/employees/{id}/hr-offices — the full replacement set of offices this
 // employee's user is HR-Admin over. An empty array clears the role entirely.
 export type SetHrOfficesInput = { office_ids: string[] }
+
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/EmployeeProfileResource.php,
+// EmployeeProfileSummaryResource.php, EmployeeAssignmentPresenter.php, and the
+// Profile FormRequests (UpsertProfileRequest, ReplaceDependentsRequest,
+// SaveIdentificationRequest) + ShowCatalogController.php (M10a: the personnel file).
+// `EmployeeProfileSummaryResource` is a SEPARATE backend class from the full resource, not a
+// filtered view of it — mirrored here by `EmployeeProfileSummary` NOT being a
+// `Partial<EmployeeProfile>`: its missing sections are absent keys, never nulled-out ones.
+// ---------------------------------------------------------------------------
+
+export type ProfileDependent = {
+  id: string
+  name: string
+  relationship: string | null
+  /** Human-readable version of `relationship` — the relationship catalog's `description`,
+   * not its `code`. Added alongside `relationship`, never replacing it: `ProfileForm`
+   * matches on the CODE to pre-select the right catalog entry when editing a dependent
+   * (matching on the description silently rewrote every dependent to "Child" — see its own
+   * doc comment), while `ProfileSections`' read view wants this label instead. */
+  relationship_label: string | null
+  birth_date: string | null // YYYY-MM-DD
+}
+
+export type ProfileIdentification = {
+  id: string
+  category_code: string | null
+  category_name: string | null
+  number: string
+  issued_on: string | null // YYYY-MM-DD
+  expires_on: string | null // YYYY-MM-DD
+  notes: string | null
+  /** Whether the scan stream will return a file. Never a URL — the scan is app-mediated. */
+  has_scan: boolean
+}
+
+/** The nine assignment fields, rendered identically for the full and redacted resources. */
+export type ProfileAssignment = {
+  designation: string | null
+  business_unit: string | null
+  reports_to: string | null
+  employment_status: string | null
+  location: string | null
+  region: string | null
+  labor_type: string | null
+  hired_at: string | null // YYYY-MM-DD
+  work_shift: string | null
+}
+
+export type EmployeeProfile = {
+  employee_id: string
+  employee_no: string
+  full_name: string
+  details: {
+    salutation: string | null
+    first_name: string
+    middle_name: string | null
+    last_name: string
+    name_suffix: string | null
+    nickname: string | null
+  }
+  contact: {
+    home_address: string | null
+    personal_email: string | null
+    phone: string | null
+    fax: string | null
+    mobile: string | null
+    emergency_contact: string | null
+  }
+  personal: {
+    gender: string | null
+    birth_date: string | null // YYYY-MM-DD
+    age: number | null
+    birthplace: string | null
+    marital_status: string | null
+    citizenship: string | null
+    religion: string | null
+    blood_type: string | null
+  }
+  assignment: ProfileAssignment
+  dependents: ProfileDependent[]
+  identifications: ProfileIdentification[]
+}
+
+/** What a manager sees. Structurally NOT a Partial<EmployeeProfile> — the missing sections are absent keys, not nulls. */
+export type EmployeeProfileSummary = {
+  employee_id: string
+  employee_no: string
+  full_name: string
+  contact: { personal_email: string | null; phone: string | null; mobile: string | null }
+  assignment: ProfileAssignment
+}
+
+export type ProfileWriteBody = Partial<{
+  salutation: string | null
+  nickname: string | null
+  home_address: string | null
+  personal_email: string | null
+  phone: string | null
+  fax: string | null
+  mobile: string | null
+  emergency_contact: string | null
+  gender: string | null
+  birth_date: string | null
+  birthplace: string | null
+  marital_status: string | null
+  citizenship: string | null
+  religion: string | null
+  blood_type: string | null
+}>
+
+export type DependentWrite = {
+  name: string
+  relationship_id: string
+  birth_date?: string | null
+}
+
+/** Static reference data for the profile dropdowns (GET /profile/catalog). */
+export type ProfileCatalog = {
+  relationships: Array<{ id: string; code: string; description: string }>
+  identification_categories: Array<{ id: string; code: string; name: string; description: string | null }>
+}
 
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
@@ -1123,5 +1251,56 @@ export const api = {
         return request<ActivityPage>(`/admin/activity${qs !== '' ? `?${qs}` : ''}`)
       },
     },
+  },
+  // The personnel file (M10a). `mine`/`forEmployee`/`redacted` are three distinct GETs —
+  // self, HR-admin full read, and manager redacted read — because their backend policies
+  // (viewFullProfile vs viewRedactedProfile) and resources (EmployeeProfileResource vs
+  // EmployeeProfileSummaryResource) genuinely differ; collapsing them into one function
+  // with a mode flag would hide that at the call site.
+  profile: {
+    mine: () => request<EmployeeProfile>('/me/profile'),
+    forEmployee: (id: string) => request<EmployeeProfile>(`/admin/employees/${id}/profile`),
+    redacted: (id: string) => request<EmployeeProfileSummary>(`/employees/${id}/profile`),
+    catalog: () => request<ProfileCatalog>('/profile/catalog'),
+
+    save: (id: string, body: ProfileWriteBody) =>
+      request<EmployeeProfile>(`/admin/employees/${id}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+
+    saveDependents: (id: string, dependents: DependentWrite[]) =>
+      request<EmployeeProfile>(`/admin/employees/${id}/dependents`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dependents }),
+      }),
+
+    // Multipart, mirroring api.adjustments.submit: build FormData and DO NOT set
+    // Content-Type — the browser must set the multipart boundary itself. POST rather than
+    // PUT because PHP parses a multipart body only on POST.
+    saveIdentification: (
+      id: string,
+      fields: { category_id: string; number: string; issued_on?: string; expires_on?: string; notes?: string; scan?: File },
+    ) => {
+      const form = new FormData()
+      form.append('category_id', fields.category_id)
+      form.append('number', fields.number)
+      if (fields.issued_on !== undefined) form.append('issued_on', fields.issued_on)
+      if (fields.expires_on !== undefined) form.append('expires_on', fields.expires_on)
+      if (fields.notes !== undefined) form.append('notes', fields.notes)
+      if (fields.scan !== undefined) form.append('scan', fields.scan)
+
+      return request<EmployeeProfile>(`/admin/employees/${id}/identifications`, {
+        method: 'POST',
+        body: form,
+      })
+    },
+
+    deleteIdentification: (id: string, identificationId: string) =>
+      request<EmployeeProfile>(`/admin/employees/${id}/identifications/${identificationId}`, {
+        method: 'DELETE',
+      }),
   },
 }

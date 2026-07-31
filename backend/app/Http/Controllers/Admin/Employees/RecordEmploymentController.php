@@ -29,6 +29,8 @@ final class RecordEmploymentController
             isArt82Exempt: $request->boolean('is_art82_exempt'),
             baseRateCents: (int) $request->input('base_rate_cents'),
             actorId: $request->user()->id,
+            designation: $request->input('designation'),
+            laborType: $request->input('labor_type'),
         ));
 
         return EmploymentRecordResource::make($record)

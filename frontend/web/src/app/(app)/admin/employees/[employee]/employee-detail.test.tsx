@@ -76,6 +76,7 @@ function office(overrides: Partial<Office> = {}): Office {
     name: 'Manila HQ',
     code: 'MNL',
     timezone: 'Asia/Manila',
+    region: null,
     geofence_lat: null,
     geofence_lng: null,
     geofence_radius_m: null,
@@ -181,6 +182,35 @@ describe('/admin/employees/[employee] — detail', () => {
     expect(screen.getAllByText('Manila HQ').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Payroll').length).toBeGreaterThan(0)
     expect(screen.getByText('₱50,000.00')).toBeInTheDocument()
+  })
+
+  it('links to the employee’s personnel file at /employees/{id}/profile (M10a fix round 2)', () => {
+    stubSession()
+    stubDetail()
+    stubSupportingData()
+    stubMutation(mockedUseUpdateEmployee)
+    stubMutation(mockedUseRecordEmployment)
+    stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
+
+    renderPage()
+
+    expect(screen.getByRole('link', { name: 'Personnel file' })).toHaveAttribute('href', '/employees/e1/profile')
+  })
+
+  it('no longer renders a Profile section — that moved to /employees/{id}/profile', () => {
+    stubSession()
+    stubDetail()
+    stubSupportingData()
+    stubMutation(mockedUseUpdateEmployee)
+    stubMutation(mockedUseRecordEmployment)
+    stubMutation(mockedUseProvisionUser)
+    stubMutation(mockedUseSetHrOffices)
+
+    renderPage()
+
+    expect(screen.queryByRole('heading', { name: 'Profile' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dependents' })).not.toBeInTheDocument()
   })
 
   it('shows a loading skeleton while the detail query is pending', () => {

@@ -14,14 +14,22 @@
  *
  * `summarize` switches on `request.type` so a future leave/OT request type is a new case
  * here, not a new component.
+ *
+ * The requester `employee_id` links to `/employees/{id}/profile` (M10a fix round 2) — the
+ * one place both this card's audiences (a manager on `/team/approvals`, an HR Admin on
+ * `/office/approvals`) already see a per-employee identifier with an id attached, so it is
+ * the natural entry point into the personnel file rather than inventing a new one. The
+ * policy on that route decides what each viewer actually sees (full vs. redacted); this
+ * card does not need to know which.
  */
 
 import { useState } from 'react'
+import Link from 'next/link'
 
 import type { AttendanceAdjustmentDetail, LeaveRequestDetail, OvertimeRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
+import { authedBlobUrl } from '@/lib/authedBlobUrl'
 import { formatDateSpan, timeInZone } from '@/lib/date'
 import { formatDuration } from '@/lib/duration'
-import { getToken } from '@/lib/session'
 import { OFFICE_TIME_ZONE } from '@/lib/timezone'
 import type { TagKind } from '@/components/Tag'
 import { Tag } from '@/components/Tag'
@@ -139,19 +147,19 @@ function summarize(request: RequestRecord): string {
 
 /**
  * `GET /requests/{id}/attachment` is an authenticated stream, not a public URL — a plain
- * `<a href>` would navigate without the bearer token and 401. Fetches it with the same
- * `Authorization` header `lib/api.ts`'s `request()` adds, then hands the browser a
- * same-origin blob URL to save.
+ * `<a href>` would navigate without the bearer token and 401. `authedBlobUrl` fetches it
+ * with the bearer header and hands back a same-origin blob URL to save. A failed fetch
+ * (network error or non-ok response) is swallowed here — there is nowhere on this card to
+ * surface it, and the prior behaviour was the same silent no-op on a non-ok response.
  */
 async function downloadAttachment(requestId: string): Promise<void> {
-  const token = getToken()
-  const response = await fetch(`/api/v1/requests/${requestId}/attachment`, {
-    headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!response.ok) return
+  let url: string
+  try {
+    url = await authedBlobUrl(`/api/v1/requests/${requestId}/attachment`)
+  } catch {
+    return
+  }
 
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
   link.download = ''
@@ -189,9 +197,18 @@ export function RequestCard({ request, onApprove, onReject, pending }: RequestCa
       }}
     >
       <div className="flex items-center justify-between flex-wrap" style={{ gap: 'var(--sp-sm)' }}>
-        <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
+        <Link
+          href={`/employees/${request.employee_id}/profile`}
+          className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
+          style={{
+            font: 'var(--t-emphasis)',
+            letterSpacing: 'var(--ls-body)',
+            color: 'var(--ink)',
+            textDecoration: 'none',
+          }}
+        >
           {request.employee_id}
-        </span>
+        </Link>
         <div className="flex items-center" style={{ gap: 'var(--sp-xs)' }}>
           <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
             {TYPE_LABEL[request.type]}

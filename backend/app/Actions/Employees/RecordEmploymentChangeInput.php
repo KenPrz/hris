@@ -16,5 +16,7 @@ final readonly class RecordEmploymentChangeInput
         public bool $isArt82Exempt,
         public int $baseRateCents,
         public ?string $actorId,
+        public ?string $designation = null,
+        public ?string $laborType = null,   // Domain\Profile\LaborType value
     ) {}
 }

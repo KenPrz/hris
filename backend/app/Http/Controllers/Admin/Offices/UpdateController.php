@@ -23,6 +23,7 @@ final class UpdateController
             name: (string) $validated['name'],
             code: (string) $validated['code'],
             timezone: (string) $validated['timezone'],
+            region: $validated['region'] ?? null,
             geofenceLat: $validated['geofence_lat'] ?? null,
             geofenceLng: $validated['geofence_lng'] ?? null,
             geofenceRadiusM: $validated['geofence_radius_m'] ?? null,

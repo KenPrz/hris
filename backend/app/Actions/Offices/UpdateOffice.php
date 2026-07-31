@@ -48,6 +48,7 @@ final class UpdateOffice
                     'name' => $in->name,
                     'code' => $in->code,
                     'timezone' => $in->timezone,
+                    'region' => $in->region,
                     'geofence_lat' => $in->geofenceLat,
                     'geofence_lng' => $in->geofenceLng,
                     'geofence_radius_m' => $in->geofenceRadiusM,

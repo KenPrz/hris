@@ -146,9 +146,16 @@ GET /api/v1/admin/employees/{employee}          # one employee's profile
   → { data: { id, employee_no, first_name, middle_name, last_name, name_suffix, full_name,
               hired_at, has_user,
               current_employment: {           # null until the first employment record
-                office_id, department_id, employment_type, is_art82_exempt,
-                base_rate_cents, reports_to_id, effective_from } } }
+                office_id, department_id, employment_type, designation, labor_type,
+                is_art82_exempt, base_rate_cents, reports_to_id, effective_from } } }
 ```
+
+`designation`/`labor_type` (M10a) join this block the same way they join the employment-change
+response above — read from the same `EmploymentResolver`-resolved record, never the
+denormalized cache. This endpoint predates and is distinct from M10a's own personnel-file
+read (`GET /admin/employees/{employee}/profile`, under "Employee profiling," below) — this
+one is the M8b onboarding/roster surface (identity plus current employment); that one is the
+full contact/personal/dependents/identifications file.
 
 `current_employment` is resolved through `EmploymentResolver` — the effective-dated record
 whose `effective_from` is the latest on or before today (`02-data-model.md`), the same way
@@ -204,14 +211,21 @@ employee who already has one is a domain failure, not a silent overwrite:
 POST /api/v1/admin/employees/{employee}/employment   # record an employment change
   { "effective_from": "2026-08-01", "office_id": "0199…", "department_id": "0199…",
     "reports_to_id": "0199…" | null, "employment_type": "regular",
-    "is_art82_exempt": true, "base_rate_cents": 150000 }
+    "is_art82_exempt": true, "base_rate_cents": 150000,
+    "designation": "HR Supervisor" | null, "labor_type": "indirect" | null }   # both OPTIONAL — added M10a
   → 201 { data: { id, employee_id, effective_from, office_id, department_id,
-                  reports_to_id, employment_type, is_art82_exempt, base_rate_cents } }
+                  reports_to_id, employment_type, is_art82_exempt, base_rate_cents,
+                  designation, labor_type } }
 ```
 
 Inserts one effective-dated `employment_records` row and advances the `current_*` cache
 **only if** the new row is the latest effective date — a back-dated correction updates
 history but leaves the cache on the genuinely-current record (`02-data-model.md`).
+`designation`/`labor_type` (M10a) ride on this same endpoint rather than living on the
+profile, because a promotion or a labour-type change is effective-dated exactly like every
+other field here (`02-data-model.md`'s "Employee profiling" section has the full reasoning).
+`labor_type`, when present, must be one of `App\Domain\Profile\LaborType`'s values
+(`direct`/`indirect`).
 
 ```
   → 422 employment_record_exists   # a change already exists for this employee on that date
@@ -253,6 +267,233 @@ write is stamped to `activity_log` (`log_name 'default'`, `description hr_admin_
 like the rest of the `/admin` surface — a non-admin gets `403`, not `404` (nothing
 office-scoped to hide). `scripts/e2e-admin-roles-audit.sh` proves the whole grant/revoke
 cycle plus the two `422` guards against the live stack.
+
+## Employee profiling (M10a)
+
+The personnel file behind an employee record — contact and personal details, dependents,
+and government/financial identification numbers with a scanned copy of each. HR Admins
+configure it, an employee reads their own, and a manager sees a redacted view of a direct
+report's. Nine routes, four `Action` classes — the scan stream and the catalog read are
+controller-only reads with no action, the same shape `DownloadAttachmentController` (below,
+under "Attendance adjustments and the requests spine") already uses for request attachments.
+
+| Route | Actor | Notes |
+| --- | --- | --- |
+| `GET /me/profile` | self | full resource |
+| `GET /profile/catalog` | any authenticated user | ungated reference data |
+| `GET /admin/employees/{employee}/profile` | HR Admin, scoped | full resource |
+| `GET /employees/{employee}/profile` | manager of `{employee}` | **redacted** resource |
+| `PUT /admin/employees/{employee}/profile` | HR Admin, scoped | upsert |
+| `PUT /admin/employees/{employee}/dependents` | HR Admin, scoped | replace-all |
+| `POST /admin/employees/{employee}/identifications` | HR Admin, scoped | upsert, multipart |
+| `DELETE /admin/employees/{employee}/identifications/{identification}` | HR Admin, scoped | — |
+| `GET /employees/{employee}/identifications/{identification}/scan` | self or HR Admin, scoped | private stream |
+
+**Writes are HR Admin only.** There is no self-service edit anywhere on this surface — an
+employee cannot change even their own address. `05-rbac.md` has the full authorization
+argument (`viewFullProfile`/`viewRedactedProfile`/`updateProfile`, and why an HR Admin
+cannot edit their own PII either); this section covers the wire shapes.
+
+### Reading a profile
+
+```
+GET /api/v1/me/profile                          # auth:sanctum — self
+GET /api/v1/admin/employees/{employee}/profile   # auth:sanctum — HR Admin/System Admin, scoped
+  → 200 { data: <full profile, below> }
+  → 404 not_found   # /me/profile: caller has no linked employee record
+                    # admin route: {employee}'s office isn't administered by the caller,
+                    #   or {employee} doesn't exist — 404-not-403, as everywhere else
+```
+
+The full profile:
+
+```json
+{ "data": {
+  "employee_id": "0199…", "employee_no": "MNL-0006", "full_name": "Carmen Lim",
+  "details": { "salutation": "Ms.", "first_name": "Carmen", "middle_name": "Reyes",
+               "last_name": "Lim", "name_suffix": null, "nickname": "Carms" },
+  "contact": { "home_address": "123 Rizal St., Cebu City", "personal_email": "carmen@example.com",
+               "phone": null, "fax": null, "mobile": "+639171234567",
+               "emergency_contact": "Juan Lim (spouse) 09179876543" },
+  "personal": { "gender": "female", "birth_date": "1990-04-12", "age": 36,
+                "birthplace": "Cebu City", "marital_status": "married",
+                "citizenship": "Filipino", "religion": "Roman Catholic", "blood_type": "O+" },
+  "assignment": { "designation": "HR Supervisor", "business_unit": "People Ops",
+                  "reports_to": "Grace Tan", "employment_status": "regular",
+                  "location": "Cebu Branch", "region": "VII", "labor_type": "indirect",
+                  "hired_at": "2021-03-01", "work_shift": "8:00 Am To 5:00 Pm - Rest Sat & Sun" },
+  "dependents": [ { "id": "0199…", "name": "Juan Lim Jr.", "relationship": "child",
+                    "relationship_label": "Child", "birth_date": "2015-06-01" } ],
+  "identifications": [ { "id": "0199…", "category_code": "TIN", "category_name": "TIN",
+                          "number": "123-456-789-000", "issued_on": "2015-01-10",
+                          "expires_on": null, "notes": null, "has_scan": true } ]
+} }
+```
+
+`age` is derived, never stored (`02-data-model.md`) — computed against the employee's
+current office timezone, which can disagree with an `assignment` field resolved against
+UTC-`today()` inside the same payload; see `06-roadmap.md`'s M10a section. `has_scan` is a
+boolean, never a URL — the scan is only ever reachable through the stream route below.
+`dependents[].relationship` and `identifications[].category_code` are the catalog `code`
+(`"child"`, `"TIN"`), not the human-readable `description`/`name` — `GET /profile/catalog`
+(below) is how a client turns one into the other. `dependents[].relationship_label` (M10a
+Task 16) carries that description directly (`"Child"`), mirroring
+`identifications[].category_name`, so the read view can display it without a second round
+trip; `relationship` itself is unchanged and stays the code a write must match on.
+`personal.gender`/`marital_status`/`blood_type` are likewise backed enum values
+(`"male"`, `"single"`), not display text — unlike dependents/identifications, these three
+have no per-company catalog row to hang a `_label` off of; they're a fixed, code-defined
+set (`app/Domain/Profile/{Gender,MaritalStatus,BloodType}.php`), so the frontend maps them
+to labels itself (`src/lib/profileOptions.ts`) instead of the API carrying a redundant
+labelled field for each.
+
+```
+GET /api/v1/employees/{employee}/profile   # auth:sanctum — manager of {employee}, scoped
+  → 200 { data: <redacted profile, below> }
+  → 404 not_found   # {employee} is outside EmployeeScope, or doesn't exist
+```
+
+The redacted profile — deliberately a **different JSON shape**, not the full one with
+fields omitted:
+
+```json
+{ "data": {
+  "employee_id": "0199…", "employee_no": "MNL-0006", "full_name": "Carmen Lim",
+  "contact": { "personal_email": "carmen@example.com", "phone": null, "mobile": "+639171234567" },
+  "assignment": { "designation": "HR Supervisor", "business_unit": "People Ops",
+                  "reports_to": "Grace Tan", "employment_status": "regular",
+                  "location": "Cebu Branch", "region": "VII", "labor_type": "indirect",
+                  "hired_at": "2021-03-01", "work_shift": "8:00 Am To 5:00 Pm - Rest Sat & Sun" }
+} }
+```
+
+No `details`, no `personal`, no `dependents`, no `identifications`, no `home_address` — none
+of those keys exist in this response at all, not even as `null`. `EmployeeProfileResource`
+and `EmployeeProfileSummaryResource` are two separate resource classes for exactly this
+reason: a field added to the full one can never leak into the redacted one by default
+(`02-data-model.md`, `05-rbac.md`).
+
+### The catalog
+
+```
+GET /api/v1/profile/catalog   # auth:sanctum — any authenticated user, ungated
+  → 200 { data: { relationships: [ { id, code, description }, … ],
+                  identification_categories: [ { id, code, name, description }, … ] } }
+```
+
+Static, company-wide reference data — the five relationship kinds and eight identification
+categories `ProfileCatalogSeeder` seeds (`02-data-model.md`). Not office-scoped and not
+admin-gated: the dependents and identification writes below take a `relationship_id`/
+`category_id`, and without this route nothing tells a client what those ids mean — every
+profile screen needs it, including a plain employee's own read-only `/me/profile` view.
+
+### Writing the profile, dependents, and identifications
+
+```
+PUT /api/v1/admin/employees/{employee}/profile   # auth:sanctum — HR Admin/System Admin, scoped
+  { "salutation": "Ms.", "nickname": "Carms", "home_address": "123 Rizal St., Cebu City",
+    "personal_email": "carmen@example.com", "phone": null, "fax": null,
+    "mobile": "+639171234567", "emergency_contact": "Juan Lim (spouse) 09179876543",
+    "gender": "female", "birth_date": "1990-04-12", "birthplace": "Cebu City",
+    "marital_status": "married", "citizenship": "Filipino", "religion": "Roman Catholic",
+    "blood_type": "O+" }                          # every field OPTIONAL/nullable
+  → 200 { data: <full profile, above> }
+  → 400 validation_failed   # bad shape — an enum field outside its closed set
+                            #   (gender/marital_status/blood_type), a bad date, etc.
+  → 404 not_found           # updateProfile denied — out-of-scope HR Admin, OR the caller
+                            #   IS {employee} themselves (self-edit is refused for
+                            #   everyone, HR Admins included — see 05-rbac.md)
+```
+
+**A `PUT` replaces the whole profile — an omitted field becomes `null`, not "leave it
+alone."** `UpsertEmployeeProfile` is a true upsert: the 1:1 row doesn't exist until someone
+first fills the personnel file in (`CreateEmployee` never pre-creates an empty one), and a
+second `PUT` on an existing profile is `updateOrCreate` against every column at once, so
+"clear this employee's fax number" needs no endpoint of its own — omit `fax` from the
+payload and it goes to `null`.
+
+```
+PUT /api/v1/admin/employees/{employee}/dependents   # auth:sanctum — HR Admin/System Admin, scoped
+  { "dependents": [
+      { "name": "Juan Lim Jr.", "relationship_id": "0199…", "birth_date": "2015-06-01" },
+      { "name": "Ana Lim", "relationship_id": "0199…", "birth_date": null } ] }
+                             # PRESENT, may be [] — up to 20 entries
+  → 200 { data: <full profile, above> }
+  → 400 validation_failed   # dependents missing/not an array, more than 20, a bad
+                            #   relationship_id (not a uuid, or not in the catalog), or a
+                            #   bad birth_date
+  → 404 not_found           # same updateProfile rule as the profile write above
+```
+
+**`dependents` is replace-all, not per-row create/update/delete.** The whole list is sent
+every time: `ReplaceEmployeeDependents` deletes every existing dependent for the employee —
+row-by-row, not a bulk query-builder delete, deliberately, so `LogsActivity` still records
+each removal (a bulk `delete()` fires no model events) — and creates the submitted list
+fresh, inside one transaction. A zero-to-twenty-row list nothing else references doesn't
+earn three routes (`POST`/`PATCH`/`DELETE`) and the client-side id bookkeeping they'd force;
+`dependents: []` is a legitimate "this employee has no dependents" instruction (`present`,
+not `required`, in the validation rule — `required` would reject `[]`).
+
+```
+POST /api/v1/admin/employees/{employee}/identifications   # auth:sanctum — HR Admin/System Admin, scoped
+  multipart/form-data:
+    category_id:  uuid, REQUIRED — one of GET /profile/catalog's identification_categories
+    number:       string, REQUIRED
+    issued_on:    YYYY-MM-DD, OPTIONAL
+    expires_on:   YYYY-MM-DD, OPTIONAL — must be on/after issued_on
+    notes:        string, OPTIONAL
+    scan:         file, OPTIONAL — pdf/jpg/jpeg/png, ≤10MB
+  → 200 { data: <full profile, above> }
+  → 400 validation_failed   # bad shape — category_id not a real category, expires_on
+                            #   before issued_on, scan wrong type/too large, etc.
+  → 404 not_found           # same updateProfile rule as the profile write above
+```
+
+**It is a `POST`, not a `PUT`, even though it is an upsert on `(employee_id,
+category_id)`.** `unique(employee_id, category_id)` (`02-data-model.md`) means one employee
+has one TIN, one SSS number, and so on — a second submission for the same category updates
+the existing row rather than creating a second one, ordinarily a `PUT`'s job. The route
+stays `POST` because **PHP parses a multipart body only on `POST`** — a `PUT
+multipart/form-data` arrives with an empty `$_FILES` and the uploaded scan vanishes with no
+error, which is exactly why Laravel ships `_method` spoofing in the first place. `PUT
+/profile` and `PUT /dependents` above stay `PUT` because they carry plain JSON and no file.
+**Omitting `scan` leaves any existing scan alone** — it does not clear it; clearing one
+means deleting the identification (below), because "I only came to fix a typo in the
+number" must never silently destroy the evidence HR is expected to be able to produce.
+Sending a new `scan` replaces the old one outright (`singleFile()` on the media collection).
+
+```
+DELETE /api/v1/admin/employees/{employee}/identifications/{identification}
+  → 200 { data: <full profile, above> }
+  → 404 not_found   # updateProfile denied for {employee}, OR {identification} does not
+                    #   belong to {employee} — checked explicitly, so an HR Admin
+                    #   authorized over one employee cannot delete another's identification
+                    #   by pairing mismatched ids
+```
+
+Deleting the row deletes its `media` row and RustFS scan object through medialibrary's own
+model `deleting` event — the normal Eloquent delete path, unlike the FK-cascade trap
+`02-data-model.md` documents for a future employee-delete route.
+
+```
+GET /api/v1/employees/{employee}/identifications/{identification}/scan
+  → 200 <file stream>
+  → 404 not_found   # not viewFullProfile (self or the administering HR Admin) — including
+                    #   a MANAGER, who is deliberately never handed identification ids at
+                    #   all — {identification} doesn't belong to {employee}, or the row
+                    #   carries no scan
+```
+
+Private and app-mediated, exactly like `GET /requests/{request}/attachment` — never a
+public or presigned RustFS URL. Gated on `viewFullProfile`, not `viewRedactedProfile`: a
+manager's redacted resource never returns an identification id in the first place, so a
+manager reaching this route at all is a guess or an attack, not a legitimate click-through
+(`05-rbac.md`).
+
+Every write above logs to `activity_log` under `log_name 'employee_profile'`
+(`EmployeeProfile`/`EmployeeDependent`/`EmployeeIdentification`'s `LogsActivity`) — **except
+that `EmployeeIdentification`'s `number` is never logged**, only that a row changed and by
+whom; see `02-data-model.md` for why.
 
 ## Attendance *(M3)*
 
@@ -956,12 +1197,13 @@ PATCH /api/v1/admin/organizations/{organization}   # full object, not a partial 
 GET  /api/v1/admin/offices                 # auth:sanctum — System Admin only
   ?organization=<uuid>                     # optional: only offices under that org
   ?include_archived=1                      # optional: include archived offices (default hides them)
-  → { data: [ { id, organization_id, name, code, timezone, geofence_lat, geofence_lng,
+  → { data: [ { id, organization_id, name, code, timezone, region, geofence_lat, geofence_lng,
                 geofence_radius_m, ip_allowlist, default_shift_template_id, archived_at }, … ] }
   → 403 forbidden
 
 POST /api/v1/admin/offices
   { "organization_id": "<uuid>", "name": "Manila HQ", "code": "MNL", "timezone": "Asia/Manila",
+    "region": "IV-A" | null,                 # OPTIONAL free text — added M10a
     "geofence_lat": null, "geofence_lng": null, "geofence_radius_m": null,
     "ip_allowlist": null, "default_shift_template_id": null }
   → 201 { data: { … , archived_at: null } }
@@ -983,6 +1225,12 @@ POST /api/v1/admin/offices/{office}/unarchive
   → 403 forbidden · 404 not_found
   → 409 not_archived                       # details: { subject_type: "office", subject_id }
 ```
+
+**`region` (M10a) is free text** — `'VII'`, `'IV-A'` — naming the office's PSA
+administrative region. It is read, never written, by M10a's profile Assignment block
+(above, under "Employee profiling"); nothing in the API validates it against a real list of
+PH regions, the same "long tail, not a closed set" treatment `02-data-model.md`'s M10a
+section gives citizenship/religion/birthplace.
 
 ```
 GET  /api/v1/admin/departments             # auth:sanctum — System Admin only

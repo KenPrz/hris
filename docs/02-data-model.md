@@ -1683,6 +1683,208 @@ section and `03-api.md` for the endpoints and error codes (`cutoff_locked`,
 
 ---
 
+## Employee profiling (M10a)
+
+The personnel file HR opens once identity, employment, and a name (M8b) already exist but
+still can't answer "what is this person's mobile number," "who do we call in an emergency,"
+"what is their TIN," or "how old are they." Five new tables, plus two columns grafted onto
+existing ones — **no new columns on `employees` at all.**
+
+```sql
+create table employee_profiles (
+  employee_id       uuid primary key references employees(id) on delete cascade,
+  salutation        text,
+  nickname          text,
+  home_address      text,
+  personal_email    text,
+  phone             text,
+  fax               text,
+  mobile            text,
+  emergency_contact text,          -- one free-text line: name, relation, and number
+  gender            text,          -- Domain\Profile\Gender
+  birth_date        date,
+  birthplace        text,
+  marital_status    text,          -- Domain\Profile\MaritalStatus
+  citizenship       text,
+  religion          text,
+  blood_type        text,          -- Domain\Profile\BloodType
+  created_at        timestamptz,
+  updated_at        timestamptz
+);
+
+create table relationships (
+  id          uuid primary key default uuidv7(),
+  code        text not null unique,     -- 'spouse', 'child', 'parent', 'sibling', 'other'
+  description text not null,
+  created_at  timestamptz,
+  updated_at  timestamptz
+);
+
+create table employee_dependents (
+  id              uuid primary key default uuidv7(),
+  employee_id     uuid references employees(id) on delete cascade,   -- nullable, deliberate — below
+  name            text not null,
+  relationship_id uuid not null references relationships(id),
+  birth_date      date,
+  created_at      timestamptz,
+  updated_at      timestamptz
+);
+create index employee_dependents_employee_id on employee_dependents (employee_id);
+
+create table employee_identification_categories (
+  id          uuid primary key default uuidv7(),
+  code        text not null unique,     -- 'TIN', 'SSS', 'HDMF', 'PHIC', 'BANK', 'PASSPORT', 'DL', 'PRC'
+  name        text not null,
+  description text,
+  created_at  timestamptz,
+  updated_at  timestamptz
+);
+
+create table employee_identifications (
+  id          uuid primary key default uuidv7(),
+  employee_id uuid not null references employees(id) on delete cascade,
+  category_id uuid not null references employee_identification_categories(id),
+  number      text not null,
+  issued_on   date,
+  expires_on  date,
+  notes       text,
+  created_at  timestamptz,
+  updated_at  timestamptz,
+  unique (employee_id, category_id)
+);
+
+alter table employment_records add column designation text;
+alter table employment_records add column labor_type  text;   -- Domain\Profile\LaborType
+alter table offices            add column region      text;   -- 'VII'
+```
+
+`EmployeeIdentification implements HasMedia` with a single-file `scan` collection on the
+`attachments` disk (RustFS), accepting `pdf`/`jpg`/`jpeg`/`png` up to 10 MB — the same
+collection shape and limits `Request`'s `attachment` collection already uses (above).
+
+**The profile is a 1:1 side table, keyed on `employee_id` as its own primary key — not
+columns on `employees`.** `employees` holds only what does not change over a career
+(above); half of a personnel file — an address, a phone number, a marital status — changes
+routinely, and `employees` is the row every office-scope query (`WHERE current_office_id =
+?`) touches. Widening it by fifteen mixed-lifetime columns to carry data no scope query
+reads is the wrong trade. `employee_profiles.employee_id` is the primary key rather than a
+surrogate `id` because the relationship *is* the identity — there is no "which profile"
+question a second id would ever answer — and it cascades on delete, the ordinary shape for
+a side table. **The profile carries current values only, no history.**
+`employment_records` is effective-dated because the pay engine must compute against the
+office and rate that were true on the day it's pricing; nothing computes against a religion
+or a nickname mid-career, so a stored history here would be a second, unread ledger.
+`activity_log` (below) is the record of what changed, not a second
+`employment_records`-shaped table.
+
+**Government and financial IDs are rows against a catalog, not eight columns
+(`tin`/`sss_no`/`hdmf_no`/…) on the profile.** An identification is not a bare number — it
+carries an issue date, an expiry, and a scanned copy HR is legally expected to be able to
+produce, none of which a column can hold, and a ninth ID type must be a row, not a
+migration. `employee_identification_categories` names the kind (`TIN`, `SSS`, `HDMF`,
+`PHIC`, `BANK`, `PASSPORT`, `DL`, `PRC` — seeded by `ProfileCatalogSeeder`, below); the row
+in `employee_identifications` carries the value. This is the split that turns "every
+employee missing a PhilHealth number" into a single join instead of a scan across eight
+nullable columns. The alternative considered — category as a *grouping*
+(Government-Mandated / Financial / License) with `code`/`name`/`description` repeated on
+every instance — was rejected: it makes each employee's row re-declare that it is a TIN,
+and a cross-employee query stops being reliable the first time someone types `Tin`.
+`unique(employee_id, category_id)` is what turns the write path into a clean upsert — one
+employee has one TIN — rather than a create-or-update dance the client would otherwise have
+to run.
+
+**Designation, labor type, and region live where they're effective-dated or singular, not
+on the profile.** Three fields the "Assignment" block on a personnel file naturally wants —
+designation, labor type, region — are not profile data:
+
+| Field | Home | Why |
+| --- | --- | --- |
+| Designation | `employment_records.designation` | A promotion changes it on a date; putting it on the profile would make last March's report show today's job title. |
+| Labor Type | `employment_records.labor_type` | Direct/indirect labour can change with a transfer — an attribute of the posting, not the person. |
+| Region | `offices.region` | Cebu is in Region VII regardless of who works there — one row, not one per employee. |
+
+`RecordEmploymentChange` (the single writer of `employment_records` and the `current_*`
+cache, above) gains the two `employment_records` fields as ordinary input; nothing else
+writes them. **Nothing is cached onto `employees`** — the `current_*` columns exist so
+office scoping stays a plain `WHERE`, and no scope query filters by designation, so a
+`current_designation` would be cache invalidation bought for nothing.
+
+**Closed sets are PHP backed enums cast on the model, not a Postgres `CHECK` and not a
+lookup table.** Gender, marital status, blood type, and labor type live in
+`app/Domain/Profile/` (`Gender`, `MaritalStatus`, `BloodType`, `LaborType`) beside
+`App\Domain\Attendance\PunchDirection` and `App\Domain\Pay\DayType` — the same shape, for
+the same reason: a `CHECK` makes adding a marital status a migration and a deploy and
+splits the set's definition across two languages, and five lookup tables plus five joins on
+every profile read is cost paid to make runtime-editable something no admin asked to edit.
+`relationships`, by contrast, genuinely *is* a table — dependents' relationships were
+specified as one, and it is referenced by a foreign key rather than merely validated, the
+one place this rule bends. Religion, citizenship, birthplace, salutation, and nickname stay
+plain free text — a long tail, not a closed set.
+
+**`EmployeeProfile::age` is derived at read time, anchored to the employee's current office
+timezone, never stored.** A written age is wrong the day after it's written — the same
+reasoning `Employee::full_name` (M8b, above) already established for composing a display
+value in exactly one place. It is computed against the office's timezone specifically, not
+a naive `now()`: `APP_TIMEZONE` is `UTC` by rule (`01-architecture.md`), so an unzoned
+`now()` would roll an age over up to eight hours early in Manila. An employee with no
+office yet falls back to `Asia/Manila`, the same default `offices.timezone` itself carries.
+**This is one of two places M10a reads "today," and the other one does not agree with
+it** — `EmployeeAssignmentPresenter`'s `work_shift` resolution and `EmployeeProfileResource`/
+`EmployeeProfileSummaryResource`'s `EmploymentResolver::on()` call both use `Carbon::today()`,
+which is UTC-today, not office-local today; see `06-roadmap.md`'s M10a section for the
+resulting disagreement inside one payload.
+
+**Deleting an employee would orphan their ID scans — verified unreachable today, recorded
+rather than guarded against.** `employee_identifications.employee_id` cascades at the
+Postgres FK level (`on delete cascade`, above). A Postgres-level cascade deletes the row
+directly at the database; it does not run through Eloquent, so spatie/medialibrary's
+`deleting` model event — the hook that deletes a row's `media` entries and their RustFS
+objects — never fires. Deleting an employee today would therefore leave both an orphaned
+`media` row and an orphaned scan object (a government ID) sitting in RustFS with nothing
+pointing at either. This is a real gap, but **verified unreachable**: there is no `DELETE`
+route for an employee anywhere in `03-api.md`, no `delete()` call anywhere in `app/`, and
+employees are separated via `employees.separated_at`, never removed. The spec owner's
+ruling was to record the trap rather than build cleanup for a path that does not exist —
+**anyone who later adds an employee-delete path must delete `employee_identifications`
+through Eloquent first** (iterating and calling `->delete()` on each row, not a bulk
+query-builder delete), so the model event fires and the media/RustFS cleanup happens before
+the FK cascade ever runs.
+
+**`number` is deliberately excluded from `EmployeeIdentification`'s `logOnly()`, and the
+profile's contact fields from `EmployeeProfile`'s.** All three new models carry spatie's
+`LogsActivity` under `log_name 'employee_profile'`, matching the trait `employees` and the
+org tree already use — but `EmployeeIdentification::getActivitylogOptions()` logs only
+`employee_id`, `category_id`, `issued_on`, and `expires_on`, and
+`EmployeeProfile::getActivitylogOptions()` logs only the closed personal-details fields
+(`salutation`, `nickname`, `birthplace`, `gender`, `birth_date`, `marital_status`,
+`citizenship`, `religion`, `blood_type`) — never `home_address`, `personal_email`, `phone`,
+`fax`, `mobile`, or `emergency_contact`. Logging the `number` column, or the profile's
+contact fields, would copy every TIN, SSS number, bank account, home address, and personal
+phone number into `activity_log` — a table with different read rules (the audit viewer,
+`03-api.md`) and a far longer retention than anyone reasoned about when they added it. The
+log records **that** an identification or a profile changed, and by whom — never **to
+what**, for the fields excluded above. The value itself lives in exactly one table,
+reachable through exactly one policy (`05-rbac.md`).
+
+Both models use an explicit `logOnly([...])` allowlist, never `logFillable()` — `logFillable()`
+reads a model's `getFillable()`, which returns `[]` on a `$guarded = []` model with no
+`$fillable` array (both models use mass-assignment guarding, not an allowlist), so
+`logFillable()` here would silently log an empty `properties` bag on every change. This was
+caught in the M10a final-fixes review; see `06-roadmap.md`'s M10a section.
+
+**`employee_dependents.employee_id` is nullable, deliberately.** An orphan dependent row —
+`employee_id null` — is unreachable by every query in the system today, which was raised
+during implementation; the ruling was to keep it nullable anyway, recorded with a
+`ponytail:` comment at the column so a later reader treats the nullability as intent, not
+an oversight to tighten.
+
+`employee_identification_categories` (the eight kinds above) and `relationships` (the five
+above) are catalog data **production needs**, in the same category as the RBAC permission
+catalog (`05-rbac.md`) — seeded by `ProfileCatalogSeeder`, called from
+`hris:bootstrap-admin` alongside `RbacSeeder`, **not** from `DatabaseSeeder` (which is
+dev-only and pulls in the Manila/Cebu demo company). Idempotent throughout
+(`updateOrCreate` on `code`), so re-running a bootstrap-adjacent seed is safe.
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:
@@ -1754,3 +1956,9 @@ Stated plainly, since these are the reasons for the constraints above:
   before its `start_date`, or a `day_part` outside `full`/`half` — and it is deleted the
   instant its parent request is. (`CHECK`s + `on delete cascade` on `leave_details`, M6b-b
   above.)
+- An employee cannot hold two identifications in the same category — one TIN, one SSS
+  number, never two rows racing each other — and an identification's `number` never reaches
+  `activity_log`, only the fact that the row changed. (`unique(employee_id, category_id)` on
+  `employee_identifications` + the `logOnly()` exclusion, M10a above.)
+- A dependent's relationship cannot be an arbitrary string — only a row that exists in the
+  `relationships` catalog. (`relationship_id` FK, M10a above.)
