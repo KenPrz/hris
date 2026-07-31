@@ -162,8 +162,17 @@ it('gives a manager contact and assignment but no address, personal block, or ID
     // "separate class, not a filtered one" invariant, which is otherwise only a docblock
     // claim. Without this, a refactor that merges the two resources behind a boolean flag
     // would pass this whole test as long as it remembered the four names above.
+    //
+    // `assignment` is pinned too, and deliberately: it is the one sub-block SHARED between
+    // the full and redacted resources via EmployeeAssignmentPresenter (see its docblock), so
+    // it is exactly where a field added for the full resource's benefit would leak into the
+    // manager's view without either resource class ever changing.
     expect(array_keys($body))->toBe(['employee_id', 'employee_no', 'full_name', 'contact', 'assignment'])
-        ->and(array_keys($body['contact']))->toBe(['personal_email', 'phone', 'mobile']);
+        ->and(array_keys($body['contact']))->toBe(['personal_email', 'phone', 'mobile'])
+        ->and(array_keys($body['assignment']))->toBe([
+            'designation', 'business_unit', 'reports_to', 'employment_status',
+            'location', 'region', 'labor_type', 'hired_at', 'work_shift',
+        ]);
 
     // Belt and braces: the raw payload must not contain the TIN anywhere at all.
     expect($response->getContent())->not->toContain('653536955000')
