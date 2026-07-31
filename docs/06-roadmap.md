@@ -1840,14 +1840,20 @@ ledger this section is drawn from.
   `RbacSeeder`, not from the dev-only `DatabaseSeeder`.
 - **Frontend.** `/me/profile` — read-only, five sections (Details, Contact, Personal,
   Assignment, National IDs) composed from existing tier-2 components, no new primitives.
-  `/admin/employees/{id}` gains a Profile section holding the HR Admin form (profile
-  fields, dependents, and identifications with scan upload/preview) — stacked directly
-  below a read-only view of the same data on the same page, not a separate tab; see the
-  "duplicated Profile rendering" note below. `useMyProfile` and
-  `useEmployeeProfile(id)`, keyed through `lib/keys.ts`. The scan preview's bearer-authenticated
-  blob-URL fetch — previously inlined in `RequestCard.tsx` — was lifted into
-  `lib/authedBlobUrl.ts` and both call sites now share it; this is the one piece of
-  pre-existing code this milestone touches, and only because it's the code being reused.
+  `/employees/{id}/profile` — a new route under the plain `(app)` group, not `/admin` —
+  holds the HR Admin's read+edit view (`ProfileSections` + `ProfileForm`) for a full-read
+  viewer, and the manager's redacted view (`ProfileSummarySections`) for anyone else the
+  backend admits; the page tries the full read and falls back to the redacted one on a
+  `404`, so it never has to reimplement the office-pivot check `EmployeePolicy` already
+  owns. (This route, and its separation from `/admin/employees/{employee}`, is the
+  final-fixes round below — the milestone originally shipped the Profile section stacked
+  on the system-admin-only admin page, which made the HR/manager halves of this
+  authorization model unreachable in a browser.) `useMyProfile`, `useEmployeeProfile(id)`,
+  and `useRedactedProfile(id)`, keyed through `lib/keys.ts`. The scan preview's
+  bearer-authenticated blob-URL fetch — previously inlined in `RequestCard.tsx` — was
+  lifted into `lib/authedBlobUrl.ts` and both call sites now share it; this is the one
+  piece of pre-existing code this milestone touches, and only because it's the code being
+  reused.
 
 **Done when:** an HR Admin fills in a Cebu employee's contact details, personal details,
 two dependents, and a TIN with a scanned copy; that employee reads the full file back at
@@ -1858,11 +1864,47 @@ byte-identical to a nonexistent one; the HR Admin who filled the file in cannot 
 bootstrapped with `hris:bootstrap-admin` already has the eight identification categories
 and five relationships waiting.
 
-**Status: complete.** **853 backend tests (19 of them Arch) + 563 frontend tests**, all
+**Status: complete.** **854 backend tests (19 of them Arch) + 574 frontend tests**, all
 green — up from the 776 backend / 541 frontend the M0–M9 roadmap closed at. `lint`,
 `typecheck`, and `build` are green, native and inside the `make test` containers alike.
 (Task 16, below, is what took the frontend count from 560 to 563 and the backend
-assertion count from 3058 to 3061 without adding a backend test — see that entry.)
+assertion count from 3058 to 3061 without adding a backend test — see that entry. The
+final-fixes round below took it from 853/563 to 854/574.)
+
+**Final-fixes round (before merge) — five findings from the whole-branch review, all
+fixed:**
+
+1. `EmployeeProfile::getActivitylogOptions()` used `logFillable()` against a
+   `$guarded = []` model with no `$fillable` — `getFillable()` returned `[]`, so every
+   profile change wrote an `activity_log` row with empty `properties`. Replaced with an
+   explicit `logOnly([...])` allowlisting the personal-details fields and deliberately
+   excluding contact PII (`home_address`, `personal_email`, `phone`, `fax`, `mobile`,
+   `emergency_contact`), the same reasoning `EmployeeIdentification` already applies to
+   `number`.
+2. `hris:bootstrap-admin` seeded `RbacSeeder`/`ProfileCatalogSeeder` BELOW the
+   System-Admin-exists guard, so every M9 production install — which by definition already
+   has a System Admin — could never gain the profile catalogs after an M10a deploy. Both
+   seed calls now run unconditionally, above the guard; the guard still refuses to mint a
+   second superuser.
+3. The Profile section lived on `/admin/employees/{employee}`, `is_system_admin`-gated on
+   the frontend even though the endpoints it called never required it — the entire
+   `viewFullProfile`/`viewRedactedProfile` model was unreachable in a browser, and the
+   manager's redacted read had no screen at all. Moved to its own route,
+   `/employees/{id}/profile` (see the Frontend bullet above); the admin employee page keeps
+   only employment records, HR-office grants, and login provisioning.
+4. `offices.region` had no frontend type, no form field, and no display — it could never be
+   set from the browser, and an unrelated office edit silently NULLed out any region set
+   via the API (`UpdateOfficeRequest` treats an absent key as an explicit null). Added to
+   the `Office`/`OfficeCreateInput`/`OfficeUpdateInput` types and the offices form, handled
+   exactly like `timezone` except optional.
+5. `ProfileSections` rendered `labor_type` (`'direct'`/`'indirect'`) raw instead of through
+   `labelForOption`, unlike gender/marital status/blood type. Added `LABOR_TYPE_OPTIONS`.
+   `employment_status` stays raw deliberately — it is validated backend-side as a free
+   string, not a `Rule::enum()`-backed set, so there is no closed set to label it against.
+
+Full writeup, including the mutation-verification for each fix and the judgment calls
+behind fix 3's frontend wiring:
+`.superpowers/sdd/2026-07-30-m10a-employee-profiling/final-fixes-report.md`.
 
 **Deferred, from the spec — none of these blocked the milestone, each has a stated trigger:**
 
@@ -1893,11 +1935,12 @@ longer belongs on this list):
   cross-cutting change bigger than this milestone, deferred rather than patched locally.
 
 **There is still no browser-level e2e harness — M10a's screens carry the identical gap
-M3.5's status block already records.** `/me/profile` and the admin Profile section are covered
-by component tests and the backend's live-API proof, but neither was confirmed rendering in
-an actual browser as part of this milestone (the brief's browser-walkthrough step was
-explicitly skipped, on instruction, during Task 14). Load them yourself — including
-uploading and previewing a scan — before trusting the UI.
+M3.5's status block already records.** `/me/profile` and `/employees/{id}/profile` (both
+its full and redacted shapes) are covered by component tests and the backend's live-API
+proof, but none was confirmed rendering in an actual browser as part of this milestone or
+its final-fixes round (the brief's browser-walkthrough step was explicitly skipped, on
+instruction, during Task 14). Load them yourself — including uploading and previewing a
+scan — before trusting the UI.
 
 **M10b — document management is the open follow-on, deliberately split out of this
 milestone's brainstorm rather than built alongside it.** A `Document`/`DocumentBucket`/

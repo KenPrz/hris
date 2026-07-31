@@ -74,8 +74,10 @@ behind a single TLS edge, with a first-login command for an empty database and a
 whose restore has actually been drilled; and M10a adds the personnel file — contact and
 personal details, dependents, and government/financial IDs with a scanned copy of each —
 that an HR Admin configures per office, an employee reads for themselves, and a manager
-sees a redacted view of. **853 backend tests (19 of them Arch) + 560 frontend tests**, plus
-a `scripts/e2e-*.sh` per milestone that walks its flow against a live stack.
+sees a redacted view of, at its own HR/manager-reachable route (`/employees/{id}/profile`)
+separate from the system-admin-only employee roster. **854 backend tests (19 of them Arch)
++ 574 frontend tests**, plus a `scripts/e2e-*.sh` per milestone that walks its flow against
+a live stack.
 
 No milestone is open. **M10b — a document management module (a `Document`/`DocumentBucket`/
 `DocumentCategory` catalog and a polymorphic file table) — was deliberately split out of
@@ -87,5 +89,5 @@ and multi-tenancy (the one flagged expensive-to-change: revisit early or not at 
 
 The one honest gap outside that table: **there is no browser-level e2e harness.** Every
 `e2e-*.sh` drives the API or the booted stack, never a rendered page, and M3.5's screens —
-and M10a's `/me/profile` and admin Profile section — have never been visually confirmed in
-a real browser.
+and M10a's `/me/profile` and `/employees/{id}/profile` — have never been visually
+confirmed in a real browser.

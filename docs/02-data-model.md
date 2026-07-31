@@ -1850,16 +1850,27 @@ through Eloquent first** (iterating and calling `->delete()` on each row, not a 
 query-builder delete), so the model event fires and the media/RustFS cleanup happens before
 the FK cascade ever runs.
 
-**`number` is deliberately excluded from `EmployeeIdentification`'s `logOnly()`.** All three
-new models carry spatie's `LogsActivity` under `log_name 'employee_profile'`, matching the
-trait `employees` and the org tree already use — but
-`EmployeeIdentification::getActivitylogOptions()` logs only `employee_id`, `category_id`,
-`issued_on`, and `expires_on`. Logging the `number` column too would copy every TIN, SSS
-number, and bank account into `activity_log` — a table with different read rules (the audit
-viewer, `03-api.md`) and a far longer retention than anyone reasoned about when they added
-it. The log records **that** an identification was created, updated, or deleted, and by
-whom — never **to what**. The value itself lives in exactly one table, reachable through
-exactly one policy (`05-rbac.md`).
+**`number` is deliberately excluded from `EmployeeIdentification`'s `logOnly()`, and the
+profile's contact fields from `EmployeeProfile`'s.** All three new models carry spatie's
+`LogsActivity` under `log_name 'employee_profile'`, matching the trait `employees` and the
+org tree already use — but `EmployeeIdentification::getActivitylogOptions()` logs only
+`employee_id`, `category_id`, `issued_on`, and `expires_on`, and
+`EmployeeProfile::getActivitylogOptions()` logs only the closed personal-details fields
+(`salutation`, `nickname`, `birthplace`, `gender`, `birth_date`, `marital_status`,
+`citizenship`, `religion`, `blood_type`) — never `home_address`, `personal_email`, `phone`,
+`fax`, `mobile`, or `emergency_contact`. Logging the `number` column, or the profile's
+contact fields, would copy every TIN, SSS number, bank account, home address, and personal
+phone number into `activity_log` — a table with different read rules (the audit viewer,
+`03-api.md`) and a far longer retention than anyone reasoned about when they added it. The
+log records **that** an identification or a profile changed, and by whom — never **to
+what**, for the fields excluded above. The value itself lives in exactly one table,
+reachable through exactly one policy (`05-rbac.md`).
+
+Both models use an explicit `logOnly([...])` allowlist, never `logFillable()` — `logFillable()`
+reads a model's `getFillable()`, which returns `[]` on a `$guarded = []` model with no
+`$fillable` array (both models use mass-assignment guarding, not an allowlist), so
+`logFillable()` here would silently log an empty `properties` bag on every change. This was
+caught in the M10a final-fixes review; see `06-roadmap.md`'s M10a section.
 
 **`employee_dependents.employee_id` is nullable, deliberately.** An orphan dependent row —
 `employee_id null` — is unreachable by every query in the system today, which was raised

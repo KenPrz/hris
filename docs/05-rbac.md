@@ -543,6 +543,17 @@ the same "assert the shape, not just that some test exists" discipline the four-
 `EmployeeScope` matrix below already established. `tests/Feature/Profile/ProfilePolicyTest.php`
 exercises `EmployeePolicy` directly, including the fail-open null-guard case above.
 
+**This model is now reachable from the browser (M10a final-fixes round).** It was correct
+server-side from the start, but the only screen that called `GET /admin/employees/{id}/profile`
+was `/admin/employees/{employee}`, whose whole page was `is_system_admin`-gated on the
+frontend — an HR Admin the policy above already admits could never reach it, and the
+`viewRedactedProfile` branch had no screen at all. `/employees/{id}/profile` (a new route
+under the plain, non-`/admin` route group) now calls the full read and falls back to the
+redacted read on a `404`, rendering whichever one the backend actually authorized for that
+viewer — the frontend does not reimplement the office-pivot check, it just reads the
+response the policy above already produces. See `06-roadmap.md` and `features.md` for the
+route and the screen.
+
 ## Testing
 
 The milestone's proof is the **four-actor scope matrix**, as feature tests

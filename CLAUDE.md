@@ -329,15 +329,16 @@ behind every step; M9 puts all of it behind a single TLS edge with a backup whos
 restore has actually been drilled; and M10a gives every employee a personnel file —
 contact and personal details, dependents, and government/financial IDs with a scanned copy
 of each — that an HR Admin configures per office, an employee reads for themselves, and a
-manager sees a redacted view of. **853 backend tests (19 of them Arch) + 563 frontend
-tests.** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
-what a user can actually do today.
+manager sees a redacted view of, at its own HR/manager-reachable route
+(`/employees/{id}/profile`) separate from the system-admin-only employee roster.
+**854 backend tests (19 of them Arch) + 574 frontend tests.** See `docs/06-roadmap.md` for
+each milestone's status and `docs/features.md` for what a user can actually do today.
 
 One caveat worth knowing before you trust the UI: the frontend is covered by component
 tests and live API walkthroughs, but **there is still no browser-level e2e harness** —
 every `scripts/e2e-*.sh` drives the API (and, for M9, the booted production stack), not a
 rendered page. M3.5's screens were never visually confirmed in a real browser, and M10a's
-`/me/profile` and the admin Profile section carry the identical gap — nothing since M3.5
+`/me/profile` and `/employees/{id}/profile` carry the identical gap — nothing since M3.5
 has closed it. Load it yourself before assuming it looks right; see the M3.5 and M10a
 status blocks in `docs/06-roadmap.md`.
 

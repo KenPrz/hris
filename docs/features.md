@@ -634,26 +634,33 @@ report's to reach them.
   shift), and every dependent and government/financial ID HR has recorded for you, each ID
   showing whether a scanned copy is on file. It's read-only from here — you look, you don't
   edit.
-- **HR Admins fill it in, for the offices they administer.** A Profile section on an
-  employee's admin page lets HR set every field above, add or remove dependents (the whole
-  list is replaced each save — a dependent list is short and doesn't need its own separate
+- **HR Admins fill it in, for the offices they administer.** `/employees/{id}/profile` — a
+  dedicated personnel-file page, not tucked inside the system-administrator-only employee
+  roster — lets HR set every field above, add or remove dependents (the whole list is
+  replaced each save — a dependent list is short and doesn't need its own separate
   add/edit/remove buttons), and record a government or financial ID — a TIN, an SSS number,
   a PhilHealth number, a bank account, a passport, and more — each with an issue date, an
   expiry, notes, and an optional scanned copy of the document itself, previewable right on
   the page. Saving a second ID of the same kind (say, a corrected TIN) updates the existing
-  one rather than adding a duplicate.
+  one rather than adding a duplicate. The same page works for a System Admin too — the
+  admin employee roster keeps only employment records, HR-office grants, and login
+  provisioning, and links out to this page for the personnel file itself.
 - **Nobody edits their own file, HR Admins included.** Even an HR Admin who administers
   their own office cannot change their own contact details, dependents, or IDs — that's a
   System Admin's job, or another HR Admin's. Two HR Admins in the same office cover for each
   other; a lone HR Admin's own file waits for someone else. You can still always *read* your
   own file at `/me/profile` — only editing your own is off-limits.
-- **A manager sees how to reach a direct report, and where they sit — nothing more.**
-  Opening a report's profile from a manager's own screens shows their contact email/phone
-  and their assignment (designation, department, office, manager, work shift) — never their
-  home address, birth date, marital status, dependents, or any government ID. This holds
-  even when the manager and the report work in different offices, and even if the manager
-  happens to also be an HR Admin somewhere else entirely: what unlocks the *full* file is
-  administering the report's specific office, not managing them.
+- **A manager sees how to reach a direct report, and where they sit — nothing more.** The
+  same `/employees/{id}/profile` page, opened for a manager instead of an HR Admin, shows
+  their contact email/phone and their assignment (designation, department, office, manager,
+  work shift) — never their home address, birth date, marital status, dependents, or any
+  government ID; the page can't even tell the two apart itself, it just renders whichever
+  shape the backend actually authorized. A manager reaches it from a direct report's name on
+  their own approval queue (`/team/approvals`), the same requester link an HR Admin uses
+  from `/office/approvals`. This holds even when the manager and the report work in
+  different offices, and even if the manager happens to also be an HR Admin somewhere else
+  entirely: what unlocks the *full* file is administering the report's specific office, not
+  managing them.
 - **A scanned ID is a private, streamed document, never a public link.** Only the employee
   themselves and the HR Admin who administers their office can ever open a scan — a manager,
   even one who can see the rest of a redacted profile, never gets a link to a report's IDs
