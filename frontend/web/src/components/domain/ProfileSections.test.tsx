@@ -49,10 +49,14 @@ describe('ProfileSections — DefinitionList key defect (Task 13)', () => {
   it('gives each dependent row a stable key even when two share the same relationship label', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
+    // 'child', not 'Child': EmployeeProfileResource sends the relationship's CODE
+    // (`$dependent->relationship?->code`), not its description — a fixture using the
+    // capitalised description encodes the same wrong mental model that produced the
+    // relationship-matching bug in ProfileForm's dependents form (Task 14 fix round 1).
     const profile = buildProfile({
       dependents: [
-        { id: 'dep-1', name: 'Anna Perez', relationship: 'Child', birth_date: '2015-01-01' },
-        { id: 'dep-2', name: 'Ben Perez', relationship: 'Child', birth_date: '2017-01-01' },
+        { id: 'dep-1', name: 'Anna Perez', relationship: 'child', birth_date: '2015-01-01' },
+        { id: 'dep-2', name: 'Ben Perez', relationship: 'child', birth_date: '2017-01-01' },
       ],
     })
 
@@ -60,7 +64,7 @@ describe('ProfileSections — DefinitionList key defect (Task 13)', () => {
 
     expect(screen.getByText('Anna Perez · 2015-01-01')).toBeInTheDocument()
     expect(screen.getByText('Ben Perez · 2017-01-01')).toBeInTheDocument()
-    expect(screen.getAllByText('Child')).toHaveLength(2)
+    expect(screen.getAllByText('child')).toHaveLength(2)
 
     const sameKeyWarning = errorSpy.mock.calls.some((args) =>
       args.some((arg) => typeof arg === 'string' && arg.includes('same key')),

@@ -70,7 +70,7 @@ export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
           <DefinitionList
             items={[
               ['Home', contact.home_address],
-              ['Email', contact.personal_email],
+              ['Personal Email', contact.personal_email],
               ['Phone', contact.phone],
               ['Fax', contact.fax],
               ['Mobile', contact.mobile],

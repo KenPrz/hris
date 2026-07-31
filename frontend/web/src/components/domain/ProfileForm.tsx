@@ -11,13 +11,17 @@
  *
  * Labels mirror `ProfileSections`' `DefinitionList` labels exactly (e.g. "Home" for
  * `home_address`, "Birthday" for `birth_date`) — the read view and the edit view describe
- * the same personnel file and must never disagree about what a field is called.
+ * the same personnel file and must never disagree about what a field is called. The one
+ * exception is `personal_email`, labelled "Personal Email" on both sides rather than bare
+ * "Email" — this same admin page's "Provision login" form has its own, unrelated "Email"
+ * field (a login), and the two forms render at once.
  *
  * Gender, marital status, and blood type are validated backend-side with `Rule::enum()`,
- * which matches the BACKED VALUE exactly — `'male'`, never `'Male'`. They use a plain
- * native `<select>` rather than the tier-1 `Select` (which is Radix-backed and renders no
- * real `<option>` elements) specifically so the exact set of values on offer stays
- * introspectable and testable.
+ * which matches the BACKED VALUE exactly — `'male'`, never `'Male'`. They use the tier-1
+ * `Select` like every other dropdown on this page (six others on this same admin employee
+ * screen alone); `GENDER_OPTIONS`/`MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` are exported
+ * so a test can assert the exact backed values on offer without depending on `Select`'s
+ * internal DOM shape (Radix's `Select.Item` renders no real `<option>` element).
  */
 
 import { useState } from 'react'
@@ -54,13 +58,15 @@ const ACCEPTED_SCAN_TYPES = '.pdf,.jpg,.jpeg,.png'
 
 // The three closed sets `Rule::enum()` validates — verified against
 // app/Domain/Profile/{Gender,MaritalStatus,BloodType}.php. Case names cannot contain '+'/
-// '-', so BloodType's backed values carry the real notation directly.
-const GENDER_OPTIONS: SelectOption[] = [
+// '-', so BloodType's backed values carry the real notation directly. Exported so a test
+// can assert the exact backed values on offer without depending on `Select`'s internal DOM
+// shape (Radix's `Select.Item` renders no real `<option>` element to introspect).
+export const GENDER_OPTIONS: SelectOption[] = [
   { value: 'male', label: 'Male' },
   { value: 'female', label: 'Female' },
 ]
 
-const MARITAL_STATUS_OPTIONS: SelectOption[] = [
+export const MARITAL_STATUS_OPTIONS: SelectOption[] = [
   { value: 'single', label: 'Single' },
   { value: 'married', label: 'Married' },
   { value: 'widowed', label: 'Widowed' },
@@ -68,7 +74,7 @@ const MARITAL_STATUS_OPTIONS: SelectOption[] = [
   { value: 'annulled', label: 'Annulled' },
 ]
 
-const BLOOD_TYPE_OPTIONS: SelectOption[] = [
+export const BLOOD_TYPE_OPTIONS: SelectOption[] = [
   { value: 'A+', label: 'A+' },
   { value: 'A-', label: 'A-' },
   { value: 'B+', label: 'B+' },
@@ -79,53 +85,13 @@ const BLOOD_TYPE_OPTIONS: SelectOption[] = [
   { value: 'O-', label: 'O-' },
 ]
 
-interface NativeSelectProps {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: SelectOption[]
-  placeholder: string
-}
-
-/** A real `<select>` with real `<option>` elements — unlike the Radix-backed tier-1
- * `Select`, whose listbox items are ARIA-only `div`s with nothing `querySelectorAll
- * ('option')` can see. `gender`/`marital_status`/`blood_type` are each validated against
- * an exact backed enum value, so the set of options actually on offer has to stay
- * introspectable in exactly this way. Styled to match `TextInput`'s filled-input look
- * directly (mirrors `CorrectionForm`'s private `TimeField`, which does the same for a
- * field kind the tier-1 primitives don't cover). */
-function NativeSelect({ id, label, value, onChange, options, placeholder }: NativeSelectProps) {
-  return (
-    <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
-      <label htmlFor={id} style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
-        style={{
-          background: 'var(--surface-1)',
-          color: 'var(--ink)',
-          border: 'none',
-          borderBottom: '1px solid var(--field-border)',
-          borderRadius: 'var(--radius)',
-          padding: 'calc(var(--sp-sm) - 1px) var(--sp-md)',
-          font: 'var(--t-body)',
-          letterSpacing: 'var(--ls-body)',
-        }}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
+/** A blank/unselected option prepended at each closed-set `Select`'s call site (not baked
+ * into the exported *_OPTIONS constants themselves, which must stay exactly the backed
+ * enum values for the constant-based test to assert against) — mirrors `EmploymentForm`'s
+ * `[{ value: '', label: 'Select an office' }, ...officeOptions]` pattern on this same page
+ * for a nullable field that starts out unset. */
+function withBlank(label: string, options: SelectOption[]): SelectOption[] {
+  return [{ value: '', label }, ...options]
 }
 
 function apiErrorMessage(error: unknown): string | null {
@@ -192,9 +158,6 @@ function PersonalDetailsForm({ profile, submitting, submitError, onSubmit }: Per
       <TextInput id="profile-salutation" label="Salutation" value={salutation} onChange={setSalutation} />
       <TextInput id="profile-nickname" label="Nickname" value={nickname} onChange={setNickname} />
       <TextInput id="profile-home-address" label="Home" value={homeAddress} onChange={setHomeAddress} />
-      {/* "Personal Email", not "Email" — this same admin page's "Provision login" form
-          (ProvisionForm) already has a login-email field labelled "Email"; the two forms
-          render on the page at once, and `getByLabelText` needs one unambiguous match. */}
       <TextInput
         id="profile-personal-email"
         label="Personal Email"
@@ -206,33 +169,30 @@ function PersonalDetailsForm({ profile, submitting, submitError, onSubmit }: Per
       <TextInput id="profile-fax" label="Fax" value={fax} onChange={setFax} />
       <TextInput id="profile-mobile" label="Mobile" value={mobile} onChange={setMobile} />
       <TextInput id="profile-emergency" label="Emergency" value={emergencyContact} onChange={setEmergencyContact} />
-      <NativeSelect
+      <Select
         id="profile-gender"
         label="Gender"
         value={gender}
         onChange={setGender}
-        options={GENDER_OPTIONS}
-        placeholder="Select gender"
+        options={withBlank('Select gender', GENDER_OPTIONS)}
       />
       <TextInput id="profile-birth-date" label="Birthday" type="date" value={birthDate} onChange={setBirthDate} />
       <TextInput id="profile-birthplace" label="Birthplace" value={birthplace} onChange={setBirthplace} />
-      <NativeSelect
+      <Select
         id="profile-marital-status"
         label="Marital Status"
         value={maritalStatus}
         onChange={setMaritalStatus}
-        options={MARITAL_STATUS_OPTIONS}
-        placeholder="Select marital status"
+        options={withBlank('Select marital status', MARITAL_STATUS_OPTIONS)}
       />
       <TextInput id="profile-citizenship" label="Citizenship" value={citizenship} onChange={setCitizenship} />
       <TextInput id="profile-religion" label="Religion" value={religion} onChange={setReligion} />
-      <NativeSelect
+      <Select
         id="profile-blood-type"
         label="Blood Type"
         value={bloodType}
         onChange={setBloodType}
-        options={BLOOD_TYPE_OPTIONS}
-        placeholder="Select blood type"
+        options={withBlank('Select blood type', BLOOD_TYPE_OPTIONS)}
       />
 
       {submitError ? (
@@ -273,11 +233,19 @@ function defaultRelationshipId(relationships: ProfileCatalog['relationships']): 
 }
 
 /**
- * `ProfileDependent` (the read side) carries a `relationship` DESCRIPTION, not an id — the
- * backend resolves it for display and never hands the id back. Re-deriving the id by
- * matching descriptions is the only way to pre-select the right catalog entry when editing
- * an existing dependent; if the match fails (a renamed/removed catalog entry) it falls back
- * to the first relationship rather than leaving the row unselectable.
+ * `ProfileDependent` (the read side) carries the relationship's CODE, not a description and
+ * not an id — verified against `EmployeeProfileResource::toArray`
+ * (`'relationship' => $dependent->relationship?->code`), e.g. `'spouse'`. Re-deriving the id
+ * by matching on `code` is the only way to pre-select the right catalog entry when editing
+ * an existing dependent.
+ *
+ * This used to match on `description` instead (`'Spouse'`), which NEVER matched — every
+ * seeded relationship's code and description differ only in case, so every existing
+ * dependent silently fell through to `defaultRelationshipId` (`relationships[0]`, which is
+ * `'child'` under `ProfileCatalogSeeder`'s `orderBy('code')`). Because `PUT .../dependents`
+ * REPLACES the whole set, saving after that silent fallback rewrote EVERY dependent's
+ * relationship to "Child" — including spouses. The fallback below still exists for a
+ * genuinely renamed/removed catalog entry; that is now the rare case, not the only case.
  */
 function initialDependentRows(
   profile: EmployeeProfile,
@@ -287,7 +255,7 @@ function initialDependentRows(
     key: dependent.id,
     name: dependent.name,
     relationshipId:
-      relationships.find((relationship) => relationship.description === dependent.relationship)?.id ??
+      relationships.find((relationship) => relationship.code === dependent.relationship)?.id ??
       defaultRelationshipId(relationships),
     birthDate: dependent.birth_date ?? '',
   }))
@@ -327,10 +295,20 @@ function DependentsForm({ profile, relationships, submitting, submitError, onSub
   function handleSubmit(event: FormEvent): void {
     event.preventDefault()
 
-    const dependents: DependentWrite[] = rows.map((row) => ({
+    // Direct keys, not a conditional spread: a spread's resulting object type isn't
+    // subject to excess-property checking, so a `birthDate`/`birth_date` typo here would
+    // typecheck clean and silently drop the date on the wire. The explicit `: DependentWrite`
+    // return-type annotation on the callback ITSELF is load-bearing, not decoration — this
+    // project's typecheck runs through `tsgo` (`@typescript/native-preview`), and confirmed
+    // by a throwaway repro, `tsgo` does NOT excess-property-check an arrow function's
+    // returned object literal through `.map()`'s generic inference, even with the target
+    // array type annotated on the `const` (`rows.map((row) => (...))`) or an explicit
+    // `.map<DependentWrite>(...)` type argument — only an explicit return-type annotation
+    // directly on the callback reliably triggers it under `tsgo`.
+    const dependents: DependentWrite[] = rows.map((row): DependentWrite => ({
       name: row.name.trim(),
       relationship_id: row.relationshipId,
-      ...(row.birthDate !== '' ? { birth_date: row.birthDate } : {}),
+      birth_date: row.birthDate !== '' ? row.birthDate : null,
     }))
 
     onSubmit(dependents)
@@ -422,7 +400,10 @@ interface IdentificationsFormProps {
   submitting: boolean
   submitError: string | null
   onSubmit: (fields: IdentificationFields) => void
-  deleting: boolean
+  /** The id of the identification currently being deleted, or `null` if none is — NOT a
+   * shared `deleteIdentification.isPending` boolean, which would disable every row's
+   * Delete button while any ONE row's delete is in flight. */
+  deletingId: string | null
   onDelete: (identificationId: string) => void
 }
 
@@ -432,7 +413,7 @@ function IdentificationsForm({
   submitting,
   submitError,
   onSubmit,
-  deleting,
+  deletingId,
   onDelete,
 }: IdentificationsFormProps) {
   const categoryOptions: SelectOption[] = categories.map((category) => ({
@@ -481,8 +462,13 @@ function IdentificationsForm({
     onSubmit({
       category_id: categoryId,
       number: number.trim(),
-      ...(issuedOn !== '' ? { issued_on: issuedOn } : {}),
-      ...(expiresOn !== '' ? { expires_on: expiresOn } : {}),
+      // Direct keys with `undefined` for "omit", not a conditional spread — a spread's
+      // result isn't excess-property-checked, so `issuedOn`/`issued_on` (or the
+      // `expires_on` equivalent) would typecheck clean while silently never reaching the
+      // wire. `api.profile.saveIdentification` already skips any field that is
+      // `undefined` when building the FormData.
+      issued_on: issuedOn !== '' ? issuedOn : undefined,
+      expires_on: expiresOn !== '' ? expiresOn : undefined,
       ...(notes.trim() !== '' ? { notes: notes.trim() } : {}),
       ...(scan !== null ? { scan } : {}),
     })
@@ -548,7 +534,7 @@ function IdentificationsForm({
               key={identification.id}
               employeeId={profile.employee_id}
               identification={identification}
-              deleting={deleting}
+              deleting={identification.id === deletingId}
               onDelete={() => onDelete(identification.id)}
             />
           ))}
@@ -605,6 +591,16 @@ export function ProfileForm({ profile, relationships, categories }: ProfileFormP
     profile.employee_id,
   )
 
+  // Tracked separately from `deleteIdentification.isPending` — that flag is shared across
+  // every row (there's one mutation object for the whole form), so using it directly would
+  // disable EVERY row's Delete button while any one row's delete is in flight.
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  function handleDeleteIdentification(identificationId: string): void {
+    setDeletingId(identificationId)
+    deleteIdentification.mutate(identificationId, { onSettled: () => setDeletingId(null) })
+  }
+
   return (
     <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
       <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
@@ -636,8 +632,8 @@ export function ProfileForm({ profile, relationships, categories }: ProfileFormP
           submitting={saveIdentification.isPending}
           submitError={apiErrorMessage(saveIdentification.error)}
           onSubmit={(fields) => saveIdentification.mutate(fields)}
-          deleting={deleteIdentification.isPending}
-          onDelete={(identificationId) => deleteIdentification.mutate(identificationId)}
+          deletingId={deletingId}
+          onDelete={handleDeleteIdentification}
         />
       </div>
     </div>
