@@ -126,10 +126,24 @@ it('replaces the whole profile — an omitted field becomes null, not its old va
     expect(EmployeeProfile::query()->count())->toBe(1);
 });
 
-it('writes an activity log entry under the employee_profile log name', function (): void {
+it('writes an activity log entry under the employee_profile log name, with non-sensitive attributes and without contact PII', function (): void {
     $this->actingAs($this->hr)
         ->putJson("/api/v1/admin/employees/{$this->employee->id}/profile", $this->payload)
         ->assertOk();
 
-    expect(Activity::query()->where('log_name', 'employee_profile')->exists())->toBeTrue();
+    $activity = Activity::query()->where('log_name', 'employee_profile')->first();
+
+    expect($activity)->not->toBeNull();
+
+    $attributes = $activity->properties['attributes'] ?? [];
+
+    // A closed, non-sensitive field must actually be captured — this is what catches
+    // logFillable() on a $guarded=[] model silently logging empty properties.
+    expect($attributes)->toHaveKey('nickname');
+    expect($attributes['nickname'])->toBe('KENPE');
+
+    // Contact PII must never land in activity_log — same reasoning as
+    // EmployeeIdentification::number being excluded (M10a spec, decision 6).
+    expect($attributes)->not->toHaveKey('home_address');
+    expect($attributes)->not->toHaveKey('mobile');
 });

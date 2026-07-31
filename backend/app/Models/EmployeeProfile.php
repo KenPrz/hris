@@ -77,10 +77,21 @@ final class EmployeeProfile extends Model
         });
     }
 
+    /**
+     * `home_address`, `personal_email`, `phone`, `fax`, `mobile`, and `emergency_contact` are
+     * DELIBERATELY absent from logOnly(). Logging them would copy contact PII into
+     * activity_log — a table with different read rules and a longer retention than anyone
+     * reasoned about. The log records THAT the profile changed, never the contact details it
+     * changed to. Same reasoning as EmployeeIdentification::getActivitylogOptions() excluding
+     * `number`. See the M10a spec, decision 6.
+     */
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logFillable()
+            ->logOnly([
+                'salutation', 'nickname', 'birthplace', 'gender', 'birth_date',
+                'marital_status', 'citizenship', 'religion', 'blood_type',
+            ])
             ->useLogName('employee_profile')
             ->logOnlyDirty();
     }
