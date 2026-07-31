@@ -2057,6 +2057,26 @@ What the building turned on, for whoever extends the profile module next:
   change. `frontend/web/src/lib/api.ts`'s `ProfileDependent` type gained the new field;
   `docs/03-api.md`'s dependents example was updated to show it.
 
+### M10a open follow-ups
+
+The final whole-branch review triaged 29 recorded items: none blocked the merge, roughly half
+were accepted as recorded, and these are the ones worth doing. Ordered by value, not by size.
+
+| Item | Why it matters |
+| --- | --- |
+| **`upload_max_filesize` is 2M while every attachment rule says `max:10240`** | Highest-value item on the list, and it **predates M10a** — it affects M3.6's existing attachment routes too. A 5 MB phone photo of a passport is dropped by PHP before Laravel sees it and surfaces as a misleading `400 "must be a file"`, not a size error. HR hits this on day one. One `php.ini` line in the api image. |
+| **Self-view renders an edit form that can only 403** | `viewFullProfile` admits self but `updateProfile` denies self, so an HR Admin opening their own profile gets a live form whose every submit fails behind the generic *"That didn't save. Check your connection and try again."* — actively wrong for a deliberate separation-of-duties denial. The backend holds correctly; this is UX only. |
+| **Scan replacement deletes the old RustFS object *inside* the DB transaction** | A rollback after `addMedia` leaves a media row pointing at a deleted object — a permanently lost government-ID scan, the one artifact this milestone says HR must be able to produce. Narrow window, unrecoverable outcome. |
+| **`RbacSeeder`'s permission names are reserved words** | spatie registers a `Gate::before` granting any ability whose *name* matches a held permission. Adding a permission literally named `viewFullProfile`/`viewRedactedProfile`/`updateProfile` would grant that policy ability **globally**, bypassing the office pivot entirely. Privilege escalation; the fix is a one-line reserved-words comment. |
+| **`hrAdminFor()` is a global Pest file-scope function** | A second declaration anywhere in `tests/` is a PHP **fatal**, not a test failure. M10b will add profile tests. Move it to `tests/Pest.php`. |
+| **No arch guard over `app/Http/Controllers/Profile/`** | The `Employees/` and `Attendance/` boundary greps don't cover it. Today's two `Profile/` controllers are ungated *by design*, which is exactly the state in which a future gated one gets no CI backstop. Widening the existing rule is nearly free. |
+| **`ProfileScopeMatrixTest` cannot tell 403 from 404** | It checks only 2xx-vs-not across all 48 cells, so the enumeration-leak discipline it claims to prove isn't actually pinned. Every route has an explicit `assertNotFound()` elsewhere, so this is a strength gap, not a hole. One line. |
+| **The `assignment` sub-block's key set isn't pinned** | The redaction test asserts exact keys at the top level and on `contact`, but not on `assignment` — and `assignment` is the block *shared* between the full and redacted resources, so it is precisely where a leak would enter. |
+| **`Select`'s `withBlank` placeholder never shows on the closed trigger** | An employee with a null blood type renders an empty box with a caret. Affects the six pre-existing dropdowns on the admin page too, so it is a `ui/Select.tsx` fix, not an M10a one. Nobody had seen it rendered until M10a's browser walkthrough. |
+| **`Carbon::today()` is UTC-today across the profile resources** | Between 00:00 and 08:00 Asia/Manila, an employment record effective *today* doesn't appear while `EmployeeProfile::age` — which correctly anchors to the office timezone — has already rolled over. The two disagree inside one payload. **Do not patch locally**: the real fix threads office timezone through `EmploymentResolver` and `ScheduleAssignment`, and deserves its own piece of work. |
+| **`useProfileCatalog()` fires for redacted viewers** | Who will never see a dropdown. A wasted request, not a disclosure. `enabled: fullQuery.isSuccess`. |
+| **`gridTemplateColumns: 'minmax(8rem, 14rem) 1fr'`** | The branch's only literal dimensional value, against a stated rule that a literal pixel value in a component is a bug. Either add the token or record the exception. |
+
 Next: no milestone is open. **M10b — document management** is the nearest unclaimed work
 (above); beyond that, the **Deferred** table below is unchanged by this milestone.
 
