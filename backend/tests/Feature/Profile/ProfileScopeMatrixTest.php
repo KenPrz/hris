@@ -197,15 +197,25 @@ it('enforces the documented matrix across every M10a route', function (): void {
             $response = $this->actingAs($this->actors[$actorName])
                 ->{$method}($route['uri'], $route['payload']);
 
-            $succeeded = $response->getStatusCode() >= 200 && $response->getStatusCode() < 300;
+            $status = $response->getStatusCode();
 
-            if ($succeeded !== $allowed) {
+            // The denied branch asserts NOT-FOUND SPECIFICALLY, not merely "not 2xx" — a
+            // bare `>= 200 && < 300` check cannot tell a 403 (the enumeration leak the
+            // 404-not-403 rule exists to prevent, per docs/05-rbac.md) apart from a 404 in
+            // any of these 48 cells, so a route that started returning 403 for an
+            // out-of-scope actor would pass silently. `$allowed` still governs which check
+            // applies, so the diagnosability of the failure message (actor + route + status)
+            // is unchanged either way.
+            $succeeded = $status >= 200 && $status < 300;
+            $ok = $allowed ? $succeeded : $status === 404;
+
+            if (! $ok) {
                 $failures[] = sprintf(
                     '%s -> %s: expected %s, got HTTP %d',
                     $actorName,
                     $routeName,
-                    $allowed ? 'allowed' : 'denied',
-                    $response->getStatusCode(),
+                    $allowed ? 'allowed' : 'denied (404)',
+                    $status,
                 );
             }
         }
