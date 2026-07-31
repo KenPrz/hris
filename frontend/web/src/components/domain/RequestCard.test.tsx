@@ -34,6 +34,12 @@ describe('RequestCard', () => {
     expect(screen.getByText('Forgot to punch out')).toBeInTheDocument()
   })
 
+  it('links the requester id to their personnel file (M10a fix round 2)', () => {
+    render(<RequestCard request={requestRecord({ employee_id: 'emp-42' })} onApprove={vi.fn()} onReject={vi.fn()} pending={false} />)
+
+    expect(screen.getByRole('link', { name: 'emp-42' })).toHaveAttribute('href', '/employees/emp-42/profile')
+  })
+
   it('summarizes a void as "Void the <time> <DIRECTION>"', () => {
     render(
       <RequestCard

@@ -2,13 +2,21 @@
 
 /**
  * The five sections of a personnel file, presentational only. Shared by /me/profile (read)
- * and the admin employee Profile tab (read + edit), so the two can never disagree about
- * what a personnel file looks like.
+ * and `/employees/{id}/profile` (the HR-Admin/System-Admin full read, alongside
+ * `ProfileForm` for the edit half), so the two can never disagree about what a personnel
+ * file looks like.
+ *
+ * `ProfileSummarySections` below renders the OTHER shape `/employees/{id}/profile` can
+ * receive — `EmployeeProfileSummary`, what a manager sees of a direct report. It is a
+ * separate function over a separate (non-`Partial`) type, not a conditional inside
+ * `ProfileSections`, mirroring why the backend keeps `EmployeeProfileSummaryResource` a
+ * separate class from `EmployeeProfileResource`: a field added to the full shape must not
+ * silently leak into the redacted one.
  */
 
 import { EmptyState } from '@/components/EmptyState'
 import { SectionHeader } from '@/components/SectionHeader'
-import type { EmployeeProfile } from '@/lib/api'
+import type { EmployeeProfile, EmployeeProfileSummary } from '@/lib/api'
 import { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, labelForOption, MARITAL_STATUS_OPTIONS } from '@/lib/profileOptions'
 
 /** Null renders as an em dash, never as blank space — "we have no value" must be visible. */
@@ -41,6 +49,23 @@ export function DefinitionList({ items }: { items: Array<[string, string | numbe
       ))}
     </dl>
   )
+}
+
+/** The nine Assignment rows, shared verbatim by the full and redacted sections below —
+ * `ProfileAssignment` is identical on both resources (`EmployeeAssignmentPresenter` on the
+ * backend), so there is exactly one place that decides what a row's label is. */
+function assignmentItems(assignment: EmployeeProfile['assignment']): Array<[string, string | null]> {
+  return [
+    ['Designation', assignment.designation],
+    ['Business Unit', assignment.business_unit],
+    ['Reporting To', assignment.reports_to],
+    ['Employment Status', assignment.employment_status],
+    ['Location', assignment.location],
+    ['Region', assignment.region],
+    ['Labor Type', assignment.labor_type],
+    ['Date Hired', assignment.hired_at],
+    ['Work Shift', assignment.work_shift],
+  ]
 }
 
 export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
@@ -127,19 +152,7 @@ export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
       <section>
         <SectionHeader title="Assignment" />
         <div style={{ marginTop: 'var(--sp-md)' }}>
-          <DefinitionList
-            items={[
-              ['Designation', assignment.designation],
-              ['Business Unit', assignment.business_unit],
-              ['Reporting To', assignment.reports_to],
-              ['Employment Status', assignment.employment_status],
-              ['Location', assignment.location],
-              ['Region', assignment.region],
-              ['Labor Type', assignment.labor_type],
-              ['Date Hired', assignment.hired_at],
-              ['Work Shift', assignment.work_shift],
-            ]}
-          />
+          <DefinitionList items={assignmentItems(assignment)} />
         </div>
       </section>
 
@@ -156,6 +169,40 @@ export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
               ])}
             />
           )}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+/**
+ * What a manager sees of a direct report — contact plus assignment, nothing else. Renders
+ * `EmployeeProfileSummary`, NOT a filtered `EmployeeProfile`: there is no personal section,
+ * no dependents, no identifications, and no home address to fall back to, matching
+ * `EmployeeProfileSummaryResource` on the wire (see the M10a spec, "Redaction").
+ */
+export function ProfileSummarySections({ summary }: { summary: EmployeeProfileSummary }) {
+  const { contact, assignment } = summary
+
+  return (
+    <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
+      <section>
+        <SectionHeader title="Contact" />
+        <div style={{ marginTop: 'var(--sp-md)' }}>
+          <DefinitionList
+            items={[
+              ['Personal Email', contact.personal_email],
+              ['Phone', contact.phone],
+              ['Mobile', contact.mobile],
+            ]}
+          />
+        </div>
+      </section>
+
+      <section>
+        <SectionHeader title="Assignment" />
+        <div style={{ marginTop: 'var(--sp-md)' }}>
+          <DefinitionList items={assignmentItems(assignment)} />
         </div>
       </section>
     </div>

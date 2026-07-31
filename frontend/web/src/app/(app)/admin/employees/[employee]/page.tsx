@@ -1,9 +1,19 @@
 'use client'
 
 /**
- * The employee profile (M8b) — sysadmin-gated, reached from `/admin/employees`'s roster.
+ * The employee record (M8b) — sysadmin-gated, reached from `/admin/employees`'s roster.
  * Reads the `[employee]` route param straight into `useAdminEmployee`, mirroring
  * `PayrollExportPage`'s `useParams` shape.
+ *
+ * Employment records, HR-office grants, and login provisioning — never the personnel
+ * file. The Profile section that used to live here moved to `/employees/{id}/profile`
+ * (M10a fix round 2): this page's whole screen is `is_system_admin`-gated, both on the
+ * frontend and via `ShowEmployeeRequest`'s `authorize()`, which made the M10a
+ * authorization model (HR Admins editing PII through `employee.pii.edit` + the
+ * `hr_admin_offices` pivot) unreachable in a browser even though the profile endpoints
+ * themselves never required `is_system_admin`. It also incidentally fixed a defect where
+ * this page stacked `ProfileSections` (read) and `ProfileForm` (edit) so every field and
+ * two `<h2>Dependents</h2>` rendered twice.
  *
  * Three independent write paths, each its own self-contained form (owns its own field
  * state, like `OfficeForm`/the create wizard's steps) so one submitting/erroring mutation
@@ -36,8 +46,6 @@ import {
   useUpdateEmployee,
 } from '@/hooks/useAdminEmployees'
 import { useDepartments, useOffices } from '@/hooks/useAdminOrgTree'
-import { useEmployeeProfile } from '@/hooks/useEmployeeProfile'
-import { useProfileCatalog } from '@/hooks/useProfileCatalog'
 import { useSession } from '@/hooks/useSession'
 import { formatCentavos } from '@/lib/money'
 import { AppShell } from '@/components/AppShell'
@@ -49,8 +57,6 @@ import { Select } from '@/components/ui/Select'
 import type { SelectOption } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { TextInput } from '@/components/ui/TextInput'
-import { ProfileForm } from '@/components/domain/ProfileForm'
-import { ProfileSections } from '@/components/domain/ProfileSections'
 
 const EMPLOYMENT_TYPE_OPTIONS: SelectOption[] = [
   { value: 'regular', label: 'Regular' },
@@ -484,8 +490,6 @@ export default function EmployeeDetailPage() {
   const officesQuery = useOffices()
   const departmentsQuery = useDepartments()
   const employeesQuery = useAdminEmployees()
-  const profileQuery = useEmployeeProfile(id ?? '')
-  const catalogQuery = useProfileCatalog()
 
   const updateMutation = useUpdateEmployee()
   const recordEmploymentMutation = useRecordEmployment()
@@ -534,19 +538,31 @@ export default function EmployeeDetailPage() {
           title={detail?.full_name ?? 'Employee'}
           level={1}
           actions={
-            <Link
-              href="/admin/employees"
-              className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
-              style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--blue)', textDecoration: 'none' }}
-            >
-              Back to employees
-            </Link>
+            <div className="flex items-center" style={{ gap: 'var(--sp-md)' }}>
+              {id !== null ? (
+                <Link
+                  href={`/employees/${id}/profile`}
+                  className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
+                  style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--blue)', textDecoration: 'none' }}
+                >
+                  Personnel file
+                </Link>
+              ) : null}
+              <Link
+                href="/admin/employees"
+                className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
+                style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--blue)', textDecoration: 'none' }}
+              >
+                Back to employees
+              </Link>
+            </div>
           }
         />
 
         {session !== null && !isSysAdmin ? (
           <InlineNotification kind="info" title="This account can't administer employees.">
-            The employee profile is a system-admin-only screen.
+            Employment records and login provisioning are a system-admin-only screen. An
+            employee&rsquo;s personnel file lives at its own HR-reachable page instead.
           </InlineNotification>
         ) : id === null ? (
           <InlineNotification kind="error" title="No employee to show.">
@@ -651,26 +667,6 @@ export default function EmployeeDetailPage() {
                   onSubmit={handleSetHrOffices}
                 />
               )}
-            </div>
-
-            <div className="flex flex-col" style={{ gap: 'var(--sp-sm)' }}>
-              <SectionHeader title="Profile" level={2} />
-              {profileQuery.isLoading || catalogQuery.isLoading ? (
-                <Skeleton height="16rem" />
-              ) : profileQuery.isError || catalogQuery.isError ? (
-                <InlineNotification kind="error" title="Couldn't load this employee's personnel file.">
-                  Check your connection and try again.
-                </InlineNotification>
-              ) : profileQuery.data !== undefined && catalogQuery.data !== undefined ? (
-                <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
-                  <ProfileSections profile={profileQuery.data} />
-                  <ProfileForm
-                    profile={profileQuery.data}
-                    relationships={catalogQuery.data.relationships}
-                    categories={catalogQuery.data.identification_categories}
-                  />
-                </div>
-              ) : null}
             </div>
           </>
         )}

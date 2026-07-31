@@ -14,9 +14,17 @@
  *
  * `summarize` switches on `request.type` so a future leave/OT request type is a new case
  * here, not a new component.
+ *
+ * The requester `employee_id` links to `/employees/{id}/profile` (M10a fix round 2) — the
+ * one place both this card's audiences (a manager on `/team/approvals`, an HR Admin on
+ * `/office/approvals`) already see a per-employee identifier with an id attached, so it is
+ * the natural entry point into the personnel file rather than inventing a new one. The
+ * policy on that route decides what each viewer actually sees (full vs. redacted); this
+ * card does not need to know which.
  */
 
 import { useState } from 'react'
+import Link from 'next/link'
 
 import type { AttendanceAdjustmentDetail, LeaveRequestDetail, OvertimeRequestDetail, RequestRecord, RequestState, RequestType } from '@/lib/api'
 import { authedBlobUrl } from '@/lib/authedBlobUrl'
@@ -189,9 +197,18 @@ export function RequestCard({ request, onApprove, onReject, pending }: RequestCa
       }}
     >
       <div className="flex items-center justify-between flex-wrap" style={{ gap: 'var(--sp-sm)' }}>
-        <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
+        <Link
+          href={`/employees/${request.employee_id}/profile`}
+          className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--blue)]"
+          style={{
+            font: 'var(--t-emphasis)',
+            letterSpacing: 'var(--ls-body)',
+            color: 'var(--ink)',
+            textDecoration: 'none',
+          }}
+        >
           {request.employee_id}
-        </span>
+        </Link>
         <div className="flex items-center" style={{ gap: 'var(--sp-xs)' }}>
           <span style={{ font: 'var(--t-body-sm)', letterSpacing: 'var(--ls-body)', color: 'var(--ink-muted)' }}>
             {TYPE_LABEL[request.type]}

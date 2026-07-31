@@ -1,28 +1,32 @@
 'use client'
 
 /**
- * The admin Profile tab's edit surface (M10a Task 14) — three independent submits against
- * three independent endpoints (personal details, dependents, identifications), because
- * they are three separate writes and one combined save would need a transaction the API
- * does not offer. `profile`/`relationships`/`categories` are already-resolved data the
- * caller (the admin employee detail page, via `useEmployeeProfile`/`useProfileCatalog`)
- * fetches; this component owns only field state and the four mutations from
- * `useSaveProfile`.
+ * The personnel file's edit surface (M10a Task 14; relocated to `/employees/{id}/profile`
+ * in fix round 2, alongside `ProfileSections`) — three independent submits against three
+ * independent endpoints (personal details, dependents, identifications), because they are
+ * three separate writes and one combined save would need a transaction the API does not
+ * offer. `profile`/`relationships`/`categories` are already-resolved data the caller
+ * fetches (via `useEmployeeProfile`/`useProfileCatalog`); this component owns only field
+ * state and the four mutations from `useSaveProfile`. The backend still enforces who may
+ * actually submit — `EmployeePolicy::updateProfile` denies self even for an HR Admin
+ * viewing their own row, so this form can be present without every viewer being able to
+ * save through it.
  *
  * Labels mirror `ProfileSections`' `DefinitionList` labels exactly (e.g. "Home" for
  * `home_address`, "Birthday" for `birth_date`) — the read view and the edit view describe
  * the same personnel file and must never disagree about what a field is called. The one
  * exception is `personal_email`, labelled "Personal Email" on both sides rather than bare
- * "Email" — this same admin page's "Provision login" form has its own, unrelated "Email"
- * field (a login), and the two forms render at once.
+ * "Email" — the admin employee detail page's separate "Provision login" form has its own,
+ * unrelated "Email" field (a login), and the two forms used to render on the same screen;
+ * kept for label continuity even though the two are now on separate pages.
  *
  * Gender, marital status, and blood type are validated backend-side with `Rule::enum()`,
  * which matches the BACKED VALUE exactly — `'male'`, never `'Male'`. They use the tier-1
- * `Select` like every other dropdown on this page (six others on this same admin employee
- * screen alone). `GENDER_OPTIONS`/`MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` live in
- * `@/lib/profileOptions`, not here — `ProfileSections` needs the same label set to display
- * an already-stored value, and a second copy of the label strings would drift from this
- * one. Re-exported below so existing imports of them from this module keep working.
+ * `Select` like every other dropdown on this screen. `GENDER_OPTIONS`/
+ * `MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` live in `@/lib/profileOptions`, not here —
+ * `ProfileSections` needs the same label set to display an already-stored value, and a
+ * second copy of the label strings would drift from this one. Re-exported below so
+ * existing imports of them from this module keep working.
  */
 
 import { useState } from 'react'
