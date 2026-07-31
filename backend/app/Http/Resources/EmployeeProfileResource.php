@@ -65,7 +65,14 @@ final class EmployeeProfileResource extends JsonResource
             'dependents' => $this->dependents->map(fn ($dependent): array => [
                 'id' => $dependent->id,
                 'name' => $dependent->name,
+                // `relationship` stays the catalog CODE — `ProfileForm` matches on it to
+                // pre-select the right catalog entry when editing (see the M10a Task 14
+                // fix: matching on the description instead silently rewrote every
+                // dependent to "Child"). `relationship_label` is added alongside, never
+                // replacing it, purely for read-view display — mirrors the
+                // category_code/category_name pair below.
                 'relationship' => $dependent->relationship?->code,
+                'relationship_label' => $dependent->relationship?->description,
                 'birth_date' => $dependent->birth_date?->toDateString(),
             ])->values()->all(),
 

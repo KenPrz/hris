@@ -785,6 +785,12 @@ export type ProfileDependent = {
   id: string
   name: string
   relationship: string | null
+  /** Human-readable version of `relationship` — the relationship catalog's `description`,
+   * not its `code`. Added alongside `relationship`, never replacing it: `ProfileForm`
+   * matches on the CODE to pre-select the right catalog entry when editing a dependent
+   * (matching on the description silently rewrote every dependent to "Child" — see its own
+   * doc comment), while `ProfileSections`' read view wants this label instead. */
+  relationship_label: string | null
   birth_date: string | null // YYYY-MM-DD
 }
 

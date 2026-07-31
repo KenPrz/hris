@@ -317,7 +317,7 @@ behind every step; M9 puts all of it behind a single TLS edge with a backup whos
 restore has actually been drilled; and M10a gives every employee a personnel file —
 contact and personal details, dependents, and government/financial IDs with a scanned copy
 of each — that an HR Admin configures per office, an employee reads for themselves, and a
-manager sees a redacted view of. **853 backend tests (19 of them Arch) + 560 frontend
+manager sees a redacted view of. **853 backend tests (19 of them Arch) + 563 frontend
 tests.** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
 what a user can actually do today.
 

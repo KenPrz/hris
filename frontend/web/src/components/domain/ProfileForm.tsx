@@ -19,9 +19,10 @@
  * Gender, marital status, and blood type are validated backend-side with `Rule::enum()`,
  * which matches the BACKED VALUE exactly — `'male'`, never `'Male'`. They use the tier-1
  * `Select` like every other dropdown on this page (six others on this same admin employee
- * screen alone); `GENDER_OPTIONS`/`MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` are exported
- * so a test can assert the exact backed values on offer without depending on `Select`'s
- * internal DOM shape (Radix's `Select.Item` renders no real `<option>` element).
+ * screen alone). `GENDER_OPTIONS`/`MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` live in
+ * `@/lib/profileOptions`, not here — `ProfileSections` needs the same label set to display
+ * an already-stored value, and a second copy of the label strings would drift from this
+ * one. Re-exported below so existing imports of them from this module keep working.
  */
 
 import { useState } from 'react'
@@ -38,6 +39,7 @@ import { ApiError } from '@/lib/api'
 import type { IdentificationFields } from '@/hooks/useSaveProfile'
 import { useSaveProfile } from '@/hooks/useSaveProfile'
 import { uuidV4 } from '@/lib/uuid'
+import { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, MARITAL_STATUS_OPTIONS } from '@/lib/profileOptions'
 import { SectionHeader } from '@/components/SectionHeader'
 import { Button } from '@/components/ui/Button'
 import { InlineNotification } from '@/components/ui/InlineNotification'
@@ -56,34 +58,10 @@ export interface ProfileFormProps {
 
 const ACCEPTED_SCAN_TYPES = '.pdf,.jpg,.jpeg,.png'
 
-// The three closed sets `Rule::enum()` validates — verified against
-// app/Domain/Profile/{Gender,MaritalStatus,BloodType}.php. Case names cannot contain '+'/
-// '-', so BloodType's backed values carry the real notation directly. Exported so a test
-// can assert the exact backed values on offer without depending on `Select`'s internal DOM
-// shape (Radix's `Select.Item` renders no real `<option>` element to introspect).
-export const GENDER_OPTIONS: SelectOption[] = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-]
-
-export const MARITAL_STATUS_OPTIONS: SelectOption[] = [
-  { value: 'single', label: 'Single' },
-  { value: 'married', label: 'Married' },
-  { value: 'widowed', label: 'Widowed' },
-  { value: 'separated', label: 'Separated' },
-  { value: 'annulled', label: 'Annulled' },
-]
-
-export const BLOOD_TYPE_OPTIONS: SelectOption[] = [
-  { value: 'A+', label: 'A+' },
-  { value: 'A-', label: 'A-' },
-  { value: 'B+', label: 'B+' },
-  { value: 'B-', label: 'B-' },
-  { value: 'AB+', label: 'AB+' },
-  { value: 'AB-', label: 'AB-' },
-  { value: 'O+', label: 'O+' },
-  { value: 'O-', label: 'O-' },
-]
+// Re-exported so this module stays the one place other code (and this file's own test)
+// imports the three closed-set option arrays from — the arrays themselves live in
+// `@/lib/profileOptions` because `ProfileSections` needs them too, for read-view labels.
+export { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, MARITAL_STATUS_OPTIONS }
 
 /** A blank/unselected option prepended at each closed-set `Select`'s call site (not baked
  * into the exported *_OPTIONS constants themselves, which must stay exactly the backed

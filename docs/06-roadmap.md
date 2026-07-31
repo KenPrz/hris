@@ -1858,9 +1858,11 @@ byte-identical to a nonexistent one; the HR Admin who filled the file in cannot 
 bootstrapped with `hris:bootstrap-admin` already has the eight identification categories
 and five relationships waiting.
 
-**Status: complete.** **853 backend tests (19 of them Arch) + 560 frontend tests**, all
+**Status: complete.** **853 backend tests (19 of them Arch) + 563 frontend tests**, all
 green — up from the 776 backend / 541 frontend the M0–M9 roadmap closed at. `lint`,
 `typecheck`, and `build` are green, native and inside the `make test` containers alike.
+(Task 16, below, is what took the frontend count from 560 to 563 and the backend
+assertion count from 3058 to 3061 without adding a backend test — see that entry.)
 
 **Deferred, from the spec — none of these blocked the milestone, each has a stated trigger:**
 
@@ -1872,7 +1874,10 @@ green — up from the 776 backend / 541 frontend the M0–M9 roadmap closed at. 
 | **Profile change history** | An audit finding that `activity_log` isn't enough. The log already records who changed what and when; a full effective-dated profile history is a second `employment_records`-shaped table, not justified by anything current. |
 | **Employee self-service contact edits** | The first HR Admin who doesn't want to retype a phone number. Requires splitting the write policy so an employee may update contact fields but not identifications or assignment. |
 
-**Two known-and-accepted rough edges, recorded honestly rather than smoothed over:**
+**One known-and-accepted rough edge, recorded honestly rather than smoothed over** (a second
+one — the Dependents list rendering a raw relationship code instead of its label — was found
+by the Task 14 browser walkthrough, deferred, then actually fixed as Task 16 below; it no
+longer belongs on this list):
 
 - **`Carbon::today()` in the profile resources is UTC-today, not office-local today.**
   `EmployeeProfileResource`/`EmployeeProfileSummaryResource`'s `EmploymentResolver::on()`
@@ -1886,13 +1891,6 @@ green — up from the 776 backend / 541 frontend the M0–M9 roadmap closed at. 
   each other during that window. Fixing it properly means threading the office timezone
   through `EmploymentResolver`/`ScheduleAssignment` lookups everywhere, not just here — a
   cross-cutting change bigger than this milestone, deferred rather than patched locally.
-- **The Dependents list renders the raw lowercase relationship `code`** (`"child"`,
-  `"spouse"`) instead of its `description` (`"Child"`, `"Spouse"`), on both `/me/profile` and
-  the admin Profile section's read view — `ProfileSections.tsx` uses `d.relationship` (the
-  code) as the label directly. Pre-existing since Task 13; the seeded demo fixture happened
-  to use a capitalized `'Child'` value that masked it until Task 14 traced it. Cosmetic, not
-  a data bug — the stored `relationship_id` and its FK are correct; only the rendered word
-  is wrong-case.
 
 **There is still no browser-level e2e harness — M10a's screens carry the identical gap
 M3.5's status block already records.** `/me/profile` and the admin Profile section are covered
@@ -1994,6 +1992,27 @@ What the building turned on, for whoever extends the profile module next:
   view by accident, because someone has to come and add it to the summary resource on
   purpose. The redaction test asserts the exact key set on both, not just "these keys are
   absent," so a stray key in a shared sub-block (`assignment`) would still be caught.
+- **Task 16 — the browser walkthrough's live-data check found a defect wider than the
+  Task 14 rough edge on record: the read view and the edit form disagreed about what THREE
+  fields are called, not one.** `ProfileSections` (read) printed backed wire values straight
+  through — `gender: 'male'`, `marital_status: 'single'`, a dependent's `relationship`
+  code (`'spouse'`) — while `ProfileForm`'s `Select`s showed `'Male'`/`'Single'`/`'Spouse'`
+  for the identical fields on the identical screen, violating the invariant `ProfileForm`'s
+  own doc comment states. Fixed two ways for two different reasons. (1) Gender/marital
+  status/blood type: `GENDER_OPTIONS`/`MARITAL_STATUS_OPTIONS`/`BLOOD_TYPE_OPTIONS` moved out
+  of `ProfileForm.tsx` into a new `src/lib/profileOptions.ts` (re-exported from
+  `ProfileForm` so its own imports didn't need to change), alongside a `labelForOption()`
+  helper both components now call — one label table, not two that can drift. (2) A
+  dependent's relationship: `EmployeeProfileResource` gained a sibling
+  `relationship_label` field (`$dependent->relationship?->description`), mirroring the
+  existing `category_code`/`category_name` pair, rather than changing what `relationship`
+  contains — `ProfileForm` still matches dependents on the CODE to pre-select a catalog
+  entry, and changing that field's meaning is exactly the Task 14 CRITICAL bug recurring.
+  Client-side resolution from `useProfileCatalog` was the other option considered and
+  rejected: `ProfileSections` is presentational with no data fetching today, and
+  `/me/profile` doesn't fetch the catalog at all, so a server-side field was the smaller
+  change. `frontend/web/src/lib/api.ts`'s `ProfileDependent` type gained the new field;
+  `docs/03-api.md`'s dependents example was updated to show it.
 
 Next: no milestone is open. **M10b — document management** is the nearest unclaimed work
 (above); beyond that, the **Deferred** table below is unchanged by this milestone.

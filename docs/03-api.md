@@ -323,7 +323,7 @@ The full profile:
                   "location": "Cebu Branch", "region": "VII", "labor_type": "indirect",
                   "hired_at": "2021-03-01", "work_shift": "8:00 Am To 5:00 Pm - Rest Sat & Sun" },
   "dependents": [ { "id": "0199…", "name": "Juan Lim Jr.", "relationship": "child",
-                    "birth_date": "2015-06-01" } ],
+                    "relationship_label": "Child", "birth_date": "2015-06-01" } ],
   "identifications": [ { "id": "0199…", "category_code": "TIN", "category_name": "TIN",
                           "number": "123-456-789-000", "issued_on": "2015-01-10",
                           "expires_on": null, "notes": null, "has_scan": true } ]
@@ -336,7 +336,16 @@ UTC-`today()` inside the same payload; see `06-roadmap.md`'s M10a section. `has_
 boolean, never a URL — the scan is only ever reachable through the stream route below.
 `dependents[].relationship` and `identifications[].category_code` are the catalog `code`
 (`"child"`, `"TIN"`), not the human-readable `description`/`name` — `GET /profile/catalog`
-(below) is how a client turns one into the other.
+(below) is how a client turns one into the other. `dependents[].relationship_label` (M10a
+Task 16) carries that description directly (`"Child"`), mirroring
+`identifications[].category_name`, so the read view can display it without a second round
+trip; `relationship` itself is unchanged and stays the code a write must match on.
+`personal.gender`/`marital_status`/`blood_type` are likewise backed enum values
+(`"male"`, `"single"`), not display text — unlike dependents/identifications, these three
+have no per-company catalog row to hang a `_label` off of; they're a fixed, code-defined
+set (`app/Domain/Profile/{Gender,MaritalStatus,BloodType}.php`), so the frontend maps them
+to labels itself (`src/lib/profileOptions.ts`) instead of the API carrying a redundant
+labelled field for each.
 
 ```
 GET /api/v1/employees/{employee}/profile   # auth:sanctum — manager of {employee}, scoped

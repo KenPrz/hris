@@ -166,7 +166,9 @@ describe('ProfileForm', () => {
     ]
     const profileWithSpouse: EmployeeProfile = {
       ...profile,
-      dependents: [{ id: 'dep-1', name: 'Maria Perez', relationship: 'spouse', birth_date: null }],
+      dependents: [
+        { id: 'dep-1', name: 'Maria Perez', relationship: 'spouse', relationship_label: 'Spouse', birth_date: null },
+      ],
     }
 
     renderForm({ profile: profileWithSpouse, relationships: RELATIONSHIPS_ORDERED_CHILD_FIRST })

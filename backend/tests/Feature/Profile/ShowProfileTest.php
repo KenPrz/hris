@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use App\Models\Employee;
+use App\Models\EmployeeDependent;
 use App\Models\EmployeeIdentification;
 use App\Models\EmployeeIdentificationCategory;
 use App\Models\EmployeeProfile;
 use App\Models\Office;
+use App\Models\Relationship;
 use App\Models\User;
 use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -45,6 +47,14 @@ beforeEach(function (): void {
         'category_id' => $tin->id,
         'number' => '653536955000',
     ]);
+
+    $spouse = Relationship::query()->create(['code' => 'spouse', 'description' => 'Spouse']);
+    EmployeeDependent::query()->create([
+        'employee_id' => $this->employee->id,
+        'name' => 'Maria Perez',
+        'relationship_id' => $spouse->id,
+        'birth_date' => '2003-05-11',
+    ]);
 });
 
 it('returns the full profile to the employee themself', function (): void {
@@ -59,7 +69,14 @@ it('returns the full profile to the employee themself', function (): void {
         ->assertJsonPath('data.assignment.region', 'VII')
         ->assertJsonPath('data.identifications.0.category_code', 'TIN')
         ->assertJsonPath('data.identifications.0.number', '653536955000')
-        ->assertJsonPath('data.identifications.0.has_scan', false);
+        ->assertJsonPath('data.identifications.0.has_scan', false)
+        // `relationship` stays the catalog CODE (what ProfileForm matches on to pre-select
+        // a dependent's relationship) while `relationship_label` carries the human
+        // description for display — see EmployeeProfileResource. The two must never
+        // collapse into one field again the way `category_code`/`category_name` didn't.
+        ->assertJsonPath('data.dependents.0.name', 'Maria Perez')
+        ->assertJsonPath('data.dependents.0.relationship', 'spouse')
+        ->assertJsonPath('data.dependents.0.relationship_label', 'Spouse');
 });
 
 it('404s /me/profile for a user with no employee record', function (): void {

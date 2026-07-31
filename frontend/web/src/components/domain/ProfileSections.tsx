@@ -9,6 +9,7 @@
 import { EmptyState } from '@/components/EmptyState'
 import { SectionHeader } from '@/components/SectionHeader'
 import type { EmployeeProfile } from '@/lib/api'
+import { BLOOD_TYPE_OPTIONS, GENDER_OPTIONS, labelForOption, MARITAL_STATUS_OPTIONS } from '@/lib/profileOptions'
 
 /** Null renders as an em dash, never as blank space — "we have no value" must be visible. */
 function value(raw: string | number | null | undefined): string {
@@ -85,16 +86,20 @@ export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
         <div style={{ marginTop: 'var(--sp-md)' }}>
           <DefinitionList
             items={[
-              ['Gender', personal.gender],
+              // gender/marital_status/blood_type are the backend's BACKED enum values
+              // (`'male'`, `'single'`), not display text — `labelForOption` resolves each
+              // through the same option arrays `ProfileForm`'s `Select`s offer, so the read
+              // view and the edit view can never disagree about what a value is called.
+              ['Gender', labelForOption(GENDER_OPTIONS, personal.gender)],
               ['Birthday', personal.birth_date],
               // The backend sends a number; the label is a display concern, so it is composed
               // here rather than shipped as a pre-formatted string.
               ['Age', personal.age === null ? null : `${personal.age} Years Old`],
               ['Birthplace', personal.birthplace],
-              ['Marital Status', personal.marital_status],
+              ['Marital Status', labelForOption(MARITAL_STATUS_OPTIONS, personal.marital_status)],
               ['Citizenship', personal.citizenship],
               ['Religion', personal.religion],
-              ['Blood Type', personal.blood_type],
+              ['Blood Type', labelForOption(BLOOD_TYPE_OPTIONS, personal.blood_type)],
             ]}
           />
         </div>
@@ -106,7 +111,11 @@ export function ProfileSections({ profile }: { profile: EmployeeProfile }) {
             ) : (
               <DefinitionList
                 items={dependents.map((d): [string, string] => [
-                  d.relationship ?? 'Dependent',
+                  // `relationship_label` is the catalog description ('Spouse'), added
+                  // alongside `relationship` (the CODE, 'spouse') purely for display —
+                  // `ProfileForm` still matches on `relationship` to pre-select a dependent's
+                  // catalog entry when editing, so that field's meaning must not change.
+                  d.relationship_label ?? d.relationship ?? 'Dependent',
                   d.birth_date === null ? d.name : `${d.name} · ${d.birth_date}`,
                 ])}
               />
