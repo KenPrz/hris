@@ -114,12 +114,16 @@ describe('/employees/[employee]/profile', () => {
     vi.mocked(api.profile.forEmployee).mockResolvedValue(fullProfile)
     renderPage()
 
-    expect(await screen.findByRole('heading', { name: 'Ken Daryl Austero Perez' })).toBeInTheDocument()
+    // Wait on the save button, not the heading: the heading resolves from `fullQuery`
+    // alone, but `useProfileCatalog` only starts fetching once `fullQuery.isSuccess` (Item
+    // 3's gate), so the form — which needs BOTH queries — settles a tick later than the
+    // heading does. Waiting on the heading here would let the assertions below race a
+    // still-loading catalog.
+    expect(await screen.findByRole('button', { name: /save profile/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ken Daryl Austero Perez' })).toBeInTheDocument()
     // ProfileSections (read view) — a personal-block field the redacted resource never has.
     expect(screen.getByText('Roman Catholic')).toBeInTheDocument()
     expect(screen.getByText('KENPE')).toBeInTheDocument()
-    // ProfileForm (the write half) is present too — its own submit button proves it mounted.
-    expect(screen.getByRole('button', { name: /save profile/i })).toBeInTheDocument()
 
     expect(api.profile.redacted).not.toHaveBeenCalled()
   })
@@ -139,6 +143,12 @@ describe('/employees/[employee]/profile', () => {
     expect(screen.queryByText('KENPE')).not.toBeInTheDocument()
     expect(screen.queryByText(/national ids/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /save profile/i })).not.toBeInTheDocument()
+
+    // A manager never sees a dropdown on this view — GET /profile/catalog is
+    // authenticated-but-unscoped, so firing it anyway would be a wasted request, not a
+    // disclosure, but `useProfileCatalog` is gated on `fullQuery.isSuccess` specifically so
+    // it never fires at all for a viewer stuck on the redacted fallback.
+    expect(api.profile.catalog).not.toHaveBeenCalled()
   })
 
   it('shows a not-found state when neither the full nor the redacted read succeeds', async () => {

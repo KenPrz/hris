@@ -62,7 +62,10 @@ export default function EmployeeProfilePage() {
   // differently).
   const tryRedacted = fullQuery.isError && isNotFound(fullQuery.error)
   const redactedQuery = useRedactedProfile(id ?? '', tryRedacted)
-  const catalogQuery = useProfileCatalog()
+  // Only the full (editable) shape ever renders a Select — a manager's redacted view
+  // falls back before this ever succeeds, so gating on it (rather than fetching
+  // unconditionally on mount) skips catalog entirely for a viewer who can never use it.
+  const catalogQuery = useProfileCatalog(fullQuery.isSuccess)
 
   const isLoading =
     fullQuery.isLoading || (tryRedacted && redactedQuery.isLoading) || (fullQuery.isSuccess && catalogQuery.isLoading)
