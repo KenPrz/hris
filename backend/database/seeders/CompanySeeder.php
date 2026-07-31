@@ -15,14 +15,22 @@ use App\Actions\Employees\RecordEmploymentChangeInput;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Attendance\PunchSource;
 use App\Domain\Pay\DayType;
+use App\Domain\Profile\BloodType;
+use App\Domain\Profile\Gender;
+use App\Domain\Profile\MaritalStatus;
 use App\Models\AttendanceLog;
 use App\Models\Department;
 use App\Models\Employee;
+use App\Models\EmployeeDependent;
+use App\Models\EmployeeIdentification;
+use App\Models\EmployeeIdentificationCategory;
+use App\Models\EmployeeProfile;
 use App\Models\Holiday;
 use App\Models\LeaveType;
 use App\Models\Office;
 use App\Models\Organization;
 use App\Models\PayRule;
+use App\Models\Relationship;
 use App\Models\ScheduleAssignment;
 use App\Models\ScheduleOverride;
 use App\Models\ShiftTemplate;
@@ -30,6 +38,7 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
+use RuntimeException;
 
 /**
  * A believable two-office Philippine company to develop and demo against: Manila (HQ) and
@@ -241,7 +250,7 @@ final class CompanySeeder extends Seeder
         // rather than only the fixed Jan/Aug demo dates above. See the method.
         $this->seedCurrentMonthAttendance($manila, $miguel, $manilaManager, $actor);
 
-        $this->onboard(
+        $andrea = $this->onboard(
             employeeNo: 'MNL-0003',
             organization: $org,
             office: $manila,
@@ -254,7 +263,7 @@ final class CompanySeeder extends Seeder
             login: ['name' => 'Andrea Cruz', 'email' => 'andrea.manila@hris.test'],
             name: 'Andrea Cruz',
         );
-        $this->onboard(
+        $paolo = $this->onboard(
             employeeNo: 'MNL-0004',
             organization: $org,
             office: $manila,
@@ -270,7 +279,7 @@ final class CompanySeeder extends Seeder
 
         // The punch-only worker: an employment record (so the cache is populated and they
         // appear in scope queries) but no user_id — the nullable-login path, made real.
-        $this->onboard(
+        $jerome = $this->onboard(
             employeeNo: 'MNL-0005',
             organization: $org,
             office: $manila,
@@ -317,7 +326,7 @@ final class CompanySeeder extends Seeder
             login: ['name' => 'Ramon Delgado', 'email' => 'manager.cebu@hris.test'],
             name: 'Ramon Delgado',
         );
-        $this->onboard(
+        $liza = $this->onboard(
             employeeNo: 'CEB-0002',
             organization: $org,
             office: $cebu,
@@ -330,7 +339,7 @@ final class CompanySeeder extends Seeder
             login: ['name' => 'Liza Fernandez', 'email' => 'employee.cebu@hris.test'],
             name: 'Liza Fernandez',
         );
-        $this->onboard(
+        $noel = $this->onboard(
             employeeNo: 'CEB-0003',
             organization: $org,
             office: $cebu,
@@ -359,6 +368,11 @@ final class CompanySeeder extends Seeder
         );
         $cebuHr->user->assignRole('HR Admin');
         $cebuHr->user->hrAdminOffices()->attach($cebu->id);
+
+        // M10a: a personnel file for every seeded employee — profile, IDs, and (for some)
+        // dependents — so the profile screens have something real to show on a fresh
+        // `make dev` instead of a column of em dashes. See seedProfiles().
+        $this->seedProfiles($manilaManager, $miguel, $andrea, $paolo, $jerome, $manilaHr, $cebuManager, $liza, $noel, $cebuHr);
 
         $this->printCredentials();
     }
@@ -730,6 +744,332 @@ final class CompanySeeder extends Seeder
         return $employee->refresh();
     }
 
+    /**
+     * M10a: a profile, some dependents, and (mostly) government/financial IDs for every
+     * seeded employee — CompanySeeder shipped with M10a merged but created none of these,
+     * so a fresh `make dev` gave ten employees whose personnel files were entirely empty.
+     * Written directly through Model::create(), the same as Holiday::create() and the
+     * other seeders above — a profile/dependent/identification has no cache to keep in
+     * sync, so there is no single-writer rule here to honour.
+     *
+     * Identification categories and relationships are looked up by `code`, never a
+     * hard-coded uuid — DatabaseSeeder runs ProfileCatalogSeeder before CompanySeeder
+     * (see its own docblock), so the catalog already exists here. category()/
+     * relationship() below fail loudly (RuntimeException) rather than silently seeding
+     * nothing if a code is ever missing.
+     *
+     * Rosa alone carries a spouse AND two same-relationship ('child') dependents, so one
+     * employee exercises both cases; Miguel/Andrea/Paolo/Jerome/Liza/Noel are left with no
+     * dependents at all — a real company's most common case. Jerome (the punch-only
+     * worker) and Noel (the newest Cebu hire, mid-onboarding) are deliberately left with
+     * no/partial identifications — "most", not "every", employee has a complete set.
+     *
+     * No scan files are attached anywhere here — has_scan (App\Http\Resources\
+     * EmployeeProfileResource) is derived from hasMedia('scan'), so leaving media untouched
+     * is exactly "no scan on file". That keeps this seeder from depending on RustFS being
+     * up, the same reasoning ProfileCatalogSeeder's own docblock gives for staying
+     * production-safe.
+     */
+    private function seedProfiles(
+        Employee $rosa,
+        Employee $miguel,
+        Employee $andrea,
+        Employee $paolo,
+        Employee $jerome,
+        Employee $carmen,
+        Employee $ramon,
+        Employee $liza,
+        Employee $noel,
+        Employee $grace,
+    ): void {
+        $categoryIds = EmployeeIdentificationCategory::query()->pluck('id', 'code');
+        $relationshipIds = Relationship::query()->pluck('id', 'code');
+
+        $category = fn (string $code): string => $categoryIds[$code]
+            ?? throw new RuntimeException("ProfileCatalogSeeder is missing identification category '{$code}' — it must run before CompanySeeder.");
+        $relationship = fn (string $code): string => $relationshipIds[$code]
+            ?? throw new RuntimeException("ProfileCatalogSeeder is missing relationship '{$code}' — it must run before CompanySeeder.");
+
+        // --- Rosa Bautista (MNL-0001, Manila manager) — married, two children: the
+        // spouse case and the duplicate-relationship-key case in one employee.
+        $this->seedProfile($rosa, [
+            'salutation' => 'Ms.',
+            'nickname' => 'Ros',
+            'home_address' => '12 Kalayaan Ave., Barangay Pinagkaisahan, Makati City, Metro Manila',
+            'personal_email' => 'rosa.bautista.personal@gmail.com',
+            'mobile' => '09171234501',
+            'emergency_contact' => 'Carlos Bautista (spouse) 09171234599',
+            'gender' => Gender::Female->value,
+            'birth_date' => '1979-03-14',
+            'birthplace' => 'Quezon City',
+            'marital_status' => MaritalStatus::Married->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::OPositive->value,
+        ]);
+        $this->seedDependents($rosa, $relationship, [
+            ['name' => 'Carlos Bautista', 'relationship' => 'spouse', 'birth_date' => '1977-06-02'],
+            ['name' => 'Miguel Bautista Jr.', 'relationship' => 'child', 'birth_date' => '2010-09-19'],
+            ['name' => 'Sofia Bautista', 'relationship' => 'child', 'birth_date' => '2013-12-05'],
+        ]);
+        $this->seedIdentifications($rosa, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-000', 'issued_on' => '2015-02-10'],
+            ['code' => 'SSS', 'number' => '34-1234567-8', 'issued_on' => '2015-02-10'],
+            ['code' => 'PHIC', 'number' => '12-345678901-2', 'issued_on' => '2015-02-10'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9012', 'issued_on' => '2015-02-10'],
+        ]);
+
+        // --- Miguel Santos (MNL-0002) — single, no dependents.
+        $this->seedProfile($miguel, [
+            'salutation' => 'Mr.',
+            'nickname' => 'Migs',
+            'home_address' => '45 Aurora Blvd., Barangay Doña Imelda, Quezon City, Metro Manila',
+            'personal_email' => 'miguel.santos.personal@gmail.com',
+            'mobile' => '09181234502',
+            'emergency_contact' => 'Elena Santos (mother) 09181234598',
+            'gender' => Gender::Male->value,
+            'birth_date' => '1990-07-22',
+            'birthplace' => 'Manila',
+            'marital_status' => MaritalStatus::Single->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::APositive->value,
+        ]);
+        $this->seedIdentifications($miguel, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-001', 'issued_on' => '2016-05-03'],
+            ['code' => 'SSS', 'number' => '34-1234568-9', 'issued_on' => '2016-05-03'],
+            ['code' => 'PHIC', 'number' => '12-345678902-3', 'issued_on' => '2016-05-03'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9013', 'issued_on' => '2016-05-03'],
+        ]);
+
+        // --- Andrea Cruz (MNL-0003) — single, no dependents.
+        $this->seedProfile($andrea, [
+            'salutation' => 'Ms.',
+            'nickname' => 'Andi',
+            'home_address' => '78 Katipunan Ave., Barangay Loyola Heights, Quezon City, Metro Manila',
+            'personal_email' => 'andrea.cruz.personal@gmail.com',
+            'mobile' => '09191234503',
+            'emergency_contact' => 'Ligaya Cruz (mother) 09191234597',
+            'gender' => Gender::Female->value,
+            'birth_date' => '1996-11-05',
+            'birthplace' => 'Marikina City',
+            'marital_status' => MaritalStatus::Single->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Born Again Christian',
+            'blood_type' => BloodType::BPositive->value,
+        ]);
+        $this->seedIdentifications($andrea, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-002', 'issued_on' => '2018-08-14'],
+            ['code' => 'SSS', 'number' => '34-1234569-0', 'issued_on' => '2018-08-14'],
+            ['code' => 'PHIC', 'number' => '12-345678903-4', 'issued_on' => '2018-08-14'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9014', 'issued_on' => '2018-08-14'],
+        ]);
+
+        // --- Paolo Villanueva (MNL-0004) — single, no dependents.
+        $this->seedProfile($paolo, [
+            'salutation' => 'Mr.',
+            'nickname' => 'Paul',
+            'home_address' => '9 Mabini St., Barangay Malate, Manila, Metro Manila',
+            'personal_email' => 'paolo.villanueva.personal@gmail.com',
+            'mobile' => '09201234504',
+            'emergency_contact' => 'Ricardo Villanueva (father) 09201234596',
+            'gender' => Gender::Male->value,
+            'birth_date' => '1999-02-18',
+            'birthplace' => 'Manila',
+            'marital_status' => MaritalStatus::Single->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::ABPositive->value,
+        ]);
+        $this->seedIdentifications($paolo, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-003', 'issued_on' => '2020-03-01'],
+            ['code' => 'SSS', 'number' => '34-1234570-1', 'issued_on' => '2020-03-01'],
+            ['code' => 'PHIC', 'number' => '12-345678904-5', 'issued_on' => '2020-03-01'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9015', 'issued_on' => '2020-03-01'],
+        ]);
+
+        // --- Jerome Salazar (MNL-0005) — the punch-only worker: no login, no dependents,
+        // and deliberately no identifications either — the minimal end of a personnel file.
+        $this->seedProfile($jerome, [
+            'salutation' => 'Mr.',
+            'nickname' => 'Jem',
+            'home_address' => '21 Commonwealth Ave., Barangay Batasan Hills, Quezon City, Metro Manila',
+            'personal_email' => null,
+            'mobile' => '09211234505',
+            'emergency_contact' => 'Marites Salazar (spouse) 09211234595',
+            'gender' => Gender::Male->value,
+            'birth_date' => '1988-05-30',
+            'birthplace' => 'Caloocan City',
+            'marital_status' => MaritalStatus::Married->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::ONegative->value,
+        ]);
+
+        // --- Carmen Lim (MNL-0006, Manila HR Admin) — widowed, one child.
+        $this->seedProfile($carmen, [
+            'salutation' => 'Ms.',
+            'nickname' => 'Carms',
+            'home_address' => '5 Timog Ave., Barangay Sacred Heart, Quezon City, Metro Manila',
+            'personal_email' => 'carmen.lim.personal@gmail.com',
+            'mobile' => '09221234506',
+            'emergency_contact' => 'Michael Lim Jr. (son) 09221234594',
+            'gender' => Gender::Female->value,
+            'birth_date' => '1982-09-09',
+            'birthplace' => 'Manila',
+            'marital_status' => MaritalStatus::Widowed->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::ANegative->value,
+        ]);
+        $this->seedDependents($carmen, $relationship, [
+            ['name' => 'Michael Lim Jr.', 'relationship' => 'child', 'birth_date' => '2015-04-20'],
+        ]);
+        $this->seedIdentifications($carmen, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-004', 'issued_on' => '2014-11-19'],
+            ['code' => 'SSS', 'number' => '34-1234571-2', 'issued_on' => '2014-11-19'],
+            ['code' => 'PHIC', 'number' => '12-345678905-6', 'issued_on' => '2014-11-19'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9016', 'issued_on' => '2014-11-19'],
+        ]);
+
+        // --- Ramon Delgado (CEB-0001, Cebu manager) — married, spouse and one child.
+        $this->seedProfile($ramon, [
+            'salutation' => 'Mr.',
+            'nickname' => 'Mon',
+            'home_address' => '88 Osmeña Blvd., Barangay Kamputhaw, Cebu City, Cebu',
+            'personal_email' => 'ramon.delgado.personal@gmail.com',
+            'mobile' => '09231234507',
+            'emergency_contact' => 'Teresa Delgado (spouse) 09231234593',
+            'gender' => Gender::Male->value,
+            'birth_date' => '1975-12-01',
+            'birthplace' => 'Cebu City',
+            'marital_status' => MaritalStatus::Married->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::BNegative->value,
+        ]);
+        $this->seedDependents($ramon, $relationship, [
+            ['name' => 'Teresa Delgado', 'relationship' => 'spouse', 'birth_date' => '1978-03-11'],
+            ['name' => 'Ramon Delgado III', 'relationship' => 'child', 'birth_date' => '2008-07-30'],
+        ]);
+        $this->seedIdentifications($ramon, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-005', 'issued_on' => '2013-06-25'],
+            ['code' => 'SSS', 'number' => '34-1234572-3', 'issued_on' => '2013-06-25'],
+            ['code' => 'PHIC', 'number' => '12-345678906-7', 'issued_on' => '2013-06-25'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9017', 'issued_on' => '2013-06-25'],
+        ]);
+
+        // --- Liza Fernandez (CEB-0002) — separated, no dependents.
+        $this->seedProfile($liza, [
+            'salutation' => 'Ms.',
+            'nickname' => 'Liza',
+            'home_address' => '14 Colon St., Barangay San Roque, Cebu City, Cebu',
+            'personal_email' => 'liza.fernandez.personal@gmail.com',
+            'mobile' => '09241234508',
+            'emergency_contact' => 'Roberto Fernandez (father) 09241234592',
+            'gender' => Gender::Female->value,
+            'birth_date' => '1993-04-17',
+            'birthplace' => 'Mandaue City',
+            'marital_status' => MaritalStatus::Separated->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::ABNegative->value,
+        ]);
+        $this->seedIdentifications($liza, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-006', 'issued_on' => '2017-09-08'],
+            ['code' => 'SSS', 'number' => '34-1234573-4', 'issued_on' => '2017-09-08'],
+            ['code' => 'PHIC', 'number' => '12-345678907-8', 'issued_on' => '2017-09-08'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9018', 'issued_on' => '2017-09-08'],
+        ]);
+
+        // --- Noel Aquino (CEB-0003) — single, no dependents, and only PARTWAY through
+        // government-ID enrollment (the newest hire): TIN and SSS only, no PhilHealth or
+        // Pag-IBIG number yet — "most" employees have the full set, not literally every one.
+        $this->seedProfile($noel, [
+            'salutation' => 'Mr.',
+            'nickname' => 'Noel',
+            'home_address' => '33 Gorordo Ave., Barangay Lahug, Cebu City, Cebu',
+            'personal_email' => 'noel.aquino.personal@gmail.com',
+            'mobile' => '09251234509',
+            'emergency_contact' => 'Corazon Reyes (mother) 09251234591',
+            'gender' => Gender::Male->value,
+            'birth_date' => '2000-08-25',
+            'birthplace' => 'Lapu-Lapu City',
+            'marital_status' => MaritalStatus::Single->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Iglesia ni Cristo',
+            'blood_type' => BloodType::OPositive->value,
+        ]);
+        $this->seedIdentifications($noel, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-007', 'issued_on' => '2023-01-09'],
+            ['code' => 'SSS', 'number' => '34-1234574-5', 'issued_on' => '2023-01-09'],
+        ]);
+
+        // --- Grace Tan (CEB-0004, Cebu HR Admin) — annulled, one sibling dependent.
+        $this->seedProfile($grace, [
+            'salutation' => 'Ms.',
+            'nickname' => 'Grace',
+            'home_address' => '7 Salinas Drive, Barangay Guadalupe, Cebu City, Cebu',
+            'personal_email' => 'grace.tan.personal@gmail.com',
+            'mobile' => '09261234510',
+            'emergency_contact' => 'Vincent Tan (brother) 09261234590',
+            'gender' => Gender::Female->value,
+            'birth_date' => '1985-06-12',
+            'birthplace' => 'Cebu City',
+            'marital_status' => MaritalStatus::Annulled->value,
+            'citizenship' => 'Filipino',
+            'religion' => 'Roman Catholic',
+            'blood_type' => BloodType::BPositive->value,
+        ]);
+        $this->seedDependents($grace, $relationship, [
+            ['name' => 'Vincent Tan', 'relationship' => 'sibling', 'birth_date' => '1988-01-22'],
+        ]);
+        $this->seedIdentifications($grace, $category, [
+            ['code' => 'TIN', 'number' => '123-456-789-008', 'issued_on' => '2012-04-16'],
+            ['code' => 'SSS', 'number' => '34-1234575-6', 'issued_on' => '2012-04-16'],
+            ['code' => 'PHIC', 'number' => '12-345678908-9', 'issued_on' => '2012-04-16'],
+            ['code' => 'HDMF', 'number' => '1234-5678-9019', 'issued_on' => '2012-04-16'],
+        ]);
+    }
+
+    /** @param  array<string, mixed>  $data */
+    private function seedProfile(Employee $employee, array $data): void
+    {
+        EmployeeProfile::create(['employee_id' => $employee->id, ...$data]);
+    }
+
+    /**
+     * @param  callable(string): string  $relationship
+     * @param  array<int, array{name: string, relationship: string, birth_date: string}>  $rows
+     */
+    private function seedDependents(Employee $employee, callable $relationship, array $rows): void
+    {
+        foreach ($rows as $row) {
+            EmployeeDependent::create([
+                'employee_id' => $employee->id,
+                'name' => $row['name'],
+                'relationship_id' => $relationship($row['relationship']),
+                'birth_date' => $row['birth_date'],
+            ]);
+        }
+    }
+
+    /**
+     * @param  callable(string): string  $category
+     * @param  array<int, array{code: string, number: string, issued_on: string}>  $rows
+     */
+    private function seedIdentifications(Employee $employee, callable $category, array $rows): void
+    {
+        foreach ($rows as $row) {
+            EmployeeIdentification::create([
+                'employee_id' => $employee->id,
+                'category_id' => $category($row['code']),
+                'number' => $row['number'],
+                'issued_on' => $row['issued_on'],
+            ]);
+        }
+    }
+
     private function printCredentials(): void
     {
         $this->command?->newLine();
@@ -746,5 +1086,6 @@ final class CompanySeeder extends Seeder
         );
         $this->command?->comment('MNL-0005 is a punch-only worker: an employment record, no login.');
         $this->command?->comment('employee.manila has a full, varied current-month attendance history (overtime, a night shift, a rest day worked, a worked holiday, and one incomplete day) — open /me/attendance to see the M5 breakdown. Today is left unpunched so you can clock in live.');
+        $this->command?->comment('Every seeded employee has a profile; most have TIN/SSS/PhilHealth/Pag-IBIG numbers and some have dependents (Rosa Bautista has a spouse and two children) — see the M10a profile screens. No ID scans are attached.');
     }
 }
