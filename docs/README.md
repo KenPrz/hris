@@ -75,8 +75,8 @@ whose restore has actually been drilled; and M10a adds the personnel file — co
 personal details, dependents, and government/financial IDs with a scanned copy of each —
 that an HR Admin configures per office, an employee reads for themselves, and a manager
 sees a redacted view of, at its own HR/manager-reachable route (`/employees/{id}/profile`)
-separate from the system-admin-only employee roster. **854 backend tests (19 of them Arch)
-+ 574 frontend tests**, plus a `scripts/e2e-*.sh` per milestone that walks its flow against
+separate from the system-admin-only employee roster. **865 backend tests (20 of them Arch)
++ 577 frontend tests**, plus a `scripts/e2e-*.sh` per milestone that walks its flow against
 a live stack.
 
 No milestone is open. **M10b — a document management module (a `Document`/`DocumentBucket`/
