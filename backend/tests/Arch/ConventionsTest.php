@@ -71,6 +71,7 @@ arch('domain value objects are final')
         'App\Domain\Profile\MaritalStatus',
         'App\Domain\Profile\BloodType',
         'App\Domain\Profile\LaborType',
+        'App\Domain\Documents\Documentable',
     ])
     ->toBeFinal()
     ->ignoring([
@@ -92,6 +93,7 @@ arch('domain value objects are final')
         'App\Domain\Profile\MaritalStatus',
         'App\Domain\Profile\BloodType',
         'App\Domain\Profile\LaborType',
+        'App\Domain\Documents\Documentable',
     ]);
 
 arch('controllers are final single-action classes')
