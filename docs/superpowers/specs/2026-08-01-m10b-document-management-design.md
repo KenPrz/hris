@@ -344,7 +344,19 @@ dropdowns and honours `applies_to`; `GET /admin/documents` is the CRUD index beh
 | Business Permit | office | yes | 12 months |
 
 Called from `hris:bootstrap-admin` **above** the System-Admin guard, so an already-bootstrapped
-production database gains the catalog on an M10b deploy. Idempotent (`updateOrCreate` on `code`).
+production database gains the catalog on an M10b deploy.
+
+**Idempotent by insert-if-absent (`firstOrCreate` on `code`), NOT by overwrite** — amended
+2026-08-01 during Task 4. The original text said `updateOrCreate`, copied from
+`ProfileCatalogSeeder`. That is correct there and wrong here: identification categories are
+fixed by Philippine law and no UI edits them, so rewriting them every run is a no-op. This
+catalog is admin-editable, and `hris:bootstrap-admin`'s own docblock instructs ops to re-run it
+whenever a later milestone adds catalog data — so `updateOrCreate` would silently reset an HR
+Admin's edit (an NBI Clearance changed to 12 months, say) on the next deploy.
+
+The trade this accepts: a later milestone cannot change a seeded *default* through this seeder.
+That is correct for an admin-editable catalog — admin edits outrank seed defaults, and a real
+default change should ship as an explicit migration that says so.
 
 Unlike M10a's identification categories — fixed by Philippine law — these are a *starting point*
 for an admin-editable catalog, not the whole of it.
