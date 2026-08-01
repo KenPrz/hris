@@ -19,9 +19,13 @@ final class UpdateDocumentRequest extends FormRequest
 
     public function rules(): array
     {
-        // Full-object on PATCH, same as UpdateDocumentCategoryRequest: every field
+        // Full-object on PATCH, same as UpdateDocumentCategoryRequest: every field is
         // required/nullable rather than `sometimes`, since UpdateDocument always writes
-        // every column.
+        // every column. `is_required` is the one exception — it stays `sometimes` because
+        // it's a boolean, not a string/nullable field: an omitted key is legitimate input
+        // (UpdateController's `has('is_required') ? boolean(...) : false` treats absence as
+        // false), so `sometimes` lets it be omitted without a `required` failure, while
+        // still validating it as a boolean whenever it IS present.
         $documentId = $this->route('document')?->id;
 
         return [

@@ -21,6 +21,26 @@ beforeEach(function (): void {
     $this->category = DocumentCategory::factory()->create();
 });
 
+it('lists documents ordered by code, carrying the behavioural fields', function (): void {
+    Document::factory()->create([
+        'code' => 'ZULU',
+        'category_id' => $this->category->id,
+        'applies_to' => 'employee',
+        'is_required' => true,
+        'validity_months' => 12,
+    ]);
+    Document::factory()->create(['code' => 'ALPHA', 'category_id' => $this->category->id]);
+
+    $this->actingAs($this->hr)
+        ->getJson('/api/v1/admin/documents')
+        ->assertOk()
+        ->assertJsonPath('data.0.code', 'ALPHA')
+        ->assertJsonPath('data.1.code', 'ZULU')
+        ->assertJsonPath('data.1.applies_to', 'employee')
+        ->assertJsonPath('data.1.is_required', true)
+        ->assertJsonPath('data.1.validity_months', 12);
+});
+
 it('creates a document with its behavioural fields', function (): void {
     $this->actingAs($this->hr)
         ->postJson('/api/v1/admin/documents', [
@@ -86,6 +106,17 @@ it('rejects an unknown category', function (): void {
             'category_id' => '0199a000-0000-7000-8000-000000000000',
         ])
         ->assertStatus(400);
+});
+
+it('rejects a duplicate code with a validation error, not a 500', function (): void {
+    Document::factory()->create(['code' => 'DUPE', 'category_id' => $this->category->id]);
+
+    $this->actingAs($this->hr)
+        ->postJson('/api/v1/admin/documents', [
+            'code' => 'DUPE', 'name' => 'Again', 'category_id' => $this->category->id,
+        ])
+        ->assertStatus(400)
+        ->assertJsonPath('error.code', 'validation_failed');
 });
 
 it('updates a document, keeping its own code and clearing description to null (not an empty string)', function (): void {
