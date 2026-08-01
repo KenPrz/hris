@@ -194,6 +194,50 @@ describe('api.adjustments.submit', () => {
   })
 })
 
+describe('api.documents.createKind', () => {
+  it('sends snake_case field names — category_id, applies_to, is_required, validity_months', async () => {
+    const fetchMock = stubFetch(201, {
+      data: {
+        id: 'd1',
+        code: 'PASSPORT',
+        name: 'Passport',
+        description: null,
+        category_id: 'c1',
+        applies_to: 'employee',
+        is_required: true,
+        validity_months: 60,
+      },
+    })
+
+    await api.documents.createKind({
+      code: 'PASSPORT',
+      name: 'Passport',
+      category_id: 'c1',
+      applies_to: 'employee',
+      is_required: true,
+      validity_months: 60,
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/admin/documents')
+    expect(init.method).toBe('POST')
+
+    // The request body is a plain object serialized by JSON.stringify — a camelCase slip
+    // here (categoryId instead of category_id) is a silent 400 at runtime that no
+    // typecheck catches, so this asserts the exact wire keys, not just that a call
+    // happened.
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body).toEqual({
+      code: 'PASSPORT',
+      name: 'Passport',
+      category_id: 'c1',
+      applies_to: 'employee',
+      is_required: true,
+      validity_months: 60,
+    })
+  })
+})
+
 describe('api.requests.reject', () => {
   it('POSTs { decision_note } as JSON to /requests/{id}/reject', async () => {
     const fetchMock = stubFetch(200, {

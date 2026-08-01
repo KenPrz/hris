@@ -93,4 +93,12 @@ export const keys = {
     // it is seeded by ProfileCatalogSeeder — so it can safely carry a long staleTime.
     catalog: () => ['profile', 'catalog'] as const,
   },
+  // The document catalog (M10b-a). `catalog` is the ungated dropdown read and carries a long
+  // staleTime — nothing writes it except the admin screens below, which invalidate this key
+  // explicitly. The two admin keys are separate because they back different screens.
+  documents: {
+    catalog: () => ['documents', 'catalog'] as const,
+    adminCategories: () => ['documents', 'admin', 'categories'] as const,
+    adminKinds: () => ['documents', 'admin', 'kinds'] as const,
+  },
 }
