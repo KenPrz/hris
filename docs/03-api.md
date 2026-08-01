@@ -1308,6 +1308,140 @@ else in this API uses. Rows are ordered newest-first (`latest()`), 50 to a page.
 `scripts/e2e-admin-roles-audit.sh` proves the viewer surfaces both the `hr_admin_offices_set`
 event and the `log_name=office` trail, and the non-admin `403`, against the live stack.
 
+## Admin — the document catalog *(M10b-a)*
+
+The admin-editable catalog behind M10b's document module: categories (shelves) and document
+kinds (what's on them), with `applies_to`/`is_required`/`validity_months` as behaviour on the
+kind (`02-data-model.md`). Nine routes total, none of which write a file — `document_files`
+exists and is empty after this milestone; upload/list/download/delete for both owner types,
+plus the two compliance reads, are M10b-b.
+
+```
+GET    /api/v1/documents/catalog                          any authenticated user, ungated
+GET    /api/v1/admin/document-categories                  \
+POST   /api/v1/admin/document-categories                   |
+PATCH  /api/v1/admin/document-categories/{category}        |  document.manage
+DELETE /api/v1/admin/document-categories/{category}        |
+GET    /api/v1/admin/documents                             |
+POST   /api/v1/admin/documents                              |
+PATCH  /api/v1/admin/documents/{document}                  |
+DELETE /api/v1/admin/documents/{document}                 /
+```
+
+**`GET /documents/catalog` is ungated by design — any authenticated user, no permission
+check, no scope.** It's static, company-wide reference data with nothing sensitive in it,
+and every screen that will eventually file a document (M10b-b) needs it to turn a
+`document_id`/`category_id` into a name — the same reasoning `GET /profile/catalog` (above)
+already established for M10a's catalog. It is the **lightweight dropdown read**; the eight
+`/admin/*` routes below are the **CRUD surface**, gated separately, and the two serve
+different callers on purpose:
+
+```
+GET /api/v1/documents/catalog
+  → 200 { data: {
+      categories: [ { id, code, name, description }, … ],       # ordered by code
+      documents:  [ { id, code, name, description, category_id,
+                      applies_to, is_required, validity_months }, … ]   # ordered by code
+    } }
+```
+
+`applies_to` is the `Documentable` enum's backed value — `"employee"` | `"office"` | `null`
+(both) — never an object. `validity_months` is `null` for a kind that never expires.
+
+**Catalog CRUD denials are `403`, not `404`** — the reverse of the 404-not-403 rule this
+document uses everywhere else. That rule protects an **owner id in the URL** from
+enumeration (an out-of-scope office, an out-of-scope employee): a category or a document
+kind has no owner and nothing to enumerate, the same reasoning `/admin/pay-rules` and
+`/admin/organizations` already established. Every `FormRequest` here authorizes with
+`$this->user()?->can('manageCatalog', Document::class) === true`
+(`App\Policies\DocumentPolicy::manageCatalog`, `05-rbac.md`), and none overrides
+`failedAuthorization()` — the framework default `403 forbidden` is correct as-is.
+
+```
+GET /api/v1/admin/document-categories        # document.manage
+  → 200 { data: [ { id, code, name, description }, … ] }   # ordered by code
+  → 403 forbidden
+
+POST /api/v1/admin/document-categories       # document.manage
+  { "code": "PRE_EMPLOYMENT", "name": "Pre-employment", "description": "…" | null }
+  → 201 { data: { id, code, name, description } }
+  → 400 validation_failed   # duplicate code, or a required field missing
+  → 403 forbidden
+
+PATCH /api/v1/admin/document-categories/{category}   # document.manage — full-object
+  { "code": "PRE_EMPLOYMENT", "name": "Pre-employment", "description": "…" | null }
+  → 200 { data: { id, code, name, description } }
+  → 400 validation_failed   # code collides with a DIFFERENT category (Rule::unique->ignore
+                            #   lets a category keep its own code unchanged)
+  → 403 forbidden
+
+DELETE /api/v1/admin/document-categories/{category}   # document.manage
+  → 200 { data: [ { id, code, name, description }, … ] }   # the REMAINING catalog
+  → 403 forbidden
+  → 409 document_catalog_in_use   # details: { subject_type: "document_category",
+                                   #   subject_id, dependents }
+```
+
+**Delete returns the remaining list, not `204`** — on both the category and the document
+kind routes below — so the client's cache updates in one round trip instead of a follow-up
+`GET`. **A category or kind still referenced elsewhere refuses with `409
+document_catalog_in_use`, never a cascade** — a category with documents under it, or a
+document kind with filed files (M10b-b) — with the dependent count in `details` so the UI
+can say "3 documents still use this category" instead of a bare failure
+(`02-data-model.md`).
+
+```
+GET /api/v1/admin/documents        # document.manage
+  → 200 { data: [ { id, code, name, description, category_id, applies_to, is_required,
+                    validity_months }, … ] }   # ordered by code
+  → 403 forbidden
+
+POST /api/v1/admin/documents       # document.manage
+  { "code": "NBI", "name": "NBI Clearance", "description": "…" | null,
+    "category_id": "0199…",
+    "applies_to": "employee" | "office" | null,    # null = both; OPTIONAL
+    "is_required": true,                            # OPTIONAL, defaults false
+    "validity_months": 6 | null }                   # OPTIONAL, null = never expires
+  → 201 { data: { id, code, name, description, category_id, applies_to, is_required,
+                  validity_months } }
+  → 400 validation_failed   # duplicate code, category_id not a real category, applies_to
+                            #   outside the enum's exact backed values (Rule::enum — casing
+                            #   matters, "Employee" 400s), or validity_months < 1
+  → 403 forbidden
+
+PATCH /api/v1/admin/documents/{document}   # document.manage — full-object except is_required
+  { "code": "NBI", "name": "NBI Clearance", "description": "…" | null,
+    "category_id": "0199…", "applies_to": "employee" | "office" | null,
+    "is_required": true,                # OPTIONAL — an omitted key means false, not "unchanged"
+    "validity_months": 6 | null }
+  → 200 { data: { id, code, name, description, category_id, applies_to, is_required,
+                  validity_months } }
+  → 400 validation_failed   # same set as create, plus a code collision with a different
+                            #   document (Rule::unique->ignore lets a document keep its own)
+  → 403 forbidden
+
+DELETE /api/v1/admin/documents/{document}   # document.manage
+  → 200 { data: [ { id, code, … }, … ] }   # the remaining catalog
+  → 403 forbidden
+  → 409 document_catalog_in_use   # details: { subject_type: "document", subject_id, dependents }
+```
+
+`category_id` on create/update validates `exists:document_categories,id` — unlike, say,
+`office_id` in `CreateLeaveTypeRequest`, which deliberately omits `exists` so an
+out-of-scope office 404s in the controller instead of 400ing at validation (an
+enumeration oracle). That reasoning doesn't apply here: `document_categories` is itself
+company-wide reference data readable by any authenticated user through `GET
+/documents/catalog`, so there is nothing to enumerate by probing `category_id`.
+
+**`GET /admin/documents/expiring` and `GET /admin/documents/missing` are M10b-b, and must
+be registered in `routes/api.php` before any future parameterised `GET
+/admin/documents/{document}`.** No such show route exists today — only `PATCH`/`DELETE`
+take a `{document}` — so there is no collision yet, but whoever adds a show route later
+must put the two literal-segment routes first, or Laravel's router would bind
+`expiring`/`missing` as a `{document}` id and 404 on model resolution instead of ever
+reaching the intended controller — the ordinary Laravel routing trap of a wildcard segment
+shadowing a literal one that comes after it.
+
 ## Leave — foundation *(M6b-a)*
 
 Leave-type config per office, the office-wide day-length divisor, HR manual grants, and a
