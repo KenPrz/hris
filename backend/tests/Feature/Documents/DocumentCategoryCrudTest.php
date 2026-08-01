@@ -37,7 +37,8 @@ it('creates a category', function (): void {
             'description' => 'Collected before day one',
         ])
         ->assertCreated()
-        ->assertJsonPath('data.code', 'PRE_EMPLOYMENT');
+        ->assertJsonPath('data.code', 'PRE_EMPLOYMENT')
+        ->assertJsonPath('data.description', 'Collected before day one');
 
     expect(DocumentCategory::query()->count())->toBe(1);
 });
@@ -51,7 +52,13 @@ it('rejects a duplicate code with a validation error, not a 500', function (): v
         ->assertJsonPath('error.code', 'validation_failed');
 });
 
-it('updates a category', function (): void {
+it('updates a category, clearing description to null (not an empty string)', function (): void {
+    // The factory default gives description a real, non-null sentence, so sending
+    // description: null here is a genuine round-trip through input() vs string(): the
+    // house rule (see CreateController's comment) is that has() is true for an explicit
+    // JSON null, and string() would coerce it to '' — silently turning "clear the
+    // description" into "set it to an empty string". Asserting the response comes back
+    // null, not '', is the regression test for that exact mistake.
     $category = DocumentCategory::factory()->create(['name' => 'Old']);
 
     $this->actingAs($this->hr)
@@ -61,7 +68,10 @@ it('updates a category', function (): void {
             'description' => null,
         ])
         ->assertOk()
-        ->assertJsonPath('data.name', 'New');
+        ->assertJsonPath('data.name', 'New')
+        ->assertJsonPath('data.description', null);
+
+    expect($category->fresh()->description)->toBeNull();
 });
 
 it('lets a category keep its own code on update', function (): void {
@@ -75,14 +85,18 @@ it('lets a category keep its own code on update', function (): void {
         ->assertOk();
 });
 
-it('deletes an empty category', function (): void {
-    $category = DocumentCategory::factory()->create();
+it('deletes an empty category, returning the remaining catalog in the same response', function (): void {
+    $deleted = DocumentCategory::factory()->create(['code' => 'GONE']);
+    $remaining = DocumentCategory::factory()->create(['code' => 'STAYS']);
 
     $this->actingAs($this->hr)
-        ->deleteJson("/api/v1/admin/document-categories/{$category->id}")
-        ->assertOk();
+        ->deleteJson("/api/v1/admin/document-categories/{$deleted->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $remaining->id)
+        ->assertJsonPath('data.0.code', 'STAYS');
 
-    expect(DocumentCategory::query()->count())->toBe(0);
+    expect(DocumentCategory::query()->count())->toBe(1);
 });
 
 // Losing a document kind because someone tidied the catalog is not an acceptable failure.

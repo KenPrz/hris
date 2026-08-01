@@ -329,44 +329,141 @@ test('every Profile controller references an authorization boundary, except the 
     expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Profile/ serve profile data without referencing an authorization boundary (EmployeeScope, $request->user()->employee, or a ->cannot()/->can()/->authorize()/Gate:: call): '.implode(', ', $offenders));
 });
 
-test('every Admin\Documents controller references a FormRequest authorization boundary', function (): void {
+test('every Admin\Documents controller is guarded by a FormRequest whose authorize() actually gates', function (): void {
     // Closes the gap the M10a-era Profile/ guard above deliberately left open: that guard's
     // docblock says a future GATED controller dropped into app/Http/Controllers/Profile/
     // would get no CI backstop, and names the exact same risk for
     // app/Http/Controllers/Admin/Documents/ once Task 6 (M10b-a) added gated controllers
     // there — until now, that directory held only the sibling Documents/ShowCatalogController
     // (a different directory, deliberately ungated by design, not scanned by this guard).
+    // Task 7 (M10b-a) is expected to add more controllers under this same directory; they
+    // are covered by this guard automatically, with no further changes needed here unless
+    // they gate through some other mechanism entirely.
     //
     // This directory's controllers gate DIFFERENTLY than every controller the guards above
-    // scan: EmployeePolicy/EmployeeScope/->cannot(/->can(/->authorize(/Gate:: never appear
-    // in the controller body itself, because DocumentCategory/Document catalog controllers
-    // authorize entirely inside their FormRequest's authorize() method
-    // (`$this->user()?->can('manageCatalog', Document::class)`) — the controller only
+    // scan: EmployeePolicy/EmployeeScope/->cannot(/->can(/->authorize(/Gate:: never appear in
+    // the controller body itself, because DocumentCategory/Document catalog controllers
+    // authorize entirely inside their FormRequest's authorize() method — the controller only
     // type-hints the FormRequest in its __invoke signature and never calls a gate inline.
     // Reusing the Employees/Attendance/Profile guards' inline-call patterns verbatim would
-    // therefore never fire — a controller with NO gate at all would still "pass" because
-    // none of those patterns are expected to appear here regardless. So this guard checks
-    // the boundary that actually exists for this directory: a `use` import of a FormRequest
-    // under App\Http\Requests\Documents (every one of which gates through manageCatalog) is
-    // the authorization boundary, not an inline gate call.
+    // therefore never fire — a controller with NO gate at all would still "pass" because none
+    // of those patterns are expected to appear here regardless.
+    //
+    // A first version of this guard checked ONLY for a `use App\Http\Requests\Documents\
+    // ...Request;` import line — an import-presence check, not an authorization-boundary
+    // check. Code review caught that it passes three regressions it should catch: a dead
+    // unused import (the class is imported but never actually type-hinted anywhere), a
+    // FormRequest type-hinted in __invoke() whose authorize() unconditionally `return
+    // true;`s, and (implicitly) any FormRequest whose authorize() body has no gate
+    // expression at all. This version instead performs two hops, BOTH of which must pass:
+    //
+    //   1. One of the imported App\Http\Requests\Documents\*Request classes must actually
+    //      appear as a parameter type-hint in the controller's __invoke() signature — not
+    //      merely imported. A dead import fails this hop.
+    //   2. That specific FormRequest's authorize() method body — read from its own file
+    //      under app/Http/Requests/Documents/ — must contain a real gate expression
+    //      (`->can(`, `Gate::`, or `manageCatalog`), not a bare `return true;` or an empty
+    //      body.
+    //
+    // What this STILL cannot prove — same limit the Employees/Attendance/Profile guards
+    // above have — is that the gate names the *right* ability for the action being
+    // performed (e.g. that a delete route's authorize() doesn't accidentally check a read
+    // permission). That is the feature tests' job (DocumentCategoryCrudTest's "denies every
+    // route to an actor without document.manage" case), not this guard's; this guard only
+    // proves SOME real gate expression sits on the path every request through this
+    // directory must take.
+    $extractBalanced = function (string $contents, int $fromPos, string $open, string $close): string {
+        $depth = 0;
+        $capturedStart = null;
+        $length = strlen($contents);
+
+        for ($i = $fromPos; $i < $length; $i++) {
+            $char = $contents[$i];
+
+            if ($char === $open) {
+                if ($depth === 0) {
+                    $capturedStart = $i + 1;
+                }
+
+                $depth++;
+            } elseif ($char === $close) {
+                $depth--;
+
+                if ($depth === 0 && $capturedStart !== null) {
+                    return substr($contents, $capturedStart, $i - $capturedStart);
+                }
+            }
+        }
+
+        return '';
+    };
+
     $offenders = [];
 
-    $files = (new Finder)
+    $controllerFiles = (new Finder)
         ->files()
         ->in(base_path('app/Http/Controllers/Admin/Documents'))
         ->name('*.php');
 
-    foreach ($files as $file) {
+    foreach ($controllerFiles as $file) {
         $contents = $file->getContents();
+        $relativePath = $file->getRelativePathname();
 
-        $guarded = preg_match('/use App\\\\Http\\\\Requests\\\\Documents\\\\\w+Request;/', $contents) === 1;
+        preg_match_all('/use App\\\\Http\\\\Requests\\\\Documents\\\\(\w+Request);/', $contents, $importMatches);
+        $importedClasses = $importMatches[1];
 
-        if (! $guarded) {
-            $offenders[] = $file->getRelativePathname();
+        if ($importedClasses === []) {
+            $offenders[$relativePath] = 'imports no FormRequest under App\Http\Requests\Documents';
+
+            continue;
+        }
+
+        // Hop 1: one of the imports must be a parameter type-hint in __invoke(), not merely
+        // an unused `use` line.
+        $invokePos = strpos($contents, 'function __invoke');
+        $parenPos = $invokePos === false ? false : strpos($contents, '(', $invokePos);
+        $invokeParams = $parenPos === false ? '' : $extractBalanced($contents, $parenPos, '(', ')');
+
+        $guardingClass = null;
+
+        foreach ($importedClasses as $className) {
+            if (preg_match('/\b'.preg_quote($className, '/').'\s+\$\w+/', $invokeParams) === 1) {
+                $guardingClass = $className;
+
+                break;
+            }
+        }
+
+        if ($guardingClass === null) {
+            $offenders[$relativePath] = 'imports a Documents FormRequest but never type-hints it in __invoke()';
+
+            continue;
+        }
+
+        // Hop 2: that FormRequest's own authorize() body must contain a real gate
+        // expression, not a bare `return true;`.
+        $requestFile = base_path('app/Http/Requests/Documents/'.$guardingClass.'.php');
+
+        if (! is_file($requestFile)) {
+            $offenders[$relativePath] = "guarding class {$guardingClass} has no matching file under app/Http/Requests/Documents/";
+
+            continue;
+        }
+
+        $requestContents = file_get_contents($requestFile);
+        $authorizePos = strpos($requestContents, 'function authorize');
+        $bracePos = $authorizePos === false ? false : strpos($requestContents, '{', $authorizePos);
+        $authorizeBody = $bracePos === false ? '' : $extractBalanced($requestContents, $bracePos, '{', '}');
+
+        $hasRealGate = $authorizeBody !== ''
+            && (str_contains($authorizeBody, '->can(') || str_contains($authorizeBody, 'Gate::') || str_contains($authorizeBody, 'manageCatalog'));
+
+        if (! $hasRealGate) {
+            $offenders[$relativePath] = "{$guardingClass}::authorize() contains no ->can(/Gate::/manageCatalog gate expression";
         }
     }
 
-    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Admin/Documents/ serve the document catalog without importing a FormRequest under App\Http\Requests\Documents\ as their authorization boundary: '.implode(', ', $offenders));
+    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Admin/Documents/ fail the two-hop FormRequest-gate check: '.json_encode($offenders));
 });
 
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
