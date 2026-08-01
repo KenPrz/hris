@@ -106,9 +106,14 @@ routes, a policy, and UI regardless), while **`applies_to` decides which *kinds*
 which** (a company's own business, changing without a deploy). Each sits on the side of
 `04-backend-conventions.md`'s config-vs-database line where it belongs.
 
-### 6. Documentable types are a config whitelist, and a morph map — but *not* an enforced one
+### 6. Documentable types are a config whitelist. There is NO Laravel morph map.
 
-`config/documents.php` maps a morph alias to a model class:
+> **Amended 2026-08-01, during Task 2.** The original decision registered
+> `Relation::morphMap()` so the database would store `'employee'` instead of
+> `App\Models\Employee`. That was wrong, and the reasoning behind it was incomplete. It is
+> recorded here rather than quietly rewritten, because the mistake is instructive.
+
+`config/documents.php` whitelists which models may own documents:
 
 ```php
 'documentable' => [
@@ -117,19 +122,42 @@ which** (a company's own business, changing without a deploy). Each sits on the 
 ],
 ```
 
-`document_files.documentable_type` stores `'employee'`, never `App\Models\Employee`. A class
-rename or namespace move must not orphan every row.
+It is used for validation, routing, and wire serialization. It is **not** passed to
+`Relation::morphMap()`.
 
-**Use `Relation::morphMap()`, not `Relation::enforceMorphMap()`.** The enforcing variant throws
-for any morphed class absent from the map, and `media.model_type` already holds
-`App\Models\Request` and `App\Models\EmployeeIdentification` as full class names from M3.6 and
-M10a. Enforcing would require adding those to the map *and* backfilling every existing media
-row. The non-enforcing form is safe because neither `Employee` nor `Office` appears in `media`
-today — they are not `HasMedia` — so no existing row changes meaning.
+**Why not.** `Relation::morphMap()` is process-global. It does not scope to one table — it
+changes `getMorphClass()` for every morph in the application. The original analysis checked
+spatie's `media` table, found neither `Employee` nor `Office` in it, and concluded the map was
+safe. It missed the second morphing package: **spatie/activitylog**.
+
+`Employee` and `Office` both use `LogsActivity`. `activity_log.subject_type` holds full class
+names today (`App\Models\EmployeeProfile`, `App\Models\EmployeeIdentification`, …), and that
+column is **exposed on the API** (`ActivityResource`) and **filterable**
+(`ListActivityController`). Registering a global map would make every *new* Office or Employee
+audit row write `'office'` while every historical row kept the FQCN — a filter that silently
+misses half the data in both directions, and a live API-contract change, for a module that has
+nothing to do with the audit viewer. It broke five existing tests, which is how it was caught.
+
+Backfilling `activity_log` to match was rejected out of hand: this system's audit trail is
+evidence, and rewriting historical rows to suit a new module's storage preference is precisely
+the thing the append-only discipline exists to prevent.
+
+**So `document_files.documentable_type` stores the full class name**, exactly as `media` and
+`activity_log` already do. The consistency is the point — this is the third polymorphic table
+in the schema and it now behaves like the other two.
+
+**The wire contract is unaffected.** `DocumentFileResource` maps the stored class back to its
+config alias, so the API still says `"documentable_type": "employee"`. Clients never see a
+class name; only the database does.
+
+What is genuinely lost is database-level rename safety: moving `App\Models\Employee` to another
+namespace would orphan rows. That cost is already accepted twice in this schema, and the
+mitigation is a data migration at rename time rather than a global setting that reaches into an
+unrelated module's storage.
 
 This is the codebase's **first application-owned polymorphic relation**. The only two
 `uuidMorphs` in the schema today are vendor-published (Sanctum's `personal_access_tokens`,
-spatie's `media`), so M10b sets the convention.
+spatie's `media`).
 
 ### 7. Two permissions: `document.manage` and `document.manage.self`
 
