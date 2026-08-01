@@ -28,15 +28,19 @@ use Illuminate\Support\Str;
  * chicken-and-egg: an employee needs an organization, and creating that organization is
  * the first thing this admin is going to do.
  *
- * The RBAC and profile catalogs are seeded UNCONDITIONALLY, before the System-Admin guard
- * below, and run every time this command runs — including on a database that already has
- * a System Admin (in which case the command still returns FAILURE; the guard only stops a
- * second superuser from being minted, not the catalogs from being kept current). Without
- * this, an M10a deploy onto an existing M9 production database — which by definition
+ * The RBAC, profile, and document catalogs are seeded UNCONDITIONALLY, before the
+ * System-Admin guard below, and run every time this command runs — including on a database
+ * that already has a System Admin (in which case the command still returns FAILURE; the guard
+ * only stops a second superuser from being minted, not the catalogs from being kept current).
+ * Without this, an M10a deploy onto an existing M9 production database — which by definition
  * already has a System Admin — could never gain `employee_identification_categories` or
- * `relationships`, and every HR Admin's "Save identification" would stay permanently
- * disabled. Both seeders are idempotent (`findOrCreate`/`updateOrCreate` throughout), so
- * re-running them is a no-op, never a duplicate or an error.
+ * `relationships`, and every HR Admin's "Save identification" would stay permanently disabled.
+ *
+ * The RBAC and profile catalogs use updateOrCreate: they are idempotent by overwriting
+ * (TIN, SSS, PhilHealth are law-fixed and never edited, so overwrites are safe).
+ * The document catalog uses firstOrCreate: it is idempotent by insert-if-absent, leaving
+ * existing rows untouched (the catalog is admin-editable, so overwriting would reset edits).
+ * Re-running is a no-op, never a duplicate or an error.
  *
  * See docs/superpowers/specs/2026-07-29-m9-containerization-production-design.md and
  * docs/superpowers/specs/2026-07-30-m10a-employee-profiling-design.md.
@@ -46,7 +50,7 @@ final class BootstrapAdmin extends Command
     protected $signature = 'hris:bootstrap-admin {email : The sign-in email for the first System Admin}
                             {--name= : Display name (defaults to "System Administrator")}';
 
-    protected $description = 'Seed the RBAC and profile catalogs (always) and create the first System Admin (empty database only)';
+    protected $description = 'Seed the RBAC, profile, and document catalogs (always) and create the first System Admin (empty database only)';
 
     public function handle(): int
     {

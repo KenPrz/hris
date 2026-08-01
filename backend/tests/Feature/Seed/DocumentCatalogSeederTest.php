@@ -61,3 +61,27 @@ it('is seeded by hris:bootstrap-admin even when a System Admin already exists', 
     expect(Document::query()->count())->toBeGreaterThan(0)
         ->and(DocumentCategory::query()->count())->toBeGreaterThan(0);
 });
+
+// Admin edits to seeded rows survive a reseed: insert-if-absent protects existing rows.
+it('does not overwrite admin edits when reseeded', function (): void {
+    $this->seed(DocumentCatalogSeeder::class);
+
+    $nbi = Document::query()->where('code', 'NBI')->firstOrFail();
+    expect($nbi->validity_months)->toBe(6);
+    expect($nbi->name)->toBe('NBI Clearance');
+
+    // Simulate an HR Admin editing the row through the UI
+    $nbi->update([
+        'validity_months' => 12,
+        'name' => 'NBI Clearance (Annual)',
+    ]);
+
+    // Reseed — the catalog rows that already exist should not be touched
+    $this->seed(DocumentCatalogSeeder::class);
+
+    $nbi->refresh();
+
+    // The admin edits survived — the seeder did not overwrite them
+    expect($nbi->validity_months)->toBe(12)
+        ->and($nbi->name)->toBe('NBI Clearance (Annual)');
+});

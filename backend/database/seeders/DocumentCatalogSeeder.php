@@ -13,11 +13,17 @@ use Illuminate\Database\Seeder;
  * A Philippine starter set for the document catalog.
  *
  * Unlike ProfileCatalogSeeder's identification categories — TIN, SSS and friends are fixed by
- * law and no UI creates them — this catalog is ADMIN-EDITABLE. These rows are a starting
- * point so the module is usable on first boot, not the whole of it.
+ * law and no UI creates them, so they are safely overwritten on every run — this catalog is
+ * ADMIN-EDITABLE. These rows are a starting point so the module is usable on first boot, not
+ * the whole of it.
  *
- * Idempotent throughout (updateOrCreate on `code`), which is what lets hris:bootstrap-admin
- * call it unconditionally.
+ * Idempotent by INSERT-IF-ABSENT (firstOrCreate on `code`), which lets hris:bootstrap-admin
+ * call it unconditionally without resetting admin edits. A seeded row that already exists is
+ * left completely alone. A later milestone that needs to change a seeded default ships a
+ * migration, not a seeder overwrite.
+ *
+ * ProfileCatalogSeeder correctly uses updateOrCreate because its rows are law-fixed and never
+ * edited; this seeder uses firstOrCreate because its rows are admin-editable.
  */
 final class DocumentCatalogSeeder extends Seeder
 {
@@ -79,14 +85,14 @@ final class DocumentCatalogSeeder extends Seeder
         $categoryIds = [];
 
         foreach (self::CATEGORIES as $code => $row) {
-            $categoryIds[$code] = DocumentCategory::query()->updateOrCreate(
+            $categoryIds[$code] = DocumentCategory::query()->firstOrCreate(
                 ['code' => $code],
                 ['name' => $row['name'], 'description' => $row['description']],
             )->id;
         }
 
         foreach (self::DOCUMENTS as $row) {
-            Document::query()->updateOrCreate(
+            Document::query()->firstOrCreate(
                 ['code' => $row['code']],
                 [
                     'name' => $row['name'],
