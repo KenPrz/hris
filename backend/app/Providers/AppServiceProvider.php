@@ -40,6 +40,17 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         Gate::policy(Employee::class, EmployeePolicy::class);
+
+        // Deliberately NO Relation::morphMap() here. Both Employee and Office already use
+        // LogsActivity, which morphs through activity_log.subject_type/causer_type — a
+        // GLOBAL registry, not scoped to document_files. Registering an alias for either
+        // model would silently rewrite the type new activity rows are logged under while
+        // every historical row keeps the FQCN, breaking ActivityResource's wire shape and
+        // ListActivityController's subject_type filter in both directions. document_files
+        // stores the FQCN instead, exactly like `media` and `activity_log` already do; a
+        // later task's DocumentFileResource maps it to the config('documents.documentable')
+        // alias at the wire layer. Do not add a morph map back without re-auditing every
+        // existing polymorphic relation on Employee/Office, not just spatie's `media`.
     }
 
     /**
