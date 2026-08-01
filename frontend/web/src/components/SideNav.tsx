@@ -54,6 +54,7 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
     { href: '/admin/departments', label: 'Departments' },
     { href: '/admin/employees', label: 'Employees' },
     { href: '/admin/activity', label: 'Activity log' },
+    { href: '/admin/documents', label: 'Documents' },
   ],
 }
 
