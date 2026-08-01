@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\User;
+use Database\Seeders\DocumentCatalogSeeder;
 use Database\Seeders\ProfileCatalogSeeder;
 use Database\Seeders\RbacSeeder;
 use Illuminate\Console\Command;
@@ -59,13 +60,14 @@ final class BootstrapAdmin extends Command
             return self::FAILURE;
         }
 
-        // Seed the RBAC and profile catalogs unconditionally — BEFORE the System-Admin guard
+        // Seed the RBAC, profile, and document catalogs unconditionally — BEFORE the System-Admin guard
         // below — so a database that already has a System Admin (every M9 production
         // install, from the moment an M10a deploy lands) still gains any catalog data a
         // later milestone introduces. Idempotent (findOrCreate/updateOrCreate throughout),
         // so running this on a database that already has the catalogs is a no-op.
         $this->callSilent('db:seed', ['--class' => RbacSeeder::class, '--force' => true]);
         $this->callSilent('db:seed', ['--class' => ProfileCatalogSeeder::class, '--force' => true]);
+        $this->callSilent('db:seed', ['--class' => DocumentCatalogSeeder::class, '--force' => true]);
 
         // Refuse rather than upsert. A command that quietly mints a second superuser — or
         // resets the existing one's password — is a privilege-escalation path wearing a
