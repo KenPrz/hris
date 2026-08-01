@@ -271,6 +271,62 @@ test('every Attendance controller references a scope or self check', function ()
     expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Attendance/ serve attendance data without referencing a scope or self check (EmployeeScope or $request->user()->employee): '.implode(', ', $offenders));
 });
 
+test('every Profile controller references an authorization boundary, except the catalog read', function (): void {
+    // A third sibling to the Employees/ and Attendance/ guards above, for M10a's
+    // app/Http/Controllers/Profile/ directory — which had NO such rule despite the two other
+    // controller-serving-sensitive-data directories both having one. Today's two controllers
+    // are ungated *by design*: ShowMyProfileController is self-only (guarded the same way
+    // Attendance/'s self-only controllers are, via `$request->user()->employee`), and
+    // ShowCatalogController genuinely has no boundary — it serves static, company-wide
+    // reference data (relationships, identification categories) with nothing
+    // employee-specific or sensitive in it, by its own docblock. That "ungated by design"
+    // state is exactly the one in which a future GATED controller dropped into this
+    // directory gets no CI backstop at all, so this widens the guard now rather than after
+    // M10b adds one. ShowCatalogController is allowed explicitly BY NAME, with the reasoning
+    // above, rather than weakening the rule for the whole directory.
+    $exemptByDesign = ['ShowCatalogController.php'];
+
+    $offenders = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app/Http/Controllers/Profile'))
+        ->name('*.php');
+
+    $patterns = [
+        '/EmployeeScope/',
+        '/user\(\)->employee\b/',
+        '/->cannot\(/',
+        '/->can\(/',
+        '/->authorize\(/',
+        '/Gate::/',
+    ];
+
+    foreach ($files as $file) {
+        if (in_array($file->getFilename(), $exemptByDesign, true)) {
+            continue;
+        }
+
+        $contents = $file->getContents();
+
+        $guarded = false;
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $contents) === 1) {
+                $guarded = true;
+
+                break;
+            }
+        }
+
+        if (! $guarded) {
+            $offenders[] = $file->getRelativePathname();
+        }
+    }
+
+    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Profile/ serve profile data without referencing an authorization boundary (EmployeeScope, $request->user()->employee, or a ->cannot()/->can()/->authorize()/Gate:: call): '.implode(', ', $offenders));
+});
+
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
     // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
     // dependency graph built from `use` statements and function-call nodes — it does not

@@ -10,15 +10,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-/** An HR Admin scoped to one office: the role (verbs) plus the pivot (scope). */
-function hrAdminFor(Office $office): User
-{
-    $user = User::factory()->create();
-    $user->assignRole('HR Admin');
-    $user->hrAdminOffices()->attach($office->id);
-
-    return $user->fresh();
-}
+// hrAdminFor() is declared once, globally, in tests/Pest.php — a second file-scope
+// declaration anywhere under tests/ is a PHP fatal, not a test failure. See the M10a
+// follow-ups.
 
 beforeEach(function (): void {
     $this->seed(RbacSeeder::class);

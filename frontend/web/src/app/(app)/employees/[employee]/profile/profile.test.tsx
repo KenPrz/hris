@@ -1,14 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { EmployeeProfile, EmployeeProfileSummary, ProfileCatalog } from '@/lib/api'
+import type { EmployeeProfile, EmployeeProfileSummary, ProfileCatalog, Session } from '@/lib/api'
 import { Providers } from '@/components/Providers'
 
 // Mirrors src/app/(app)/me/profile/profile.test.tsx: AppShell calls useRouter/usePathname
-// (next/navigation) and useSession (via SessionProvider inside <Providers>) — outside a
-// real Next app-router tree the former throws, and outside a <SessionProvider> the latter
-// does too. useParams additionally needs a stub here because this page reads the
-// [employee] route param, which next/navigation only supplies inside a real route.
+// (next/navigation) — outside a real Next app-router tree that throws. useParams
+// additionally needs a stub here because this page reads the [employee] route param, which
+// next/navigation only supplies inside a real route.
 vi.mock('next/navigation', () => ({
   useParams: () => ({ employee: 'e1' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -16,7 +15,36 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/employees/e1/profile',
 }))
 
+// Mirrors src/app/(app)/admin/employees/[employee]/employee-detail.test.tsx's `stubSession`
+// pattern: the page (and AppShell, underneath it) both read `useSession()` directly, and
+// the "is this viewer looking at their own record" check needs to drive `session.employee.id`
+// explicitly per test — going through the real SessionProvider (an unauthenticated `/me`
+// query in this test environment) can never produce that.
+vi.mock('@/hooks/useSession', () => ({ useSession: vi.fn() }))
+
+import { useSession } from '@/hooks/useSession'
+
 import EmployeeProfilePage from './page'
+
+const mockedUseSession = vi.mocked(useSession)
+
+function session(overrides: Partial<Session> = {}): Session {
+  return {
+    user: { id: 'u1', email: 'admin@x.com', name: 'Admin' },
+    employee: null,
+    is_system_admin: false,
+    has_reports: false,
+    hr_offices: ['o1'],
+    permissions: [],
+    ...overrides,
+  }
+}
+
+/** Defaults to a viewer who is NOT the employee this page is showing ('e1') — most tests
+ * are about an HR Admin or manager viewing someone else's record. */
+function stubSession(overrides: Partial<Session> = {}): void {
+  mockedUseSession.mockReturnValue({ session: session(overrides), isLoading: false, isAuthenticated: true })
+}
 
 // jsdom implements neither Pointer Events capture nor Element.scrollIntoView, and
 // ProfileForm's Selects (Radix) call both on open — mirrors ProfileForm.test.tsx's own
@@ -107,6 +135,7 @@ beforeEach(() => {
   vi.mocked(api.profile.redacted).mockReset()
   vi.mocked(api.profile.catalog).mockReset()
   vi.mocked(api.profile.catalog).mockResolvedValue(catalog)
+  stubSession()
 })
 
 describe('/employees/[employee]/profile', () => {
@@ -114,14 +143,42 @@ describe('/employees/[employee]/profile', () => {
     vi.mocked(api.profile.forEmployee).mockResolvedValue(fullProfile)
     renderPage()
 
-    expect(await screen.findByRole('heading', { name: 'Ken Daryl Austero Perez' })).toBeInTheDocument()
+    // Wait on the save button, not the heading: the heading resolves from `fullQuery`
+    // alone, but `useProfileCatalog` only starts fetching once `fullQuery.isSuccess` (Item
+    // 3's gate), so the form — which needs BOTH queries — settles a tick later than the
+    // heading does. Waiting on the heading here would let the assertions below race a
+    // still-loading catalog.
+    expect(await screen.findByRole('button', { name: /save profile/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ken Daryl Austero Perez' })).toBeInTheDocument()
     // ProfileSections (read view) — a personal-block field the redacted resource never has.
     expect(screen.getByText('Roman Catholic')).toBeInTheDocument()
     expect(screen.getByText('KENPE')).toBeInTheDocument()
-    // ProfileForm (the write half) is present too — its own submit button proves it mounted.
-    expect(screen.getByRole('button', { name: /save profile/i })).toBeInTheDocument()
 
     expect(api.profile.redacted).not.toHaveBeenCalled()
+  })
+
+  it('hides the edit form and shows a separation-of-duties notice when the viewer is looking at their own profile', async () => {
+    // `EmployeePolicy::viewFullProfile` admits self (so this viewer still gets the full
+    // read) but `updateProfile` denies self even for an HR Admin — a deliberate rule, not a
+    // bug — so this must render the read view only, never a form whose every submit 403s.
+    stubSession({ employee: { id: 'e1', employee_no: '2506366', current_office_id: 'o1', current_department_id: null } })
+    vi.mocked(api.profile.forEmployee).mockResolvedValue(fullProfile)
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: 'Ken Daryl Austero Perez' })).toBeInTheDocument()
+    // Read view still shows.
+    expect(screen.getByText('Roman Catholic')).toBeInTheDocument()
+    expect(screen.getByText('KENPE')).toBeInTheDocument()
+    // No save controls anywhere on the page — not the personal-details form, not
+    // dependents, not identifications.
+    expect(screen.queryByRole('button', { name: /save profile/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save dependents/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /save identification/i })).not.toBeInTheDocument()
+    // A notice explains the rule instead of leaving self to guess from a 403.
+    expect(screen.getByText(/can.t edit your own personnel file/i)).toBeInTheDocument()
+
+    // The catalog this viewer can never use (there's no form to populate) is never fetched.
+    expect(api.profile.catalog).not.toHaveBeenCalled()
   })
 
   it('falls back to the redacted shape for a manager, without the sections it has no data for', async () => {
@@ -139,6 +196,12 @@ describe('/employees/[employee]/profile', () => {
     expect(screen.queryByText('KENPE')).not.toBeInTheDocument()
     expect(screen.queryByText(/national ids/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /save profile/i })).not.toBeInTheDocument()
+
+    // A manager never sees a dropdown on this view — GET /profile/catalog is
+    // authenticated-but-unscoped, so firing it anyway would be a wasted request, not a
+    // disclosure, but `useProfileCatalog` is gated on `fullQuery.isSuccess` specifically so
+    // it never fires at all for a viewer stuck on the redacted fallback.
+    expect(api.profile.catalog).not.toHaveBeenCalled()
   })
 
   it('shows a not-found state when neither the full nor the redacted read succeeds', async () => {

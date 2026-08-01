@@ -160,7 +160,10 @@ full contact/personal/dependents/identifications file.
 `current_employment` is resolved through `EmploymentResolver` — the effective-dated record
 whose `effective_from` is the latest on or before today (`02-data-model.md`), the same way
 the pay engine reads it — never the denormalized cache. A brand-new employee with no
-employment record yet gets `null`, not an error.
+employment record yet gets `null`, not an error. "Today" here is the employee's current
+office-local date (M10a follow-ups) — this endpoint carried the same UTC-`today()` bug the
+M10a profile resources had, fixed the same way and at the same time; see `06-roadmap.md`'s
+M10a section.
 
 ```
 POST /api/v1/admin/employees          # onboard an employee (+ optional first employment)
@@ -331,8 +334,11 @@ The full profile:
 ```
 
 `age` is derived, never stored (`02-data-model.md`) — computed against the employee's
-current office timezone, which can disagree with an `assignment` field resolved against
-UTC-`today()` inside the same payload; see `06-roadmap.md`'s M10a section. `has_scan` is a
+current office timezone. **`assignment` resolves "today" the same way (M10a follow-ups):**
+both now go through `Carbon::now($employee->currentOffice?->timezone ?? 'Asia/Manila')`, so
+they no longer disagree during the 00:00–08:00 Asia/Manila window a UTC-anchored `today()`
+used to miss — see `06-roadmap.md`'s M10a section for the fix and the correction to its
+original "deferred, needs its own piece of work" framing. `has_scan` is a
 boolean, never a URL — the scan is only ever reachable through the stream route below.
 `dependents[].relationship` and `identifications[].category_code` are the catalog `code`
 (`"child"`, `"TIN"`), not the human-readable `description`/`name` — `GET /profile/catalog`

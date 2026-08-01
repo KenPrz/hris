@@ -11,6 +11,21 @@ FROM dunglas/frankenphp:php8.5 AS base
 # time this image tried to pick up M3.6's Media Library dependency. Found running Task 9.
 RUN install-php-extensions pdo_pgsql pgsql bcmath intl opcache exif
 
+# This base image ships upload_max_filesize=2M / post_max_size=8M. Every attachment route
+# validates `max:10240` (10240 KB = 10 MiB) — SubmitAdjustmentRequest, SubmitLeaveRequest-
+# Request (both M3.6), and SaveIdentificationRequest (M10a) — but PHP enforces its own,
+# smaller ceiling BEFORE the request ever reaches Laravel: an over-2M upload (a phone photo
+# of a passport is comfortably over that) is silently dropped from $_FILES, and Laravel's
+# `file` rule then fails with a generic "must be a file" 400 instead of a size error. Fixed
+# here, in the shared `base` stage, so both `dev` and `prod` inherit it — an .ini in
+# conf.d is the conventional override point for this image (confirmed via `php --ini`
+# against the running dev container: scan dir is /usr/local/etc/php/conf.d). 12M clears the
+# 10 MiB validation ceiling with headroom; post_max_size is raised higher still (not just
+# matched) because the multipart body carries the file PLUS every other form field, and
+# PHP silently truncates the whole POST — not just the file — if post_max_size doesn't
+# exceed upload_max_filesize.
+RUN printf 'upload_max_filesize=12M\npost_max_size=20M\n' > "$PHP_INI_DIR/conf.d/zz-uploads.ini"
+
 # The base image has no composer binary; take the official static one.
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 

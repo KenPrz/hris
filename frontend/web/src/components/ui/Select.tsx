@@ -22,6 +22,17 @@ export interface SelectProps {
  * are all Radix's.
  */
 export function Select({ id, label, value, onChange, options }: SelectProps) {
+  // Radix treats `value === ''` as "nothing selected" — `shouldShowPlaceholder` in
+  // @radix-ui/react-select — and refuses to portal that item's `SelectItemText` into the
+  // closed trigger even though `options` still lists it. Left unset, the trigger's
+  // `placeholder` prop defaults to `''`, so a blank value rendered as an empty box with
+  // just the caret. The fix is to hand Radix the blank option's own label as that
+  // placeholder — every call site that wants a blank state already prepends one
+  // (`{ value: '', label: 'Select gender' }`-shaped, see `ProfileForm`'s `withBlank` and
+  // the admin employee/office pickers), so this is the one label already on hand, not a
+  // new string to keep in sync.
+  const blankLabel = options.find((option) => option.value === '')?.label
+
   return (
     <div className="flex flex-col" style={{ gap: 'var(--sp-xxs)' }}>
       <label
@@ -46,7 +57,7 @@ export function Select({ id, label, value, onChange, options }: SelectProps) {
             gap: 'var(--sp-xs)',
           }}
         >
-          <RadixSelect.Value />
+          <RadixSelect.Value placeholder={blankLabel} />
           <RadixSelect.Icon aria-hidden="true">▾</RadixSelect.Icon>
         </RadixSelect.Trigger>
         <RadixSelect.Portal>

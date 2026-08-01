@@ -1869,7 +1869,10 @@ green — up from the 776 backend / 541 frontend the M0–M9 roadmap closed at. 
 `typecheck`, and `build` are green, native and inside the `make test` containers alike.
 (Task 16, below, is what took the frontend count from 560 to 563 and the backend
 assertion count from 3058 to 3061 without adding a backend test — see that entry. The
-final-fixes round below took it from 853/563 to 854/574.)
+final-fixes round below took it from 853/563 to 854/574. The M10a follow-ups round, after
+this — a separate branch, `m10a-followups`, closing the "open follow-ups" table below —
+took it further, to **865 backend tests (20 of them Arch) + 577 frontend tests**; see that
+section for what changed.)
 
 **Final-fixes round (before merge) — five findings from the whole-branch review, all
 fixed:**
@@ -1919,7 +1922,9 @@ behind fix 3's frontend wiring:
 **One known-and-accepted rough edge, recorded honestly rather than smoothed over** (a second
 one — the Dependents list rendering a raw relationship code instead of its label — was found
 by the Task 14 browser walkthrough, deferred, then actually fixed as Task 16 below; it no
-longer belongs on this list):
+longer belongs on this list). **This first one was later fixed too, by the `m10a-followups`
+branch — kept here verbatim as the original record, with the fix and its correction to the
+"deserves its own piece of work" claim below in the M10a follow-ups section:**
 
 - **`Carbon::today()` in the profile resources is UTC-today, not office-local today.**
   `EmployeeProfileResource`/`EmployeeProfileSummaryResource`'s `EmploymentResolver::on()`
@@ -2057,25 +2062,47 @@ What the building turned on, for whoever extends the profile module next:
   change. `frontend/web/src/lib/api.ts`'s `ProfileDependent` type gained the new field;
   `docs/03-api.md`'s dependents example was updated to show it.
 
-### M10a open follow-ups
+### M10a follow-ups — closed
 
 The final whole-branch review triaged 29 recorded items: none blocked the merge, roughly half
-were accepted as recorded, and these are the ones worth doing. Ordered by value, not by size.
+were accepted as recorded, and twelve were judged worth doing, listed below in the original
+value order. All twelve were cleared on the `m10a-followups` branch, plus a thirteenth —
+`CompanySeeder` shipping ten employees with entirely empty personnel files — found and fixed
+alongside them though it was never on this table. Fourteen commits, `git log --oneline
+main..m10a-followups`; **865 backend tests (20 of them Arch) + 577 frontend tests**, up from
+854/574, all green.
 
-| Item | Why it matters |
+| Item | What shipped |
 | --- | --- |
-| **`upload_max_filesize` is 2M while every attachment rule says `max:10240`** | Highest-value item on the list, and it **predates M10a** — it affects M3.6's existing attachment routes too. A 5 MB phone photo of a passport is dropped by PHP before Laravel sees it and surfaces as a misleading `400 "must be a file"`, not a size error. HR hits this on day one. One `php.ini` line in the api image. |
-| **Self-view renders an edit form that can only 403** | `viewFullProfile` admits self but `updateProfile` denies self, so an HR Admin opening their own profile gets a live form whose every submit fails behind the generic *"That didn't save. Check your connection and try again."* — actively wrong for a deliberate separation-of-duties denial. The backend holds correctly; this is UX only. |
-| **Scan replacement deletes the old RustFS object *inside* the DB transaction** | A rollback after `addMedia` leaves a media row pointing at a deleted object — a permanently lost government-ID scan, the one artifact this milestone says HR must be able to produce. Narrow window, unrecoverable outcome. |
-| **`RbacSeeder`'s permission names are reserved words** | spatie registers a `Gate::before` granting any ability whose *name* matches a held permission. Adding a permission literally named `viewFullProfile`/`viewRedactedProfile`/`updateProfile` would grant that policy ability **globally**, bypassing the office pivot entirely. Privilege escalation; the fix is a one-line reserved-words comment. |
-| **`hrAdminFor()` is a global Pest file-scope function** | A second declaration anywhere in `tests/` is a PHP **fatal**, not a test failure. M10b will add profile tests. Move it to `tests/Pest.php`. |
-| **No arch guard over `app/Http/Controllers/Profile/`** | The `Employees/` and `Attendance/` boundary greps don't cover it. Today's two `Profile/` controllers are ungated *by design*, which is exactly the state in which a future gated one gets no CI backstop. Widening the existing rule is nearly free. |
-| **`ProfileScopeMatrixTest` cannot tell 403 from 404** | It checks only 2xx-vs-not across all 48 cells, so the enumeration-leak discipline it claims to prove isn't actually pinned. Every route has an explicit `assertNotFound()` elsewhere, so this is a strength gap, not a hole. One line. |
-| **The `assignment` sub-block's key set isn't pinned** | The redaction test asserts exact keys at the top level and on `contact`, but not on `assignment` — and `assignment` is the block *shared* between the full and redacted resources, so it is precisely where a leak would enter. |
-| **`Select`'s `withBlank` placeholder never shows on the closed trigger** | An employee with a null blood type renders an empty box with a caret. Affects the six pre-existing dropdowns on the admin page too, so it is a `ui/Select.tsx` fix, not an M10a one. Nobody had seen it rendered until M10a's browser walkthrough. |
-| **`Carbon::today()` is UTC-today across the profile resources** | Between 00:00 and 08:00 Asia/Manila, an employment record effective *today* doesn't appear while `EmployeeProfile::age` — which correctly anchors to the office timezone — has already rolled over. The two disagree inside one payload. **Do not patch locally**: the real fix threads office timezone through `EmploymentResolver` and `ScheduleAssignment`, and deserves its own piece of work. |
-| **`useProfileCatalog()` fires for redacted viewers** | Who will never see a dropdown. A wasted request, not a disclosure. `enabled: fullQuery.isSuccess`. |
-| **`gridTemplateColumns: 'minmax(8rem, 14rem) 1fr'`** | The branch's only literal dimensional value, against a stated rule that a literal pixel value in a component is a bug. Either add the token or record the exception. |
+| **`upload_max_filesize` is 2M while every attachment rule says `max:10240`** | Fixed. `backend/Dockerfile`'s shared `base` stage now drops `upload_max_filesize=12M` / `post_max_size=20M` into `conf.d` (12M clears the 10 MiB validation ceiling with headroom; 20M stays well above 12M because the multipart body also carries every other form field, and PHP truncates the whole POST — not just the file — if `post_max_size` doesn't exceed `upload_max_filesize`). Both `dev` and `prod` inherit it. **This predates M10a and also fixes M3.6's existing attachment routes** (`SubmitAdjustmentRequest`, `SubmitLeaveRequestRequest`). Built and verified against a fresh image; an **already-running api container keeps serving the old 2M/8M until it is recreated** — see the Production section of `CLAUDE.md`. |
+| **Self-view renders an edit form that can only 403** | Fixed. `/employees/{employee}/profile` now reads `isSelf` from `useSession()` (never inferred from a failed request) and, when true, renders the read view (`ProfileSections`) plus an `InlineNotification` explaining the separation-of-duties rule instead of `ProfileForm`. `useProfileCatalog` is skipped for self too — there is no form to populate a dropdown for. |
+| **Scan replacement deletes the old RustFS object *inside* the DB transaction** | Fixed. `SaveEmployeeIdentification` now runs the `updateOrCreate` alone inside `DB::transaction()` and calls `addMedia(...)->toMediaCollection('scan')` only after that closure returns — i.e. after the DB write is durably committed. A failure in the media step can no longer roll back an already-committed number/date change, and a transaction rollback can no longer reach RustFS at all. |
+| **`RbacSeeder`'s permission names are reserved words** | Fixed. A block comment above `HR_PERMISSIONS` names `viewFullProfile`, `viewRedactedProfile`, and `updateProfile` as reserved — spatie's `Gate::before` grants any ability whose *name* matches a held permission, so a permission literally named one of these would bypass `administersOfficeOf()` entirely. Comment only; nothing in `HR_PERMISSIONS` changed. |
+| **`hrAdminFor()` is a global Pest file-scope function** | Fixed. Moved from `tests/Feature/Profile/ProfilePolicyTest.php` into `tests/Pest.php`'s new "Shared test helpers" section, with a comment stating why: a second declaration anywhere under `tests/` is a PHP fatal, not a test failure, and M10b will add more profile tests. |
+| **No arch guard over `app/Http/Controllers/Profile/`** | Fixed. `tests/Arch/ConventionsTest.php` gained a guard sibling to the existing `Employees/`/`Attendance/` ones, checking the union of both existing patterns (`EmployeeScope`, `user()->employee`, `->cannot(`/`->can(`/`->authorize(`, `Gate::`). `ShowCatalogController` is exempted by filename — it serves static, ungated reference data by design. Arch suite: 19 → 20. |
+| **`ProfileScopeMatrixTest` cannot tell 403 from 404** | Fixed. The denied branch now asserts `$status === 404` specifically rather than reusing the 2xx-or-not inversion, so a 403 — the enumeration leak the 404-not-403 discipline exists to prevent — is now caught, not just tolerated. |
+| **The `assignment` sub-block's key set isn't pinned** | Fixed. `ShowProfileTest`'s redacted-manager-view case now asserts the exact key set of `$body['assignment']`, alongside the pre-existing top-level and `contact` assertions — closing the one gap in the resource where a leak into the block shared by the full and redacted resources would go uncaught. |
+| **`Select`'s `withBlank` placeholder never shows on the closed trigger** | Fixed. `RadixSelect.Value` now receives `placeholder={blankLabel}`, the blank option's own label, already present at every call site that wants a blank state. No call site needed to change — affects the six pre-existing admin dropdowns too, not just the profile form. |
+| **`Carbon::today()` is UTC-today across the profile resources** | Fixed — narrower than originally described; see the correction below. |
+| **`useProfileCatalog()` fires for redacted viewers** | Fixed. The hook takes an `enabled: boolean = true` param (mirroring `useRedactedProfile`'s existing pattern); the page calls it with `fullQuery.isSuccess && !isSelf`, so a manager who will only ever see the redacted shape never fires the request. |
+| **`gridTemplateColumns: 'minmax(8rem, 14rem) 1fr'`** | Fixed. `carbon.css` gained a `--dl-label-col: minmax(8rem, 14rem);` token with an explanatory comment; `DefinitionList` reads it. `DESIGN.md` was deliberately **not** touched — its front-matter schema has no category for grid-track sizing, and `carbon.css`'s pre-existing `--field-border` (present in `carbon.css`, absent from `DESIGN.md`, with its own "not in DESIGN.md's colors block" comment) is the accepted precedent for a token that lives in code only. |
+
+**Correction to the `Carbon::today()` entry above.** This roadmap previously said of that item:
+*"Do not patch locally: the real fix threads office timezone through `EmploymentResolver` and
+`ScheduleAssignment`, and deserves its own piece of work."* **That assessment was wrong.**
+Verification on this branch showed `EmploymentResolver::on()` already takes an explicit date
+argument, and nothing in the compute engine ever calls `today()` itself —
+`ComputeDailySummary:76` passes the day being computed, `PayrollExport:107,112` pass explicit
+period dates. Only the four HTTP resources were choosing "today" for themselves:
+`EmployeeProfileResource`, `EmployeeProfileSummaryResource`, `EmployeeAssignmentPresenter`, and
+the pre-existing M8b `EmployeeDetailResource` (which had the identical bug and was never on
+this list, because nobody had traced it back that far until this pass). The fix is a new
+`app/Http/Resources/EmployeeLocalToday.php` helper — `Carbon::now($employee->currentOffice
+?->timezone ?? 'Asia/Manila')->startOfDay()`, mirroring `EmployeeProfile::age`'s existing
+approach exactly — used at all four call sites. **`EmploymentResolver` and `ScheduleAssignment`
+were deliberately left untouched.** The record stands corrected rather than quietly deleted: the
+wider fix was never necessary, the pay engine was never at risk, and the resource-layer fix also
+closes the M8b `EmployeeDetailResource` instance of the same bug as a side effect.
 
 Next: no milestone is open. **M10b — document management** is the nearest unclaimed work
 (above); beyond that, the **Deferred** table below is unchanged by this milestone.
@@ -2091,3 +2118,28 @@ Next: no milestone is open. **M10b — document management** is the nearest uncl
 | **Tenure-based leave accrual** | A leave policy with year-based tiers (12 days at year 1, 15 at year 5). M5's ledger supports it; only the accrual job changes. |
 | **Recursive manager scope** | An org chart deep enough that direct reports aren't sufficient. Costs a materialized path on `employees` plus cycle detection, and makes the scope check the most expensive query in the system — which is why it isn't in v1. |
 | **Multi-tenancy** | Selling this to a second company. **Expensive to change**, exactly as POS flagged. Revisit early or not at all. |
+
+### Still open after the follow-up branch
+
+Four things the final review surfaced that were deliberately left, so the next reader does
+not rediscover them:
+
+- **The self-view notice is imprecise for one viewer class.** `/employees/{id}/profile` hides
+  the edit form when `session.employee.id` matches the route param, and tells you your own
+  details are changed by someone else. That is true for an HR Admin — but `Gate::before`
+  grants a **System Admin** everything, so `updateProfile`'s self-denial never runs for them
+  and the backend *would* have allowed the edit. Unreachable today (`hris:bootstrap-admin`
+  creates a System Admin with no employee row, and `is_system_admin` is in `User::$guarded`),
+  so it is a latent mismatch rather than a live bug. It becomes real the first time someone
+  grants `is_system_admin` to a user who is also an employee.
+- **The arch authorization guard covers `Http/Controllers/Profile/` but not
+  `Http/Controllers/Admin/Profile/`** — the two *read* controllers, not the five that
+  actually mutate a personnel file. Those authorize inside their FormRequests, which none of
+  the guard's grep patterns would match anyway, so extending it means teaching the rule about
+  FormRequest-based gating rather than just widening a path. A future ungated
+  `Admin/Profile/*` controller gets no CI backstop.
+- **The arch exemption matches on filename, not relative path.** A future
+  `Http/Controllers/Profile/Something/ShowCatalogController.php` would be silently exempt.
+- **`make restore-drill` still does not verify the attachments tar restores.** M9's recorded
+  gap, unchanged — and identification scans now ride in that same tar, so it covers more
+  than it did.

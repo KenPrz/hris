@@ -17,6 +17,16 @@ use Spatie\Permission\PermissionRegistrar;
  */
 final class RbacSeeder extends Seeder
 {
+    // RESERVED WORDS — never add a permission literally named `viewFullProfile`,
+    // `viewRedactedProfile`, or `updateProfile` (or any other bare policy-ability name) to
+    // this list. spatie/laravel-permission registers its own Gate::before that grants any
+    // ability whose NAME matches a permission the user holds, regardless of which policy
+    // method that ability maps to or what arguments it was called with. A permission named
+    // after one of EmployeePolicy's abilities would therefore grant that ability GLOBALLY —
+    // bypassing the hr_admin_offices pivot check inside administersOfficeOf() entirely — the
+    // moment any role held it. Today's catalog is deliberately dotted (`employee.pii.edit`)
+    // so no such collision exists; keep it that way. See docs/05-rbac.md and the M10a
+    // follow-ups.
     private const array HR_PERMISSIONS = [
         'employee.manage',
         'employee.pii.edit',

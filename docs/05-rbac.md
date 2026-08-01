@@ -540,7 +540,14 @@ and a System Admin — against all eight authenticated M10a routes (`GET /profil
 excluded on purpose: it is ungated reference data, and a row of eight `true`s would be
 noise), asserting `2xx`-or-`404` against a hand-written expectation table for all 48 cells —
 the same "assert the shape, not just that some test exists" discipline the four-actor
-`EmployeeScope` matrix below already established. `tests/Feature/Profile/ProfilePolicyTest.php`
+`EmployeeScope` matrix below already established. **The denied branch asserts `$status ===
+404` specifically, not merely "not 2xx" (M10a follow-ups).** The original assertion inverted
+the allowed-cell check, so a denied cell returning `403` — the exact enumeration leak the
+404-not-403 discipline exists to prevent — would have passed the matrix silently; a
+mutation test that swapped one controller's denial from `NotFoundHttpException` to
+`AccessDeniedHttpException` proved it (the matrix went red, naming the three actors that hit
+the mutated route). The 404-not-403 discipline is now genuinely pinned here, not merely
+asserted elsewhere and assumed to hold in this matrix too. `tests/Feature/Profile/ProfilePolicyTest.php`
 exercises `EmployeePolicy` directly, including the fail-open null-guard case above.
 
 **This model is now reachable from the browser (M10a final-fixes round).** It was correct
@@ -553,6 +560,18 @@ redacted read on a `404`, rendering whichever one the backend actually authorize
 viewer — the frontend does not reimplement the office-pivot check, it just reads the
 response the policy above already produces. See `06-roadmap.md` and `features.md` for the
 route and the screen.
+
+**The UI now reflects the self-edit denial instead of presenting a form that can only fail
+(M10a follow-ups).** `viewFullProfile` admits self, so before this fix `/employees/{id}/profile`
+rendered the live `ProfileForm` when a viewer opened their own record — and every submit then
+hit `updateProfile`'s self-denial and surfaced the generic *"That didn't save. Check your
+connection and try again."*, which reads like a network fault, not a deliberate
+separation-of-duties rule. The backend was never wrong; only the screen was misleading. The
+page now reads `isSelf` from `useSession()` — never inferred from a failed request, so the
+notice shows before anyone submits anything — and when true, renders the read-only
+`ProfileSections` view plus an `InlineNotification` stating the rule, instead of `ProfileForm`.
+An HR Admin can still read their own file in full (`viewFullProfile`'s self branch, above);
+they simply never see a form that was always going to 403.
 
 ## Testing
 
