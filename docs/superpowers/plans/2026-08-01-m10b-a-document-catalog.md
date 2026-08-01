@@ -752,19 +752,40 @@ return [
 ];
 ```
 
-- [ ] **Step 5: Register the morph map**
+- [ ] **Step 5: Do NOT register a morph map — amended 2026-08-01 during execution**
 
-In `backend/app/Providers/AppServiceProvider.php`, add `use Illuminate\Database\Eloquent\Relations\Relation;` and, inside `boot()` after the `Gate::policy(...)` line:
+> **This step originally said to call `Relation::morphMap(config('documents.documentable'))`.
+> That was a spec defect, caught when it broke five existing tests. Do not do it.**
+>
+> `Relation::morphMap()` is **process-global**. It does not scope to one table — it changes
+> `getMorphClass()` for every morph in the application, including **spatie/activitylog**.
+> `Employee` and `Office` both use `LogsActivity`; `activity_log.subject_type` holds FQCNs
+> today and is exposed via `ActivityResource` and **filtered** via `ListActivityController`.
+> Registering the map writes `'office'` on new audit rows while history keeps the FQCN, so the
+> audit viewer's filter silently misses half the data in both directions.
+>
+> The original analysis checked spatie's `media` table and stopped there. Backfilling
+> `activity_log` was rejected: rewriting audit history to suit a new module's storage
+> preference is what the append-only discipline exists to prevent.
+
+**`document_files.documentable_type` stores the full class name**, exactly as `media.model_type`
+and `activity_log.subject_type` already do. This is the third polymorphic table in the schema
+and it now behaves like the other two.
+
+In `backend/app/Providers/AppServiceProvider.php`, add **no** morph map. Leave a comment where
+one would have gone, so nobody adds it back:
 
 ```php
-        // morphMap, NOT enforceMorphMap. The enforcing variant throws for any morphed class
-        // absent from the map, and spatie's `media.model_type` already holds
-        // App\Models\Request and App\Models\EmployeeIdentification as full class names from
-        // M3.6 and M10a — enforcing would mean adding those AND backfilling every existing
-        // media row. Non-enforcing is safe here because neither Employee nor Office appears
-        // in `media` today (neither is HasMedia), so no existing row changes meaning.
-        Relation::morphMap(config('documents.documentable'));
+        // Deliberately NO Relation::morphMap() for documentable types. It is process-global
+        // and would also rewrite spatie/activitylog's subject_type for Employee and Office —
+        // both use LogsActivity, activity_log holds FQCNs today, and that column is exposed
+        // and filtered by the M8c audit viewer. document_files stores the class name instead,
+        // matching media and activity_log. The wire contract still says 'employee': the
+        // resource maps class -> alias from config('documents.documentable').
 ```
+
+`config/documents.php` keeps its array; its job is the **whitelist** of models that may own
+documents (validation, routing, wire serialization), not a morph map. Its docblock must say so.
 
 - [ ] **Step 6: Write the model**
 
@@ -2542,12 +2563,16 @@ Update the Status test counts (measure them, see Step 7). Add to "Gotchas that w
 afternoon":
 
 ```markdown
-- **`Relation::enforceMorphMap()` would break every pre-existing media row.** It throws for any
-  morphed class absent from the map, and `media.model_type` holds `App\Models\Request` and
-  `App\Models\EmployeeIdentification` as full class names from M3.6 and M10a. M10b uses the
-  non-enforcing `Relation::morphMap()`, which is safe only because neither `Employee` nor
-  `Office` appears in `media` today. Adding a `HasMedia` trait to either model later means
-  revisiting this.
+- **`Relation::morphMap()` is process-global, and it reaches spatie/activitylog, not just
+  spatie/medialibrary.** M10b tried to register one so `document_files.documentable_type` would
+  store `'employee'` rather than `App\Models\Employee`. Because `Employee` and `Office` both use
+  `LogsActivity`, that also changed `activity_log.subject_type` for every *new* audit row while
+  history kept the FQCN — and that column is exposed by `ActivityResource` and filtered by
+  `ListActivityController`, so the M8c audit viewer silently missed half its data in both
+  directions. Five tests caught it. There is now **no morph map**: all three polymorphic tables
+  (`media`, `activity_log`, `document_files`) store full class names, and the stable
+  `'employee'` alias is applied at the resource layer instead. Before adding a morph map for
+  anything, enumerate every package that morphs — medialibrary and activitylog both do.
 ```
 
 - [ ] **Step 7: Measure the numbers — do not estimate**
