@@ -329,6 +329,46 @@ test('every Profile controller references an authorization boundary, except the 
     expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Profile/ serve profile data without referencing an authorization boundary (EmployeeScope, $request->user()->employee, or a ->cannot()/->can()/->authorize()/Gate:: call): '.implode(', ', $offenders));
 });
 
+test('every Admin\Documents controller references a FormRequest authorization boundary', function (): void {
+    // Closes the gap the M10a-era Profile/ guard above deliberately left open: that guard's
+    // docblock says a future GATED controller dropped into app/Http/Controllers/Profile/
+    // would get no CI backstop, and names the exact same risk for
+    // app/Http/Controllers/Admin/Documents/ once Task 6 (M10b-a) added gated controllers
+    // there — until now, that directory held only the sibling Documents/ShowCatalogController
+    // (a different directory, deliberately ungated by design, not scanned by this guard).
+    //
+    // This directory's controllers gate DIFFERENTLY than every controller the guards above
+    // scan: EmployeePolicy/EmployeeScope/->cannot(/->can(/->authorize(/Gate:: never appear
+    // in the controller body itself, because DocumentCategory/Document catalog controllers
+    // authorize entirely inside their FormRequest's authorize() method
+    // (`$this->user()?->can('manageCatalog', Document::class)`) — the controller only
+    // type-hints the FormRequest in its __invoke signature and never calls a gate inline.
+    // Reusing the Employees/Attendance/Profile guards' inline-call patterns verbatim would
+    // therefore never fire — a controller with NO gate at all would still "pass" because
+    // none of those patterns are expected to appear here regardless. So this guard checks
+    // the boundary that actually exists for this directory: a `use` import of a FormRequest
+    // under App\Http\Requests\Documents (every one of which gates through manageCatalog) is
+    // the authorization boundary, not an inline gate call.
+    $offenders = [];
+
+    $files = (new Finder)
+        ->files()
+        ->in(base_path('app/Http/Controllers/Admin/Documents'))
+        ->name('*.php');
+
+    foreach ($files as $file) {
+        $contents = $file->getContents();
+
+        $guarded = preg_match('/use App\\\\Http\\\\Requests\\\\Documents\\\\\w+Request;/', $contents) === 1;
+
+        if (! $guarded) {
+            $offenders[] = $file->getRelativePathname();
+        }
+    }
+
+    expect($offenders)->toBe([], 'Controller(s) under app/Http/Controllers/Admin/Documents/ serve the document catalog without importing a FormRequest under App\Http\Requests\Documents\ as their authorization boundary: '.implode(', ', $offenders));
+});
+
 test('only RecordEmploymentChange writes the employment cache columns', function (): void {
     // The installed pest-plugin-arch's toOnlyBeUsedIn() walks a class/function "uses"
     // dependency graph built from `use` statements and function-call nodes — it does not

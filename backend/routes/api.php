@@ -8,6 +8,10 @@ use App\Http\Controllers\Admin\Departments\CreateController as CreateDepartmentC
 use App\Http\Controllers\Admin\Departments\ListController as ListDepartmentsController;
 use App\Http\Controllers\Admin\Departments\UnarchiveController as UnarchiveDepartmentController;
 use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentController;
+use App\Http\Controllers\Admin\Documents\Categories\CreateController as CreateDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Categories\DeleteController as DeleteDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Categories\ListController as ListDocumentCategoriesController;
+use App\Http\Controllers\Admin\Documents\Categories\UpdateController as UpdateDocumentCategoryController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
@@ -270,6 +274,16 @@ Route::prefix('v1')->group(function (): void {
             // Same is_system_admin gating as the rest of this group: the log spans every
             // subject type company-wide, nothing to scope-check against a single office.
             Route::get('/activity', ListActivityController::class);
+
+            // The document catalog (M10b-a). Unlike most of this group these are NOT
+            // is_system_admin-gated: each FormRequest checks `manageCatalog`, so any HR Admin
+            // may edit the catalog. It is company-wide reference data with no office to
+            // scope by, which is why the denial is a plain 403 rather than the 404-not-403
+            // shape used where an owner id sits in the URL.
+            Route::get('/document-categories', ListDocumentCategoriesController::class);
+            Route::post('/document-categories', CreateDocumentCategoryController::class);
+            Route::patch('/document-categories/{category}', UpdateDocumentCategoryController::class);
+            Route::delete('/document-categories/{category}', DeleteDocumentCategoryController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
