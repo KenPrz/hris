@@ -12,6 +12,10 @@ use App\Http\Controllers\Admin\Documents\Categories\CreateController as CreateDo
 use App\Http\Controllers\Admin\Documents\Categories\DeleteController as DeleteDocumentCategoryController;
 use App\Http\Controllers\Admin\Documents\Categories\ListController as ListDocumentCategoriesController;
 use App\Http\Controllers\Admin\Documents\Categories\UpdateController as UpdateDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Kinds\CreateController as CreateDocumentController;
+use App\Http\Controllers\Admin\Documents\Kinds\DeleteController as DeleteDocumentController;
+use App\Http\Controllers\Admin\Documents\Kinds\ListController as ListDocumentsController;
+use App\Http\Controllers\Admin\Documents\Kinds\UpdateController as UpdateDocumentController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
@@ -284,6 +288,18 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/document-categories', CreateDocumentCategoryController::class);
             Route::patch('/document-categories/{category}', UpdateDocumentCategoryController::class);
             Route::delete('/document-categories/{category}', DeleteDocumentCategoryController::class);
+
+            // The document catalog's other tier: document KINDS (M10b-a Task 7), one level
+            // down from categories, same manageCatalog gating and plain-403 denial shape.
+            // This task adds no parameterised GET show route, so there is no ordering
+            // collision yet — but M10b-b adds GET /admin/documents/expiring and /missing,
+            // both literal segments that MUST be registered before any future
+            // GET /admin/documents/{document}, or "expiring"/"missing" would bind as a
+            // {document} id and 404.
+            Route::get('/documents', ListDocumentsController::class);
+            Route::post('/documents', CreateDocumentController::class);
+            Route::patch('/documents/{document}', UpdateDocumentController::class);
+            Route::delete('/documents/{document}', DeleteDocumentController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each
