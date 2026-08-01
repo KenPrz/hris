@@ -6,8 +6,10 @@ namespace App\Providers;
 
 use App\Actions\Requests\RequestEffectFactory;
 use App\Domain\Requests\RequestEffectResolver;
+use App\Models\Document;
 use App\Models\Employee;
 use App\Models\User;
+use App\Policies\DocumentPolicy;
 use App\Policies\EmployeePolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\Gate;
@@ -39,6 +41,7 @@ final class AppServiceProvider extends ServiceProvider
             $request->input('email').'|'.$request->ip()
         ));
 
+        Gate::policy(Document::class, DocumentPolicy::class);
         Gate::policy(Employee::class, EmployeePolicy::class);
 
         // Deliberately NO Relation::morphMap() here. Both Employee and Office already use
