@@ -37,6 +37,7 @@ use App\Http\Controllers\Attendance\ListMyAttendanceController;
 use App\Http\Controllers\Attendance\ListMySummaryController;
 use App\Http\Controllers\Attendance\PunchController;
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Documents\ShowCatalogController as ShowDocumentCatalogController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\MeController;
 use App\Http\Controllers\Cutoff\CloseCutoffController;
@@ -127,6 +128,10 @@ Route::prefix('v1')->group(function (): void {
 
         // Static reference data for the profile dropdowns — not scoped, not admin-gated.
         Route::get('/profile/catalog', ShowCatalogController::class);
+
+        // Static reference data for the document dropdowns — not scoped, not admin-gated,
+        // exactly like /profile/catalog above.
+        Route::get('/documents/catalog', ShowDocumentCatalogController::class);
 
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
