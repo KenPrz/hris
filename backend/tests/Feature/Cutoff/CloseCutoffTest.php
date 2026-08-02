@@ -7,13 +7,17 @@ use App\Actions\Cutoff\CloseCutoffInput;
 use App\Domain\Attendance\AdjustmentOperation;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Cutoff\CutoffState;
+use App\Domain\Pay\DayType;
+use App\Domain\Pay\SummaryLineKind;
 use App\Exceptions\Domain\CutoffAlreadyClosed;
 use App\Exceptions\Domain\CutoffHasUnresolvedExceptions;
 use App\Exceptions\Domain\InvalidCutoffStart;
 use App\Models\AttendanceAdjustmentDetail;
 use App\Models\CutoffPeriod;
 use App\Models\DailyAttendanceSummary;
+use App\Models\DailySummaryLine;
 use App\Models\Employee;
+use App\Models\Holiday;
 use App\Models\LeaveDetail;
 use App\Models\LeaveType;
 use App\Models\Office;
@@ -243,4 +247,83 @@ it('409s a second close of an already-closed period', function (): void {
 
     expect(fn () => closeCutoff($office->id, '2026-07-01', $actor->id))
         ->toThrow(CutoffAlreadyClosed::class);
+});
+
+// materializing the employee x date grid ------------------------------------------------
+
+require_once __DIR__.'/../Compute/support.php';
+
+it('pays an unworked regular holiday to an employee who never punched that day', function (): void {
+    // A summary row was only ever created by a punch, an adjustment, or LeaveEffect, so a
+    // regular holiday nobody worked had no row — making computeUnworkedDay's holiday_unworked
+    // line (a non-exempt employee's statutory Art. 94 100%) dead code in production. Verified
+    // against the dev database at review time: the one regular_holiday row had zero summaries,
+    // and daily_summary_lines held only regular_day and regular_night company-wide.
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+    $actor = User::factory()->create();
+
+    Holiday::query()->create([
+        'office_id' => $office->id,
+        'date' => '2026-07-08',   // a Wednesday inside the 1-15 period
+        'name' => 'Test regular holiday',
+        'day_type' => DayType::RegularHoliday,
+    ]);
+
+    closeCutoff($office->id, '2026-07-01', $actor->id);
+
+    $summary = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)
+        ->whereDate('date', '2026-07-08')
+        ->with('lines')
+        ->first();
+
+    expect($summary)->not->toBeNull()
+        ->and($summary->status)->toBe('locked');
+
+    $holidayLine = $summary->lines->firstWhere(
+        fn (DailySummaryLine $line): bool => $line->kind === SummaryLineKind::HolidayUnworked
+    );
+
+    expect($holidayLine)->not->toBeNull()
+        ->and($holidayLine->minutes)->toBe(540)
+        ->and($holidayLine->applied_bp)->toBe(10000);
+});
+
+it('gives an employee absent all period a summary for every day, so payroll can see them', function (): void {
+    // PayrollExport reads existing summary rows and groups by employee_id, so an employee
+    // with no rows did not appear in the export at all.
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+    $actor = User::factory()->create();
+
+    closeCutoff($office->id, '2026-07-01', $actor->id);
+
+    $summaries = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)
+        ->whereBetween('date', ['2026-07-01', '2026-07-15'])
+        ->get();
+
+    expect($summaries)->toHaveCount(15)
+        ->and($summaries->every(fn (DailyAttendanceSummary $s): bool => $s->status === 'locked'))->toBeTrue()
+        // Absences, not exceptions: an unworked day is never incomplete, so materializing the
+        // grid does not make a clean period suddenly unclosable.
+        ->and($summaries->every(fn (DailyAttendanceSummary $s): bool => $s->is_incomplete === false))->toBeTrue();
+});
+
+it('still refuses to close when materializing surfaces an incomplete day', function (): void {
+    // The materialization runs BEFORE the exception gate, so a day it creates as incomplete
+    // is caught rather than silently frozen.
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+    $actor = User::factory()->create();
+
+    // A lone in-punch: one unpaired punch, so the day computes as incomplete.
+    recordManualPunch($employee, $office, '2026-07-08', '08:00', PunchDirection::In);
+
+    expect(fn () => closeCutoff($office->id, '2026-07-01', $actor->id))
+        ->toThrow(CutoffHasUnresolvedExceptions::class);
 });
