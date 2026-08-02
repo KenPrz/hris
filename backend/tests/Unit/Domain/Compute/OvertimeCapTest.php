@@ -40,7 +40,7 @@ function capInput(int $workedMinutes, int $scheduled, int $approvedOvertime, boo
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: $isArt82Exempt,
         rates: PayRatesFactory::statutory(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: $approvedOvertime,
     );
 }

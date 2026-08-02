@@ -138,6 +138,7 @@ it('refuses to close while a pending leave request overlaps the window', functio
         'end_date' => '2026-07-02',
         'day_part' => 'full',
         'amount_minutes' => 1440,
+        'minutes_per_day' => 480,
     ]);
 
     try {

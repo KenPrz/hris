@@ -42,7 +42,7 @@ it('prices an ordinary 8h day as 480 regular_day minutes at 100%', function (): 
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -72,7 +72,7 @@ it('prices a rest day worked past 8h as regular_day base + overtime_day at the r
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -100,7 +100,7 @@ it('prices a special working day worked at 100%', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -120,7 +120,7 @@ it('prices a special non-working day worked at 130%', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -140,7 +140,7 @@ it('prices a regular holiday worked at 200%', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -160,7 +160,7 @@ it('prices a double regular holiday worked at 300%', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -182,7 +182,7 @@ it('prices a regular holiday NOT worked as one holiday_unworked line at 100%', f
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -206,7 +206,7 @@ it('gives an art82-exempt employee NO holiday_unworked line at all (no premium e
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: true,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -226,7 +226,7 @@ it('is not incomplete on an unworked rest day, and carries no lines', function (
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -249,7 +249,7 @@ it('carries no lines for an absence on an ordinary day (no punches, not a paid h
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -273,7 +273,7 @@ it('prices a scheduled working day covered by approved leave as one leave_with_p
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: true,
+        leaveMinutes: 480,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -297,7 +297,7 @@ it('prices leave_with_pay over holiday_unworked when a leave day also happens to
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: true,
+        leaveMinutes: 480,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -318,11 +318,140 @@ it('gives no leave_with_pay line on a rest day covered by leave (leave never cha
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: true,
+        leaveMinutes: 480,
         approvedOvertimeMinutes: 9999,
     ));
 
     expect($out->lines)->toBe([]);
+});
+
+it('pays a half-day leave for half a day', function (): void {
+    // day_part was written at submit and read by nothing downstream: LeaveDayLookup returned
+    // a bare boolean, so a half-day was priced as a full day. Debited 240, paid 480.
+    $out = DailyComputation::compute(new DailyComputationInput(
+        punches: [],
+        dayType: DayType::Ordinary,
+        isRestDay: false,
+        scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: 480,
+        breakMinutes: 60,
+        mealBreakAppliesOverMinutes: 300,
+        isArt82Exempt: false,
+        rates: rates(),
+        leaveMinutes: 240,
+        approvedOvertimeMinutes: 9999,
+    ));
+
+    expect($out->lines)->toHaveCount(1);
+    expect($out->lines[0]->kind)->toBe(SummaryLineKind::LeaveWithPay);
+    expect($out->lines[0]->minutes)->toBe(240);
+    expect($out->lines[0]->appliedBp)->toBe(10000);
+    // Half the day is genuinely unaccounted for — the employee neither worked it nor
+    // holds leave for it. That is undertime, not free pay.
+    expect($out->undertimeMinutes)->toBe(240);
+});
+
+it('pays both the worked half and the leave half when an employee works the other half', function (): void {
+    // The likelier half-day case, and the one that disadvantaged the employee: punches
+    // exist, so computeUnworkedDay was never reached and NO leave line was emitted at all.
+    // Debited 240 and paid only for the hours worked.
+    $out = DailyComputation::compute(new DailyComputationInput(
+        punches: [480, 720],   // 08:00-12:00, gross 240 — under the 300 meal-break threshold
+        dayType: DayType::Ordinary,
+        isRestDay: false,
+        scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: 480,
+        breakMinutes: 60,
+        mealBreakAppliesOverMinutes: 300,
+        isArt82Exempt: false,
+        rates: rates(),
+        leaveMinutes: 240,
+        approvedOvertimeMinutes: 9999,
+    ));
+
+    $byKind = collect($out->lines)->keyBy(fn ($l) => $l->kind->value);
+
+    expect($out->workedMinutes)->toBe(240);
+    expect($byKind['regular_day']->minutes)->toBe(240);
+    expect($byKind['leave_with_pay']->minutes)->toBe(240);
+    expect($byKind['leave_with_pay']->appliedBp)->toBe(10000);
+    // Worked 240 + leave 240 == the scheduled 480. Nothing owed.
+    expect($out->undertimeMinutes)->toBe(0);
+});
+
+it('never pays leave and worked time beyond the scheduled day', function (): void {
+    // Full-day leave, but the employee came in and worked the whole day anyway. The leave
+    // yields to the worked time rather than stacking on top of it — paid once, not twice.
+    $out = DailyComputation::compute(new DailyComputationInput(
+        punches: [480, 1020],  // gross 540, net 480 after the break
+        dayType: DayType::Ordinary,
+        isRestDay: false,
+        scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: 480,
+        breakMinutes: 60,
+        mealBreakAppliesOverMinutes: 300,
+        isArt82Exempt: false,
+        rates: rates(),
+        leaveMinutes: 480,
+        approvedOvertimeMinutes: 9999,
+    ));
+
+    expect($out->workedMinutes)->toBe(480);
+    expect($out->lines)->toHaveCount(1);
+    expect($out->lines[0]->kind)->toBe(SummaryLineKind::RegularDay);
+});
+
+it('tops a partially worked day up to the scheduled day with the leave it holds', function (): void {
+    // Half-day leave, but the employee worked six hours instead of four. Leave tops up only
+    // the remaining two, never the full 240 it nominally covers — leave + worked can never
+    // exceed the scheduled day.
+    $out = DailyComputation::compute(new DailyComputationInput(
+        punches: [480, 840],   // 08:00-14:00, gross 360, net 300 after the break
+        dayType: DayType::Ordinary,
+        isRestDay: false,
+        scheduledMinutes: 480,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: 480,
+        breakMinutes: 60,
+        mealBreakAppliesOverMinutes: 300,
+        isArt82Exempt: false,
+        rates: rates(),
+        leaveMinutes: 240,
+        approvedOvertimeMinutes: 9999,
+    ));
+
+    $byKind = collect($out->lines)->keyBy(fn ($l) => $l->kind->value);
+
+    expect($out->workedMinutes)->toBe(300);
+    expect($byKind['regular_day']->minutes)->toBe(300);
+    expect($byKind['leave_with_pay']->minutes)->toBe(180);
+    expect($out->undertimeMinutes)->toBe(0);
+});
+
+it('gives no leave line to a rest day the employee worked', function (): void {
+    // A rest day has no scheduled minutes to top up, so leave never adds anything to one —
+    // matching the unworked rest-day case above.
+    $out = DailyComputation::compute(new DailyComputationInput(
+        punches: [480, 840],
+        dayType: DayType::Ordinary,
+        isRestDay: true,
+        scheduledMinutes: 0,
+        overtimeThresholdMinutes: 480,
+        scheduledStartMinute: null,
+        breakMinutes: 0,
+        mealBreakAppliesOverMinutes: 300,
+        isArt82Exempt: false,
+        rates: rates(),
+        leaveMinutes: 480,
+        approvedOvertimeMinutes: 9999,
+    ));
+
+    $kinds = collect($out->lines)->map(fn ($l) => $l->kind->value)->all();
+
+    expect($kinds)->not->toContain('leave_with_pay');
 });
 
 // night differential -------------------------------------------------------------------
@@ -340,7 +469,7 @@ it('prices a night shift entirely within one calendar day at the compounded 110%
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -364,7 +493,7 @@ it('prices a cross-midnight night shift at the compounded 110%', function (): vo
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -390,7 +519,7 @@ it('prices work beyond the scheduled day as overtime at +25% ordinary', function
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -423,7 +552,7 @@ it('keeps a compressed 10h scheduled day entirely regular, with no overtime line
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -448,7 +577,7 @@ it('is incomplete on an unpaired punch: zero worked, no lines', function (): voi
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -475,7 +604,7 @@ it('collapses every bucket to 100% for an art82-exempt employee, even on a holid
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: true,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -508,7 +637,7 @@ it('proves the same holiday-night-OT day is NOT flat 100% without the art82 exem
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -541,7 +670,7 @@ it('populates late and undertime minutes together', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -575,7 +704,7 @@ it('never credits more worked minutes for a shorter span', function (): void {
             mealBreakAppliesOverMinutes: 300,
             isArt82Exempt: false,
             rates: rates(),
-            onApprovedLeave: false,
+            leaveMinutes: 0,
             approvedOvertimeMinutes: 9999,
         ));
 
@@ -599,7 +728,7 @@ it('deducts the meal break above five hours, not above the scheduled day', funct
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 
@@ -620,7 +749,7 @@ it('leaves a span at or under five hours whole', function (): void {
         mealBreakAppliesOverMinutes: 300,
         isArt82Exempt: false,
         rates: rates(),
-        onApprovedLeave: false,
+        leaveMinutes: 0,
         approvedOvertimeMinutes: 9999,
     ));
 

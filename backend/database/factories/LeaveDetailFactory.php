@@ -26,6 +26,19 @@ final class LeaveDetailFactory extends Factory
             'end_date' => $end->format('Y-m-d'),
             'day_part' => 'full',
             'amount_minutes' => 480,
+            // The per-day quantity the compute engine prices a leave day at, and what
+            // amount_minutes is a multiple of. A one-day 'full' leave, so the two match.
+            'minutes_per_day' => 480,
         ];
+    }
+
+    /** Half a standard 480-minute day, with day_part and both minute figures kept consistent. */
+    public function halfDay(): self
+    {
+        return $this->state(fn (): array => [
+            'day_part' => 'half',
+            'amount_minutes' => 240,
+            'minutes_per_day' => 240,
+        ]);
     }
 }

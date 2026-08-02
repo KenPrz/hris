@@ -76,6 +76,7 @@ final class SubmitLeaveRequestController
             endDate: $endDate,
             dayPart: $dayPart,
             amountMinutes: $amount,
+            minutesPerDay: $perDay,
             note: $request->string('note')->toString(),
             attachment: $request->file('attachment'),
         ));

@@ -83,7 +83,7 @@ final class ComputeDailySummary
 
         $schedule = (new ScheduleResolver)->resolve($employee, $date);
 
-        $onApprovedLeave = LeaveDayLookup::isOnApprovedLeave($employee, $date);
+        $leaveMinutes = LeaveDayLookup::paidMinutesFor($employee, $date);
 
         $approvedOvertimeMinutes = OvertimeAuthorizationLookup::approvedMinutesFor($employee, $date);
 
@@ -126,7 +126,7 @@ final class ComputeDailySummary
             mealBreakAppliesOverMinutes: (int) config('hris.meal_break.applies_over_minutes'),
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,
-            onApprovedLeave: $onApprovedLeave,
+            leaveMinutes: $leaveMinutes,
             approvedOvertimeMinutes: $approvedOvertimeMinutes,
         ));
 
