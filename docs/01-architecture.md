@@ -100,8 +100,22 @@ a recomputation of every payslip since.
 
 ## The time rules
 
-**Every timestamp is `timestamptz`, stored UTC.** No `timestamp without time zone`
-anywhere.
+**Every timestamp that carries meaning is `timestamptz`, stored UTC** — `punched_at`,
+`computed_at`, `closed_at`, every `_at` a decision or an audit depends on. Those columns are
+declared `timestampTz()`/`timestampsTz()` explicitly.
+
+**This is not true of the whole schema, and the doc claimed it was.** Tables using Laravel's
+plain `$table->timestamps()` get `timestamp without time zone`: 55 such columns today
+against 26 `timestamptz`. Mostly `created_at`/`updated_at` on configuration rows, where the
+instant is bookkeeping rather than a fact anyone computes from — which is why it has cost
+nothing so far.
+
+It has cost something once. `ListActivityController`'s `whereDate('created_at', …)` filter
+runs against `activity_log.created_at`, which is one of the non-tz columns, while
+`admin/activity/page.tsx` renders those rows with `toLocaleString` in the *browser's* zone.
+A Manila admin therefore sees an event as "Aug 2, 01:00", filters on `2026-08-02`, and
+watches the row disappear. Fixing that is a follow-on, not a schema-wide migration: the rule
+to hold is that a column anyone filters, compares, or computes from must be `timestamptz`.
 
 **`APP_TIMEZONE=UTC`, enforced at boot.** `AppServiceProvider::assertConfigured()` throws
 a `RuntimeException` if `config('app.timezone')` is anything other than `UTC`, and it runs
@@ -166,14 +180,27 @@ retryable. The mechanics and the two tests that must exist are in
 
 ## Concurrency
 
-**`lockForUpdate()` and a version check solve different problems, and both are needed.**
+**`lockForUpdate()` and a version check solve different problems. Only the first is built.**
 
 - The **row lock** serializes concurrent writers. Two requests touching the same summary
-  take turns instead of interleaving.
-- The **version check** rejects a *stale client* — one that read v7 and is acting on
-  information v8 invalidated. With only the lock, both writers succeed and the second
-  silently clobbers the first, which is the worst outcome available: no error, no audit
-  trail, wrong number.
+  take turns instead of interleaving. This exists, is used consistently, and is proven by
+  six two-process tests that spawn a real second Postgres session rather than simulating
+  one — see `tests/Feature/**/*ConcurrencyTest.php`.
+- The **version check** would reject a *stale client* — one that read v7 and is acting on
+  information v8 invalidated. **It does not exist.** There is no `version`/`lock_version`
+  column in any migration and no `If-Match`/`ETag` handling anywhere in `app/` or
+  `frontend/web/src`. This document previously asserted otherwise.
+
+So every update in the system is **last-write-wins**. Two HR admins editing the same profile:
+the second silently overwrites the first, with no error and no indication anything was lost.
+The row locks keep the database consistent — no torn writes, no lost ledger entries — but
+they cannot tell a writer that what they read has since changed.
+
+Why it has not bitten yet: almost every mutation is either append-only (punches, ledger
+entries, annulments), guarded by a state machine that refuses a second transition (approve,
+close, reopen), or edited by exactly one role on records that role owns. The exposure is the
+handful of screens where two people plausibly edit one record — profiles, offices, pay
+rules. Deferred with that trigger written down; see `06-roadmap.md`.
 
 The race that matters most in this system is **approving a request versus closing the
 cutoff that contains it** (M6). `ApproveRequest` must `lockForUpdate()` the affected

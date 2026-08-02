@@ -195,7 +195,8 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-267 backend tests + 17 arch tests, and 165 frontend tests today.
+888 backend tests (19 of them Arch) + 582 frontend tests today — 581 passing; the one
+red is the pre-existing, date-dependent `attendance.test.tsx` fixture described below.
 
 The test database is created once:
 
@@ -342,7 +343,7 @@ contact and personal details, dependents, and government/financial IDs with a sc
 of each — that an HR Admin configures per office, an employee reads for themselves, and a
 manager sees a redacted view of, at its own HR/manager-reachable route
 (`/employees/{id}/profile`) separate from the system-admin-only employee roster.
-**854 backend tests (19 of them Arch) + 574 frontend tests.** See `docs/06-roadmap.md` for
+**888 backend tests (19 of them Arch) + 582 frontend tests (581 passing).** See `docs/06-roadmap.md` for
 each milestone's status and `docs/features.md` for what a user can actually do today.
 
 One caveat worth knowing before you trust the UI: the frontend is covered by component
