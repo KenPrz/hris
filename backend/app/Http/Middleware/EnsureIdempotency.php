@@ -39,31 +39,75 @@ final class EnsureIdempotency
         ]));
 
         return DB::transaction(function () use ($key, $hash, $request, $next): Response {
-            $seen = IdempotencyKey::whereKey($key)->lockForUpdate()->first();
+            // Claim the key BEFORE running the guarded work.
+            //
+            // This used to be `SELECT … FOR UPDATE` followed by an insert afterwards. A lock
+            // on a row that does not exist yet locks NOTHING, so two first uses of one key
+            // both passed that check, both ran $next() — the guarded work executed twice —
+            // and then the loser's insert raised a 23505 with no savepoint, rolling back its
+            // whole transaction and surfacing as a 500 where a replayed 2xx was owed.
+            //
+            // insertOrIgnore is the atomic claim: exactly one caller inserts, and everyone
+            // else falls through to a lock that now has a real row to wait on.
+            $claimed = self::claim($key, $hash);
 
-            if ($seen !== null) {
-                if (! hash_equals($seen->request_hash, $hash)) {
-                    throw new IdempotencyKeyReused($key);   // 409
+            if (! $claimed) {
+                // Someone else holds the claim. This blocks until their transaction ends.
+                $seen = IdempotencyKey::whereKey($key)->lockForUpdate()->first();
+
+                if ($seen !== null) {
+                    if (! hash_equals($seen->request_hash, $hash)) {
+                        throw new IdempotencyKeyReused($key);   // 409
+                    }
+
+                    // A committed claim always carries its outcome: the owner either records
+                    // the response (2xx) or releases the key (non-2xx) before committing.
+                    if ($seen->response_code !== null) {
+                        return response()->json($seen->response_body, $seen->response_code);
+                    }
                 }
 
-                return response()->json($seen->response_body, $seen->response_code);
+                // The owner released the key — their work threw, or returned non-2xx, so
+                // nothing durable happened and this request owns the retry. Claim it now.
+                // Another caller can still win that race; a 409 tells the client to retry,
+                // which is the honest answer and is bounded, unlike looping here.
+                if (! self::claim($key, $hash)) {
+                    throw new IdempotencyKeyReused($key);
+                }
             }
 
             $response = $next($request);   // the action's DB::transaction() nests here
 
-            // Only success earns a key, so a flagged-but-stored punch (a 2xx) is recorded,
-            // while a genuine failure rolls back to the savepoint and stays retryable.
+            // Only success keeps the key, so a flagged-but-stored punch (a 2xx) is recorded,
+            // while a genuine failure releases it and stays retryable — the same rule as
+            // before, expressed as "resolve or release" now that the row exists up front.
             if ($response->isSuccessful()) {
-                IdempotencyKey::create([
-                    'key' => $key,
-                    'request_hash' => $hash,
+                IdempotencyKey::whereKey($key)->update([
                     'response_code' => $response->getStatusCode(),
                     'response_body' => json_decode($response->getContent(), true),
-                    'created_at' => now(),
                 ]);
+            } else {
+                IdempotencyKey::whereKey($key)->delete();
             }
 
             return $response;
         });
+    }
+
+    /**
+     * Atomically reserve the key with no outcome yet. True when this caller won it.
+     *
+     * insertOrIgnore rather than a check-then-insert: the check is exactly what could not be
+     * made safe, since there is no row to lock until someone creates one.
+     */
+    private static function claim(string $key, string $hash): bool
+    {
+        return DB::table('idempotency_keys')->insertOrIgnore([
+            'key' => $key,
+            'request_hash' => $hash,
+            'response_code' => null,
+            'response_body' => null,
+            'created_at' => now(),
+        ]) === 1;
     }
 }

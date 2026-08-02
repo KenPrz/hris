@@ -65,3 +65,58 @@ it('passes through unkeyed requests without storing anything', function (): void
 
     expect(App\Models\IdempotencyKey::count())->toBe(0);
 });
+
+// claim ordering -------------------------------------------------------------------------
+
+it('claims the key BEFORE running the guarded work', function (): void {
+    // The whole fix. This used to be `SELECT … FOR UPDATE` on the key, then the work, then
+    // the insert — and a lock on a row that does not exist yet locks nothing, so two first
+    // uses of one key both reached the work and the loser's insert raised a 23505 with no
+    // savepoint: a 500 where a replayed 2xx was owed, on top of executing twice.
+    //
+    // If the claim moves back after the work, this route observes no row and fails.
+    Route::post('/api/v1/_test/observe', fn (): array => ['data' => [
+        'claimed' => App\Models\IdempotencyKey::whereKey('observe-key')->exists(),
+    ]])->middleware(['auth:sanctum', 'idempotent']);
+
+    Sanctum::actingAs(User::factory()->create());
+
+    $this->postJson('/api/v1/_test/observe', [], ['Idempotency-Key' => 'observe-key'])
+        ->assertOk()
+        ->assertJsonPath('data.claimed', true);
+});
+
+it('resolves the claim with the response once the work succeeds', function (): void {
+    Sanctum::actingAs(User::factory()->create());
+
+    $this->postJson('/api/v1/_test/increment', [], ['Idempotency-Key' => 'resolve-key'])->assertOk();
+
+    $row = App\Models\IdempotencyKey::whereKey('resolve-key')->sole();
+
+    // A committed claim always carries its outcome — never a half-written key that a later
+    // replay would serve as `null`. The CHECK constraint enforces the pairing too.
+    expect($row->response_code)->toBe(200)
+        ->and($row->response_body)->not->toBeNull();
+});
+
+it('releases the key when the guarded work fails, so the client can retry', function (): void {
+    // Only success keeps the key. The claim now exists up front, so "stays retryable" means
+    // releasing it rather than simply never writing it.
+    Route::post('/api/v1/_test/failing', function () {
+        cache()->increment('idem_fail_calls');
+
+        return response()->json(['error' => ['code' => 'nope', 'message' => 'no']], 422);
+    })->middleware(['auth:sanctum', 'idempotent']);
+
+    cache()->forget('idem_fail_calls');
+    Sanctum::actingAs(User::factory()->create());
+
+    $this->postJson('/api/v1/_test/failing', [], ['Idempotency-Key' => 'fail-key'])->assertStatus(422);
+
+    expect(App\Models\IdempotencyKey::whereKey('fail-key')->exists())->toBeFalse();
+
+    // Genuinely retryable: the same key runs the work again rather than replaying a failure.
+    $this->postJson('/api/v1/_test/failing', [], ['Idempotency-Key' => 'fail-key'])->assertStatus(422);
+
+    expect(cache()->get('idem_fail_calls'))->toBe(2);
+});
