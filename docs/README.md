@@ -80,7 +80,7 @@ HR/manager-reachable route (`/employees/{id}/profile`) separate from the
 system-admin-only employee roster; and M10b-a adds the document catalog beneath it — the
 document kinds and categories an HR Admin configures, admin-editable and company-wide, that
 M10b-b will let HR and employees actually file documents against. **911 backend tests (21
-of them Arch) + 590 frontend tests (589 passing — one pre-existing, date-dependent red
+of them Arch) + 600 frontend tests (599 passing — one pre-existing, date-dependent red
 unrelated to any shipped feature; see `06-roadmap.md`'s M10b-a section)**, plus a
 `scripts/e2e-*.sh` per milestone that walks its flow against a live stack.
 
