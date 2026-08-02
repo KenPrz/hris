@@ -46,7 +46,7 @@ it('creates a holiday recompute run for an office+date with an existing summary'
 
     $date = '2026-08-21'; // Friday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $this->assertDatabaseHas('daily_attendance_summaries', ['employee_id' => $employee->id, 'date' => $date]);
 
@@ -90,7 +90,7 @@ it('creates a pay_rule recompute run for a version effective F', function (): vo
 
     $date = '2026-08-21';
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $this->assertDatabaseHas('daily_attendance_summaries', ['employee_id' => $employee->id, 'date' => $date]);
 
@@ -130,7 +130,7 @@ it('creates a schedule_override recompute run for an employee with an existing s
 
     $date = '2026-08-21';
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $this->assertDatabaseHas('daily_attendance_summaries', ['employee_id' => $employee->id, 'date' => $date]);
 
@@ -164,10 +164,10 @@ it('flips a punched ordinary day to special_non_working end-to-end when its holi
     $date = '2026-08-21'; // Friday
 
     recordManualPunch($manilaEmployee, $manila, $date, '08:00', PunchDirection::In);
-    recordManualPunch($manilaEmployee, $manila, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($manilaEmployee, $manila, $date, '17:00', PunchDirection::Out);
 
     recordManualPunch($cebuEmployee, $cebu, $date, '08:00', PunchDirection::In);
-    recordManualPunch($cebuEmployee, $cebu, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($cebuEmployee, $cebu, $date, '17:00', PunchDirection::Out);
 
     $manilaSummaryBefore = DailyAttendanceSummary::query()
         ->where('employee_id', $manilaEmployee->id)->whereDate('date', $date)->sole();

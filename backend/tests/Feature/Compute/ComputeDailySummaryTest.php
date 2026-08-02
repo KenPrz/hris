@@ -32,7 +32,7 @@ it('computes an ordinary punched 8h day: one regular_day line at the floor, rule
 
     $date = '2026-08-03'; // Monday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -62,7 +62,7 @@ it('snapshots the resolved office_id on the summary', function (): void {
 
     $date = '2026-08-03'; // Monday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -83,7 +83,7 @@ it('prices a special_non_working holiday (Aug 21) at 13000bp', function (): void
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -103,7 +103,7 @@ it('is idempotent: recomputing the same day yields one summary and identical lin
 
     $date = '2026-08-03';
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $first = app(ComputeDailySummary::class)->execute($employee, $date);
     $second = app(ComputeDailySummary::class)->execute($employee, $date);
@@ -156,7 +156,7 @@ it('reads applied_bp from a custom pay_rules version, not a hardcoded constant',
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 

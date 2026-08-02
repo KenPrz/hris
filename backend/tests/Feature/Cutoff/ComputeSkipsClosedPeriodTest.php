@@ -49,7 +49,7 @@ it('leaves a locked summary in a closed period byte-identical', function (): voi
 
     // Punches that WOULD recompute to a different row if the guard were absent.
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -79,7 +79,7 @@ it('creates nothing when computing a summary-less date in a closed period', func
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $returned = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -108,7 +108,7 @@ it('computes normally for a date in an OPEN period (control)', function (): void
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 

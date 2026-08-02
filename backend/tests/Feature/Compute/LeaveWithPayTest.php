@@ -89,7 +89,7 @@ it('prices from punches, not leave_with_pay, on an approved-leave date that has 
     leaveWithPayRequest($employee, $office, RequestState::Approved, $date, $date);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 

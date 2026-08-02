@@ -72,7 +72,7 @@ final class DailyComputation
         }
 
         $grossTotal = $paired->totalWorked();
-        $net = MealBreakPolicy::assumed($in->breakMinutes, $in->scheduledMinutes)->netWorked($grossTotal);
+        $net = MealBreakPolicy::assumed($in->breakMinutes, $in->mealBreakAppliesOverMinutes)->netWorked($grossTotal);
         $breakDeducted = $grossTotal->value - $net->value;
 
         $keptIntervals = self::trimTail($paired->intervals, $breakDeducted);

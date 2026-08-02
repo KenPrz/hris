@@ -31,6 +31,12 @@ final readonly class DailyComputationInput
      * @param  ?int  $scheduledStartMinute  Null when there is no scheduled start (a rest
      *                                      day) — late is always 0 in that case, never a
      *                                      phantom lateness against minute 0.
+     * @param  int  $mealBreakAppliesOverMinutes  The gross span above which the assumed
+     *   meal break is deducted — the statutory 300 (five hours), from
+     *   config('hris.meal_break.applies_over_minutes'). Deliberately NOT $scheduledMinutes,
+     *   which is what it used to be: deducting only above the scheduled day makes worked
+     *   minutes non-monotonic in the out-punch, so leaving earlier can pay more than
+     *   staying.
      * @param  bool  $onApprovedLeave  Whether this employee has an APPROVED full-day
      *                                 `leave` request covering this date (LeaveDayLookup,
      *                                 resolved by the caller — this class stays pure and
@@ -51,6 +57,7 @@ final readonly class DailyComputationInput
         public int $overtimeThresholdMinutes,
         public ?int $scheduledStartMinute,
         public int $breakMinutes,
+        public int $mealBreakAppliesOverMinutes,
         public bool $isArt82Exempt,
         public PayRates $rates,
         public bool $onApprovedLeave,

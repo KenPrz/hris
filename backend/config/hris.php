@@ -30,6 +30,29 @@ return [
     // The operating company. Per-office identity lives on `offices` (M2).
     'organization_name' => env('HRIS_ORGANIZATION_NAME'),
 
+    // The DOLE statutory TIME constants (Arts. 83, 87), in integer minutes. Same rule as
+    // `pay_floors` below: the Labor Code sets these, not an admin, so they are config
+    // rather than columns. Both were previously derived from the resolved shift template,
+    // which is a per-office admin setting — so an office could move a statutory boundary by
+    // editing a shift.
+    'meal_break' => [
+        // Art. 83 / IRR Book III Rule I s.7: a meal period is owed after five consecutive
+        // hours. The assumed-break policy deducts only above this span — NOT above the
+        // scheduled day, which made worked minutes non-monotonic in the out-punch: with a
+        // 540-minute schedule, punching out at 540 gross kept all 540 while punching out at
+        // 541 kept 481. Leaving earlier paid more.
+        'applies_over_minutes' => 300,
+    ],
+
+    'overtime' => [
+        // Art. 83: eight hours is the normal working day, and work beyond it is overtime. A
+        // shift template scheduled LONGER than this does not move the boundary — a
+        // 540-minute template was pricing the ninth hour at 100% instead of 125%. A
+        // legally compressed workweek (D.O. 02-04, e.g. 4x10) genuinely does begin overtime
+        // later, but that needs an offices.is_compressed_workweek flag, not this value.
+        'statutory_threshold_minutes' => 480,
+    ],
+
     // The DOLE statutory pay-rate FLOORS (Arts. 86-94), in integer basis points. The Labor
     // Code sets these, not an admin; a pay_rules write is refused below any of them. These
     // are the same minimums PayMultiplier encodes today — M5 reconciles PayMultiplier to

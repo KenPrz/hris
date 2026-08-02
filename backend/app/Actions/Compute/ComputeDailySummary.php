@@ -108,6 +108,7 @@ final class ComputeDailySummary
             overtimeThresholdMinutes: $overtimeThresholdMinutes,
             scheduledStartMinute: $schedule->startMinute,
             breakMinutes: $schedule->breakMinutes ?? 0,
+            mealBreakAppliesOverMinutes: (int) config('hris.meal_break.applies_over_minutes'),
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,
             onApprovedLeave: $onApprovedLeave,

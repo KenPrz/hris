@@ -58,7 +58,7 @@ it('genuinely serializes a close against a concurrent recompute through the empl
     // Two paired punches produce a real, complete `computed` summary (RecordPunch computes on
     // afterCommit) — the in-period row the close will freeze and the holder will recompute.
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = DailyAttendanceSummary::query()
         ->where('employee_id', $employee->id)->whereDate('date', $date)->firstOrFail();
