@@ -405,9 +405,13 @@ it('prices work beyond the scheduled day as overtime at +25% ordinary', function
 });
 
 it('keeps a compressed 10h scheduled day entirely regular, with no overtime line', function (): void {
-    // 08:00 -> 18:00 (480 -> 1080) = 600m worked, scheduled 600. A normal working day
-    // sets overtimeThresholdMinutes == scheduledMinutes, so this proves the decoupled
-    // field behaves exactly as the old single scheduledMinutes boundary did.
+    // 08:00 -> 18:00 (480 -> 1080) = 600m worked, scheduled 600, boundary 600.
+    //
+    // ComputeDailySummary no longer PRODUCES a boundary above the statutory 480 — Art. 83
+    // fixes the normal working day at eight hours, so it caps there. This case is kept
+    // deliberately: the calculator still honours whatever boundary it is handed, which is
+    // exactly what makes a legally compressed workweek (D.O. 02-04, 4x10) a one-flag change
+    // in the action rather than a change down here. Do not delete it as unreachable.
     $out = DailyComputation::compute(new DailyComputationInput(
         punches: [480, 1080],
         dayType: DayType::Ordinary,
