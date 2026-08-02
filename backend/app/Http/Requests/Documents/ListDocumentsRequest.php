@@ -11,9 +11,13 @@ final class ListDocumentsRequest extends FormRequest
 {
     /**
      * Same manageCatalog gate as the other three Document FormRequests, kept identical here
-     * on purpose — the read is behind the same gate as the writes, so all four routes share
-     * one authorization shape rather than the list quietly being open to more actors than
-     * the mutations. See CreateDocumentRequest's docblock for the full reasoning.
+     * for uniformity across the CRUD set — not because the data is otherwise sensitive. The
+     * same rows this route returns are ALSO served, unauthenticated-permission-wise, by the
+     * deliberately ungated `GET /documents/catalog` (`ShowCatalogController`) — same
+     * resources, same order, no gate at all. Gating this route doesn't make the data any
+     * less public; it just keeps `/admin/documents`'s four routes (list, create, update,
+     * delete) sharing one authorization shape instead of the list being the odd one out. See
+     * CreateDocumentRequest's docblock for the rest of the reasoning.
      */
     public function authorize(): bool
     {

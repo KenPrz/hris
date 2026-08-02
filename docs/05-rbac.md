@@ -577,9 +577,13 @@ they simply never see a form that was always going to 403.
 
 ## The document catalog — one ability, unscoped *(M10b-a)*
 
-`document.manage` (permission table, above) is the fourth of the original seven-plus
-catalog to move from "seeded, unread" to a real, enforced gate — after `leave.manage`
-(M6b-a), `leave.approve` (M6b-b), and `employee.pii.edit` (M10a).
+`document.manage` (permission table, above) is the second of the original seven-plus
+catalog to move from "seeded, unread" to a real, enforced gate — after `employee.pii.edit`
+(M10a). `leave.manage` and `leave.approve` remain catalogued-but-unread even today (see
+their own entries above: neither is ever passed to `can()` or `authorize()` anywhere in
+`app/`), so they don't count toward this total — a grep of `app/` for `can('` turns up only
+three permission strings, ever: `employee.manage` (referenced but, per above, never actually
+called), `employee.pii.edit`, and `document.manage`.
 
 **`document.manage.self` is catalogued in M10b-a but still reads nowhere.** It joins the
 seeded-but-unread set rather than leaving it, and becomes a real gate only when M10b-b

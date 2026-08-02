@@ -1986,9 +1986,13 @@ deleted its category, is not an acceptable failure mode either way.
 
 **Spatie's `media` stays the file layer; `document_files` carries only what it doesn't.**
 `DocumentFile implements HasMedia` with a single-file `file` collection on the
-`attachments` disk (RustFS), accepting `pdf`/`jpg`/`jpeg`/`png` up to 10 MB — the same
-collection shape and limits `EmployeeIdentification`'s `scan` and `Request`'s `attachment`
-already use. There is **no path, no disk, no object key, and no `media` id** on
+`attachments` disk (RustFS), accepting `pdf`/`jpg`/`jpeg`/`png` — the same mime allowlist
+`EmployeeIdentification`'s `scan` and `Request`'s `attachment` already use, set via
+`acceptsMimeTypes()` on the collection (`DocumentFile::registerMediaCollections()`). There
+is **no size ceiling yet**: `EmployeeIdentification`/`Request` get their 10 MB limit from
+`max:10240` on their upload `FormRequest`s, and M10b-a ships no `FormRequest` for
+`document_files` — the file routes, and the same 10 MB ceiling, arrive with M10b-b. There is
+**no path, no disk, no object key, and no `media` id** on
 `document_files`; the link is spatie's own `media.model_id → document_files.id`, in the
 direction medialibrary already maintains. Writing a second storage layer would reimplement
 four things that already work in production: RustFS storage, mime/size validation, the

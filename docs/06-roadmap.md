@@ -2158,9 +2158,11 @@ fresh database bootstrapped with `hris:bootstrap-admin` has the document catalog
 does one that already had a System Admin**; `document_files` exists and is empty — nothing
 writes it yet.
 
-**Status: complete. 911 backend tests (21 of them Arch, 3302 assertions) + 590 frontend
-tests (589 passed, 1 pre-existing red — see below), up from 865/577.** `lint`, `typecheck`,
-and `build` are green, native and inside the `make test` containers alike.
+**Status: complete. 911 backend tests (21 of them Arch, 3303 assertions) + 600 frontend
+tests (599 passed, 1 pre-existing red — see below), up from 865/577.** `lint`, `typecheck`,
+and `build` are green, native and inside the `make test` containers alike. (The final-fixes
+round below took it from 911/3302/590 to 911/3303/600 — no new backend test, ten new
+frontend tests, plus one new backend assertion on an existing test.)
 
 **Two rulings reversed the original design, both made mid-implementation with the
 developer asleep and the wheel deliberately delegated — recorded here with the mistake
@@ -2213,8 +2215,62 @@ intact, not quietly corrected:**
   nothing on the catalog specifically, so the gap is documented, not silent. It becomes a
   real gate the moment M10b-b wires the file routes.
 
-**Two open questions, deliberately left for the developer to decide, not resolved
-unilaterally while they were away:**
+**Final-fixes round (before merge) — seven findings from the whole-branch review, all
+fixed:**
+
+1. **`/admin/documents` was the only admin screen with no authorization affordance** — it
+   read no session field at all, so any authenticated employee could open it and see live
+   "New category"/"Edit"/"Delete" buttons that all 403'd with a network-fault-shaped message
+   ("That didn't save. Check your connection and try again."), the exact bug class the
+   immediately preceding M10a follow-ups branch fixed on `/employees/{employee}/profile`.
+   This closed the second open question below at the same time: `SideNav.tsx` gated the
+   whole `admin` group on `is_system_admin`, but catalog CRUD gates on `document.manage`,
+   which `RbacSeeder` grants to `HR Admin` too, so an HR Admin who could manage the catalog
+   had no link to reach it. Fixed both, keyed on one `canManage` value: `NavItem` gained an
+   optional `permission` field (set on the Documents entry only), and `navEntriesFor` now
+   adds the `admin` group with just that one item when the session lacks `is_system_admin`
+   but holds `document.manage`; the page reads `useSession()` and renders the sibling-style
+   `InlineNotification` plus hides the mutating controls when the actor holds neither — the
+   lists still render either way, since `GET /documents/catalog` is intentionally ungated.
+2. **The Arch guard for `Admin/Documents` FormRequests was comment-blind.** Its
+   `str_contains($authorizeBody, 'manageCatalog')` check ran over the raw brace body
+   *including comments* — a `// TODO(M10b-b): manageCatalog moves to the controller.` above
+   a bare `return true;` passed silently. Fixed by stripping `//` and `/* */` comments
+   before the check; a reintroduction of that exact mutation was verified to turn the guard
+   red.
+3. **`05-rbac.md` overstated the gate count.** It called `document.manage` "the fourth… to
+   move from 'seeded, unread' to a real, enforced gate — after `leave.manage`,
+   `leave.approve`, and `employee.pii.edit`" — contradicting the same file's own earlier
+   sections, which say neither `leave.manage` nor `leave.approve` is ever passed to `can()`
+   anywhere in `app/`. A grep confirms only `employee.manage` (referenced but never called),
+   `employee.pii.edit`, and `document.manage` appear in a `can()` call at all — corrected to
+   "the second… after `employee.pii.edit`."
+4. **`02-data-model.md` documented a size ceiling that doesn't exist.** It described the
+   `file` media collection as "accepting pdf/jpg/jpeg/png up to 10 MB," but
+   `DocumentFile::registerMediaCollections()` sets only `acceptsMimeTypes` — `max:10240`
+   lives in FormRequests that don't exist until M10b-b. Reworded so the mime allowlist reads
+   as shipped and the size ceiling as M10b-b's, matching how the section separates the two
+   everywhere else.
+5. **A docblock's stated rationale was false.** `ListDocumentCategoriesRequest` (and its
+   `ListDocumentsRequest` twin) said the gate exists so the list "isn't quietly open to more
+   actors than the mutations" — it already is, via the deliberately ungated
+   `GET /documents/catalog`, same rows, same order. Reworded: the gate is for uniformity
+   across the four-route CRUD set, not because the data is otherwise sensitive.
+6. **Two cheap test gaps.** `ShowDocumentCatalogTest` asserted category ordering but used
+   `firstWhere` for documents, so dropping `ShowCatalogController`'s second `orderBy('code')`
+   failed nothing — added the matching `pluck('code')->all()` exact-order assertion, verified
+   red when the `orderBy` is dropped. No test asserted `useSaveDocumentCatalog`'s three
+   `invalidateQueries` calls, and `useDocumentCatalog`'s 1-hour `staleTime` means a dropped
+   one would silently ship an hour of stale dropdowns in M10b-b — added
+   `useSaveDocumentCatalog.test.tsx`, verified red when one invalidation is dropped.
+7. **Three one-liners:** an unused `App\Models\Office` import in `DocumentPolicyTest`; a
+   `BootstrapAdmin` inline comment that said "findOrCreate/updateOrCreate throughout" and
+   omitted `firstOrCreate` (the class docblock was already correct); one `use` import in
+   `routes/api.php` out of alphabetical order.
+
+**One open question, deliberately left for the developer to decide, not resolved
+unilaterally while they were away** (a second question — HR Admins had no way to discover
+the screen — was resolved above, in the final-fixes round):
 
 1. **`/admin/documents` builds its forms inline, while all four sibling admin CRUD screens
    (offices, departments, organizations, pay-rules) use a `Dialog`.** It is the sole outlier
@@ -2224,20 +2280,6 @@ unilaterally while they were away:**
    than guessing silently. Unresolved: either this screen should gain a `Dialog` to match
    its siblings, or the inline shape (arguably fine for forms this short) should be recorded
    as the new house pattern and the other four left alone.
-2. **HR Admins cannot discover the screen.** `SideNav.tsx:87` gates the whole `admin` nav
-   group on `session.is_system_admin`, but catalog CRUD is gated on `document.manage`,
-   which `RbacSeeder` grants to the `HR Admin` role — so an HR Admin can write the catalog
-   through the API but has no nav link to the screen at all. Same class of gap as M10a's
-   Task 14 finding (HR Admins couldn't reach the profile UI before the final-fixes round,
-   above). The counter-argument, recorded so it isn't re-litigated from scratch: every other
-   company-wide config screen (pay-rules, organizations, offices, departments) is
-   System-Admin-only too, so the *placement* is internally consistent — the real question is
-   whether catalog CRUD should have been `is_system_admin`-gated all along, which was a
-   judgment call made mid-implementation and never put to the developer. Three coherent
-   resolutions, none chosen: tighten catalog CRUD to `is_system_admin` (smallest change,
-   matches every sibling); add per-item nav gating so "Documents" shows for anyone holding
-   `document.manage`; or give it its own HR-reachable route the way M10a's
-   `/employees/{id}/profile` sits outside `/admin`.
 
 **One pre-existing frontend failure, unrelated to this branch, recorded so it isn't
 mistaken for M10b-a's.** `src/app/(app)/me/attendance/attendance.test.tsx`'s "renders Clock

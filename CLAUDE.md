@@ -192,7 +192,7 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-911 backend tests (21 of them Arch) + 590 frontend tests (589 passing — the one red,
+911 backend tests (21 of them Arch) + 600 frontend tests (599 passing — the one red,
 `(app)/me/attendance/attendance.test.tsx`, is a pre-existing, date-dependent fixture bug
 unrelated to any shipped feature; see `docs/06-roadmap.md`'s M10b-a section) today. The
 **Status** section below carries the same figures — if these two ever disagree, one of them
@@ -367,7 +367,7 @@ company files (NBI clearance, employment contract, business permit, and more), g
 into categories, each applying to employees, offices, or both, required or not, expiring
 after N months or never. **M10b-a ships the catalog only** — `document_files` exists and
 is empty; nobody can file an actual document against an employee or office until M10b-b.
-**911 backend tests (21 of them Arch) + 590 frontend tests (589 passing — see the caveat
+**911 backend tests (21 of them Arch) + 600 frontend tests (599 passing — see the caveat
 below).** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
 what a user can actually do today.
 
