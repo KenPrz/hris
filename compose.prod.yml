@@ -51,6 +51,11 @@ services:
       # ShouldQueue, so this value and the `queue` service are one decision. phpunit.xml
       # forces `sync`, which is why no test can catch the worker going missing.
       QUEUE_CONNECTION: database
+      # Minutes until an API token expires (config/sanctum.php). Sanctum's own default is
+      # null — never — so a leaked token would stay valid forever. 720 = 12 hours, one
+      # working day plus a margin. Checked against created_at on every request, so lowering
+      # it takes effect immediately for tokens already issued.
+      SANCTUM_EXPIRATION_MINUTES: ${HRIS_SANCTUM_EXPIRATION_MINUTES:-720}
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
