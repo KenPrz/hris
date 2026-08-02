@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     depends_on:
       db: { condition: service_healthy }
-    environment:
+    environment: &api-environment
       APP_ENV: production
       APP_DEBUG: "false"
       APP_KEY: ${HRIS_APP_KEY:-}
@@ -47,6 +47,10 @@ services:
       # into timestamptz and is wrong the moment a second office opens in another zone;
       # AppServiceProvider::assertConfigured() refuses to boot otherwise.
       APP_TIMEZONE: UTC
+      # Explicit, though config/queue.php already defaults to it: RecomputeDay implements
+      # ShouldQueue, so this value and the `queue` service are one decision. phpunit.xml
+      # forces `sync`, which is why no test can catch the worker going missing.
+      QUEUE_CONNECTION: database
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
@@ -70,6 +74,31 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+
+  # The api image with a different command. RecomputeDay implements ShouldQueue and
+  # QUEUE_CONNECTION is `database`, so without a worker every recompute triggered by a
+  # holiday edit, a pay-rule change, or an approval queued into a table nothing drained —
+  # and the summaries behind payroll silently never updated. The test suite cannot catch
+  # its absence: phpunit.xml forces QUEUE_CONNECTION=sync, so every test runs its jobs
+  # inline.
+  #
+  # The environment is the api's, by anchor rather than by copy: a worker running against
+  # different config than the app that enqueues to it fails in ways that look like data
+  # loss. Two exceptions, both set below the merge.
+  queue:
+    build: { context: backend, target: prod }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      <<: *api-environment
+      # Only one container may migrate. Two racing `migrate --force` runs on boot is a
+      # deadlock at best and a half-applied schema at worst; `api` owns it.
+      MIGRATE_ON_BOOT: "0"
+    # --max-time recycles the worker hourly so a deployed code change is picked up without
+    # a manual restart; --tries bounds a poison job instead of retrying it forever.
+    command: ["php", "artisan", "queue:work", "--tries=3", "--max-time=3600", "--sleep=1"]
+    # No ports: nothing outside the compose network talks to a worker.
 
   web:
     build: { context: frontend/web, target: runner }

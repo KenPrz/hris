@@ -163,6 +163,17 @@ can never touch a real stack's volumes.
 
 Things worth knowing before you change any of it:
 
+- **The `queue` service is not optional, and no test can tell you it is missing.**
+  `RecomputeDay implements ShouldQueue` and `QUEUE_CONNECTION` is `database`, so every
+  recompute after a holiday edit, a pay-rule change, or an approval lands in the `jobs`
+  table. Without a worker draining it, the daily summaries behind payroll silently never
+  update — no error, no failed job, just stale numbers. `phpunit.xml` forces
+  `QUEUE_CONNECTION=sync`, so all backend tests run their jobs inline and stay green either
+  way; `scripts/e2e-prod-boot.sh` is the only place the real asynchronous path is
+  exercised. The service runs in **both** compose files on purpose — dev diverging from
+  production about what is synchronous is how the gap stayed invisible. Its environment is a
+  YAML anchor of the api's, not a copy: a worker on different config than the app enqueuing
+  to it fails in ways that look like data loss. `make prod-queue-logs` tails it.
 - **`.dockerignore` is a security boundary, not tidiness.** The prod stage is `COPY . .`;
   without it the host's `backend/.env` — a real `APP_KEY` and database password — is baked
   into an image layer.

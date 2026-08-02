@@ -39,7 +39,7 @@ services:
     user: root
     depends_on:
       db: { condition: service_healthy }
-    environment:
+    environment: &api-environment
       APP_ENV: local
       # Soft default, not `:?required` — a required var with no default fails
       # interpolation for the WHOLE compose file, including `up -d db` alone. The
@@ -47,6 +47,10 @@ services:
       APP_KEY: ${HRIS_DEV_APP_KEY:-}
       APP_DEBUG: "true"
       APP_TIMEZONE: UTC
+      # Explicit, though config/queue.php already defaults to it: RecomputeDay implements
+      # ShouldQueue, so this value and the `queue` service are one decision. phpunit.xml
+      # forces `sync`, which is why no test can catch the worker going missing.
+      QUEUE_CONNECTION: database
       DB_CONNECTION: pgsql
       DB_HOST: db
       DB_PORT: 5432
@@ -84,6 +88,32 @@ services:
           chown -R hris:hris /app/vendor
         fi
         exec su hris -s /bin/sh -c 'composer install --no-interaction && exec entrypoint.sh frankenphp run --config /etc/frankenphp/Caddyfile'
+
+  # Dev runs a worker for the same reason production does — so dev and production agree
+  # about what is synchronous. RecomputeDay implements ShouldQueue and QUEUE_CONNECTION
+  # defaults to `database`; without this, a holiday edit or an approval enqueues a
+  # recompute nothing drains, and the summaries silently never update. The test suite
+  # cannot surface that either: phpunit.xml forces QUEUE_CONNECTION=sync.
+  #
+  # Environment by anchor, not by copy: a worker on different config than the app that
+  # enqueues to it fails in ways that look like data loss.
+  queue:
+    build: { context: backend, target: dev }
+    user: root
+    depends_on:
+      api: { condition: service_healthy }   # api owns composer install into the shared volume
+    environment:
+      <<: *api-environment
+    volumes:
+      - ./backend:/app
+      - api_vendor:/app/vendor
+    # --max-time recycles hourly; with hot-reloaded source on a bind mount that is what
+    # picks up a changed job class without a manual restart.
+    command:
+      - sh
+      - -c
+      - |
+        exec su hris -s /bin/sh -c 'exec php artisan queue:work --tries=3 --max-time=3600 --sleep=1'
 
   web:
     build: { context: frontend/web, target: dev }
