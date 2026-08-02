@@ -577,11 +577,16 @@ they simply never see a form that was always going to 403.
 
 ## The document catalog — one ability, unscoped *(M10b-a)*
 
-`document.manage` and `document.manage.self` (permission table, above) are the fourth and
-fifth of the original seven-plus catalog to move from "seeded, unread" to a real,
-enforced gate — after `leave.manage` (M6b-a), `leave.approve` (M6b-b), and
-`employee.pii.edit` (M10a). `App\Policies\DocumentPolicy::manageCatalog` reads only
-`document.manage`:
+`document.manage` (permission table, above) is the fourth of the original seven-plus
+catalog to move from "seeded, unread" to a real, enforced gate — after `leave.manage`
+(M6b-a), `leave.approve` (M6b-b), and `employee.pii.edit` (M10a).
+
+**`document.manage.self` is catalogued in M10b-a but still reads nowhere.** It joins the
+seeded-but-unread set rather than leaving it, and becomes a real gate only when M10b-b
+wires the file routes. Do not build on it as though it already enforces something — see
+"grants nothing on the catalog" below, which is the shipped behaviour today.
+
+`App\Policies\DocumentPolicy::manageCatalog` reads only `document.manage`:
 
 ```php
 public function manageCatalog(User $user): bool

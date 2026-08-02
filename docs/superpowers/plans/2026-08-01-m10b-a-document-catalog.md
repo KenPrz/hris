@@ -4,7 +4,7 @@
 
 **Goal:** Build the configurable-but-empty half of the document module — the schema, the morph map, the two permissions, the policy, an admin-editable catalog of document kinds, and the screen that edits it.
 
-**Architecture:** Three tables (`document_categories` → `documents` → `document_files`). Spatie's `media` stays the file layer; `document_files` is a `HasMedia` model carrying only what spatie doesn't. Documentable types are a **non-enforcing** `Relation::morphMap()` fed from `config/documents.php`, so the database stores `'employee'`, never a FQCN. Two new permissions (`document.manage`, `document.manage.self`) gate everything through a `DocumentPolicy`. M10b-a creates all three tables but writes files through none of them — file endpoints are M10b-b.
+**Architecture:** Three tables (`document_categories` → `documents` → `document_files`). Spatie's `media` stays the file layer; `document_files` is a `HasMedia` model carrying only what spatie doesn't. Documentable types are a config whitelist in `config/documents.php`; **there is no Laravel morph map** — see Task 2's amended Step 5 for why registering one broke spatie/activitylog — so `document_files.documentable_type` stores the full class name, matching `media.model_type` and `activity_log.subject_type`. Two new permissions (`document.manage`, `document.manage.self`) gate everything through a `DocumentPolicy`. M10b-a creates all three tables but writes files through none of them — file endpoints are M10b-b.
 
 **Tech Stack:** Laravel 13.21 / PHP 8.5, PostgreSQL 18, Pest, spatie/laravel-medialibrary, spatie/laravel-permission, Next.js 16 / React 19 / TypeScript, @tanstack/react-query, Vitest.
 
