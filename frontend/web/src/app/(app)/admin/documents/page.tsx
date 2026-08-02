@@ -22,6 +22,15 @@
  * with `error.details.dependents` — surfaced verbatim as "N documents still use this
  * category/document kind", not the generic failure copy, since this is the one error in the
  * milestone an admin will actually hit (see `DeleteDocumentCategory`/`DeleteDocument`).
+ *
+ * **Authorization (M10b-a final fixes).** `GET /documents/catalog` is intentionally ungated
+ * (see `useDocumentCatalog`'s own comment), so the lists always render — but every write 403s
+ * for an actor who lacks `document.manage`, and unlike a sibling screen this one is NOT
+ * `is_system_admin`-only: `manageCatalog` (`app/Policies/DocumentPolicy.php`) reads
+ * `document.manage`, which `RbacSeeder` grants to `HR Admin` too. `canManage` mirrors that:
+ * `is_system_admin` OR the session holds `document.manage`. When neither holds, this screen
+ * hides the "New …"/"Edit"/"Delete" controls and shows the sibling-style notice instead of
+ * presenting a button that can only 403.
  */
 
 import { useState } from 'react'
@@ -31,6 +40,7 @@ import type { DocumentCategory, DocumentCategoryWrite, DocumentKind, DocumentKin
 import { ApiError } from '@/lib/api'
 import { useDocumentCatalog } from '@/hooks/useDocumentCatalog'
 import { useSaveDocumentCatalog } from '@/hooks/useSaveDocumentCatalog'
+import { useSession } from '@/hooks/useSession'
 import { AppShell } from '@/components/AppShell'
 import { EmptyState } from '@/components/EmptyState'
 import { SectionHeader } from '@/components/SectionHeader'
@@ -177,11 +187,12 @@ function CategoryForm({ initial, submitting, submitError, onCancel, onSubmit }: 
 interface CategoryRowProps {
   category: DocumentCategory
   deleting: boolean
+  canManage: boolean
   onEdit: () => void
   onDelete: () => void
 }
 
-function CategoryRow({ category, deleting, onEdit, onDelete }: CategoryRowProps) {
+function CategoryRow({ category, deleting, canManage, onEdit, onDelete }: CategoryRowProps) {
   return (
     <li
       className="flex flex-col"
@@ -191,14 +202,16 @@ function CategoryRow({ category, deleting, onEdit, onDelete }: CategoryRowProps)
         <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
           {category.name}
         </span>
-        <span className="flex items-center" style={{ gap: 'var(--sp-sm)' }}>
-          <Button variant="ghost" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button variant="ghost" loading={deleting} disabled={deleting} onClick={onDelete}>
-            Delete
-          </Button>
-        </span>
+        {canManage ? (
+          <span className="flex items-center" style={{ gap: 'var(--sp-sm)' }}>
+            <Button variant="ghost" onClick={onEdit}>
+              Edit
+            </Button>
+            <Button variant="ghost" loading={deleting} disabled={deleting} onClick={onDelete}>
+              Delete
+            </Button>
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap" style={{ gap: 'var(--sp-lg)' }}>
@@ -338,11 +351,12 @@ interface KindRowProps {
   kind: DocumentKind
   categoryName: string
   deleting: boolean
+  canManage: boolean
   onEdit: () => void
   onDelete: () => void
 }
 
-function KindRow({ kind, categoryName, deleting, onEdit, onDelete }: KindRowProps) {
+function KindRow({ kind, categoryName, deleting, canManage, onEdit, onDelete }: KindRowProps) {
   return (
     <li
       className="flex flex-col"
@@ -352,14 +366,16 @@ function KindRow({ kind, categoryName, deleting, onEdit, onDelete }: KindRowProp
         <span style={{ font: 'var(--t-emphasis)', letterSpacing: 'var(--ls-body)', color: 'var(--ink)' }}>
           {kind.name}
         </span>
-        <span className="flex items-center" style={{ gap: 'var(--sp-sm)' }}>
-          <Button variant="ghost" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button variant="ghost" loading={deleting} disabled={deleting} onClick={onDelete}>
-            Delete
-          </Button>
-        </span>
+        {canManage ? (
+          <span className="flex items-center" style={{ gap: 'var(--sp-sm)' }}>
+            <Button variant="ghost" onClick={onEdit}>
+              Edit
+            </Button>
+            <Button variant="ghost" loading={deleting} disabled={deleting} onClick={onDelete}>
+              Delete
+            </Button>
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap" style={{ gap: 'var(--sp-lg)' }}>
@@ -388,9 +404,17 @@ function KindRow({ kind, categoryName, deleting, onEdit, onDelete }: KindRowProp
 // ---------------------------------------------------------------------------
 
 export default function DocumentsPage() {
+  const { session } = useSession()
   const catalogQuery = useDocumentCatalog()
   const { createCategory, updateCategory, deleteCategory, createKind, updateKind, deleteKind } =
     useSaveDocumentCatalog()
+
+  // Unlike every sibling admin screen, this one is not is_system_admin-only:
+  // DocumentPolicy::manageCatalog reads document.manage, which RbacSeeder grants to HR
+  // Admin too (see the file docblock). `null` while the session hasn't loaded yet — treated
+  // the same as "can't manage" below, but the notice itself waits for `session !== null` so
+  // it doesn't flash before the session resolves.
+  const canManage = session?.is_system_admin === true || (session?.permissions.includes('document.manage') ?? false)
 
   const [categoryFormState, setCategoryFormState] = useState<CategoryFormState>({ mode: 'closed' })
   const [kindFormState, setKindFormState] = useState<KindFormState>({ mode: 'closed' })
@@ -455,6 +479,14 @@ export default function DocumentsPage() {
       <div className="flex flex-col" style={{ gap: 'var(--sp-lg)' }}>
         <SectionHeader eyebrow="Admin" title="Documents" level={1} />
 
+        {session !== null && !canManage ? (
+          <InlineNotification kind="info" title="This account can't administer documents.">
+            Editing the document catalog needs the document.manage permission — held by HR
+            Admins and system admins. You can still browse the categories and document kinds
+            below.
+          </InlineNotification>
+        ) : null}
+
         {catalogQuery.isLoading ? (
           <Skeleton height="16rem" />
         ) : catalogQuery.isError ? (
@@ -467,7 +499,7 @@ export default function DocumentsPage() {
               <SectionHeader
                 title="Categories"
                 actions={
-                  categoryFormState.mode === 'closed' ? (
+                  canManage && categoryFormState.mode === 'closed' ? (
                     <Button onClick={() => setCategoryFormState({ mode: 'add' })}>New category</Button>
                   ) : undefined
                 }
@@ -484,6 +516,7 @@ export default function DocumentsPage() {
                       key={category.id}
                       category={category}
                       deleting={deletingCategoryId === category.id && deleteCategory.isPending}
+                      canManage={canManage}
                       onEdit={() => setCategoryFormState({ mode: 'edit', category })}
                       onDelete={() => handleDeleteCategory(category.id)}
                     />
@@ -515,7 +548,7 @@ export default function DocumentsPage() {
               <SectionHeader
                 title="Document kinds"
                 actions={
-                  kindFormState.mode === 'closed' && categories.length > 0 ? (
+                  canManage && kindFormState.mode === 'closed' && categories.length > 0 ? (
                     <Button onClick={() => setKindFormState({ mode: 'add' })}>New document kind</Button>
                   ) : undefined
                 }
@@ -537,6 +570,7 @@ export default function DocumentsPage() {
                       kind={kind}
                       categoryName={categoryNameById.get(kind.category_id) ?? '—'}
                       deleting={deletingKindId === kind.id && deleteKind.isPending}
+                      canManage={canManage}
                       onEdit={() => setKindFormState({ mode: 'edit', kind })}
                       onDelete={() => handleDeleteKind(kind.id)}
                     />

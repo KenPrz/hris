@@ -149,6 +149,20 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
     expect(groups.map((g) => g.key)).toEqual(['me'])
   })
 
+  it('document.manage without is_system_admin adds Admin with only the Documents item (M10b-a final fixes)', () => {
+    const groups = navEntriesFor(buildSession({ permissions: ['document.manage'] }))
+    const admin = groups.find((g) => g.key === 'admin')
+
+    expect(groups.map((g) => g.key)).toEqual(['me', 'admin'])
+    expect(admin?.items).toEqual([{ href: '/admin/documents', label: 'Documents', permission: 'document.manage' }])
+  })
+
+  it('neither is_system_admin nor document.manage yields no Admin group at all', () => {
+    const groups = navEntriesFor(buildSession({ permissions: [] }))
+
+    expect(groups.map((g) => g.key)).not.toContain('admin')
+  })
+
   it('a user with every scope sees every ROUTES entry, group by group (M6a: Team and Office both ship an Approvals link)', () => {
     const groups = navEntriesFor(
       buildSession({ is_system_admin: true, has_reports: true, hr_offices: ['office-1'] }),
@@ -176,7 +190,7 @@ describe('navEntriesFor — the scope rules (pure, no rendering)', () => {
       { href: '/admin/departments', label: 'Departments' },
       { href: '/admin/employees', label: 'Employees' },
       { href: '/admin/activity', label: 'Activity log' },
-      { href: '/admin/documents', label: 'Documents' },
+      { href: '/admin/documents', label: 'Documents', permission: 'document.manage' },
     ])
   })
 })
@@ -305,6 +319,40 @@ describe('SideNav — rendered', () => {
 
     const documentsLink = await screen.findByRole('link', { name: 'Documents' })
     expect(documentsLink).toHaveAttribute('href', '/admin/documents')
+  })
+
+  it('an HR Admin holding document.manage but not is_system_admin sees Documents and nothing else in Admin (M10b-a final fixes)', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ is_system_admin: false, permissions: ['document.manage'] }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    const documentsLink = await screen.findByRole('link', { name: 'Documents' })
+    expect(documentsLink).toHaveAttribute('href', '/admin/documents')
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Pay rules' })).not.toBeInTheDocument()
+  })
+
+  it('a non-sysadmin with no document.manage permission sees no Documents link either', async () => {
+    setToken('sekrit')
+    stubFetch(200, sessionBody({ is_system_admin: false, permissions: [] }))
+
+    render(
+      <Providers>
+        <SideNav />
+      </Providers>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Documents' })).not.toBeInTheDocument()
   })
 
   it('a non-sysadmin does not see the Admin group or the Pay rules link', async () => {

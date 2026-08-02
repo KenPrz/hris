@@ -1,18 +1,22 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DocumentCatalog, DocumentCategory, DocumentKind } from '@/lib/api'
+import type { DocumentCatalog, DocumentCategory, DocumentKind, Session } from '@/lib/api'
 import { Providers } from '@/components/Providers'
 
 // Same reasoning as `src/app/(app)/me/profile/profile.test.tsx`: `AppShell` needs a mounted
-// router (`usePathname`) and a `<SessionProvider>` (via `<Providers>`). No token is set, so
-// `SessionProvider`'s `GET /me` stays disabled and `useSession()` resolves to a `null`
-// session — this page reads no session field, so that's a non-issue here.
+// router (`usePathname`) and a `<SessionProvider>` (via `<Providers>`). `useSession` is
+// mocked directly (same shape as `/admin/offices`'s and `/admin/organizations`'s own test
+// files) rather than driven through a stubbed `fetch`, since M10b-a final fixes made this
+// page read `session.is_system_admin`/`session.permissions` to decide whether the mutating
+// controls render at all.
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/admin/documents',
 }))
+
+vi.mock('@/hooks/useSession', () => ({ useSession: vi.fn() }))
 
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/api')>()),
@@ -30,8 +34,11 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 }))
 
 const { api, ApiError } = await import('@/lib/api')
+import { useSession } from '@/hooks/useSession'
 import { APPLIES_TO_OPTIONS } from './page'
 import DocumentsPage from './page'
+
+const mockedUseSession = vi.mocked(useSession)
 
 // jsdom implements neither Pointer Events capture nor Element.scrollIntoView, which Radix
 // Select's trigger/content call on open — see src/components/ui/Select.test.tsx.
@@ -44,6 +51,22 @@ beforeAll(() => {
 afterEach(() => {
   vi.clearAllMocks()
 })
+
+function session(overrides: Partial<Session> = {}): Session {
+  return {
+    user: { id: 'u1', email: 'admin@x.com', name: 'Admin' },
+    employee: null,
+    is_system_admin: true,
+    has_reports: false,
+    hr_offices: [],
+    permissions: [],
+    ...overrides,
+  }
+}
+
+function stubSession(overrides: Partial<Session> = {}): void {
+  mockedUseSession.mockReturnValue({ session: session(overrides), isLoading: false, isAuthenticated: true })
+}
 
 function category(overrides: Partial<DocumentCategory> = {}): DocumentCategory {
   return { id: 'cat-1', code: 'GOVT_ID', name: 'Government IDs', description: null, ...overrides }
@@ -69,6 +92,7 @@ function catalog(overrides: Partial<DocumentCatalog> = {}): DocumentCatalog {
 
 beforeEach(() => {
   vi.mocked(api.documents.catalog).mockResolvedValue(catalog())
+  stubSession()
 })
 
 function renderPage() {
@@ -237,5 +261,36 @@ describe('/admin/documents — delete surfaces the 409', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
 
     expect(await screen.findByText('Cannot reach the server.')).toBeInTheDocument()
+  })
+})
+
+describe('/admin/documents — authorization (M10b-a final fixes)', () => {
+  it('an HR Admin holding document.manage but not is_system_admin sees the working screen, no notice', async () => {
+    stubSession({ is_system_admin: false, permissions: ['document.manage'] })
+    renderPage()
+
+    expect(await screen.findByText('Government IDs')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New category' })).toBeInTheDocument()
+    expect(screen.queryByText("This account can't administer documents.")).not.toBeInTheDocument()
+  })
+
+  it('an actor holding neither document.manage nor is_system_admin sees the notice and no create control', async () => {
+    stubSession({ is_system_admin: false, permissions: [] })
+    renderPage()
+
+    expect(await screen.findByText('Government IDs')).toBeInTheDocument()
+    expect(screen.getByText("This account can't administer documents.")).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New category' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New document kind' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+
+  it('an is_system_admin with no document.manage permission still sees the working screen', async () => {
+    stubSession({ is_system_admin: true, permissions: [] })
+    renderPage()
+
+    expect(await screen.findByText('Government IDs')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New category' })).toBeInTheDocument()
   })
 })
