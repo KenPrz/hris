@@ -8,7 +8,7 @@ colors:
   on-primary: "#ffffff"
   ink: "#161616"
   ink-muted: "#525252"
-  ink-subtle: "#8c8c8c"
+  ink-subtle: "#6f6f6f"
   canvas: "#ffffff"
   surface-1: "#f4f4f4"
   surface-2: "#e0e0e0"
@@ -21,7 +21,7 @@ colors:
   blue-60: "#0043ce"
   blue-80: "#002d9c"
   blue-hover: "#0050e6"
-  semantic-success: "#24a148"
+  semantic-success: "#198038"
   semantic-warning: "#f1c21b"
   semantic-error: "#da1e28"
   semantic-info: "#0f62fe"
@@ -301,12 +301,15 @@ The system reaches for color rarely — IBM Blue marks links, primary CTAs, and 
 ### Text
 - **Ink** ({colors.ink}): All headlines and emphasized body type — charcoal #161616.
 - **Ink Muted** ({colors.ink-muted}): Secondary type at #525252 — meta, sub-headlines, footer body.
-- **Ink Subtle** ({colors.ink-subtle}): Tertiary type at #8c8c8c — disabled, helper text, captions.
+- **Ink Subtle** ({colors.ink-subtle}): Tertiary type at #6f6f6f — disabled, helper text, captions.
+  Carbon Gray 60, not Gray 50 (#8c8c8c): this token is helper text and captions, which is
+  body text, and Gray 50 on white is 3.36:1 — under WCAG AA's 4.5:1 floor. Gray 60 is 5.0:1.
 - **Inverse Ink** ({colors.inverse-ink}): White on charcoal — footer headings.
 - **Inverse Ink Muted** ({colors.inverse-ink-muted}): Light gray on charcoal — footer body.
 
 ### Semantic
-- **Success Green** ({colors.semantic-success}): Carbon green-50 — success states.
+- **Success Green** ({colors.semantic-success}): Carbon green-60 — success states. Green 50
+  (#24a148) is 3.35:1 on white, under the 4.5:1 floor for the text it labels; green-60 is 5.0:1.
 - **Warning Yellow** ({colors.semantic-warning}): Carbon yellow-30 — warning states.
 - **Error Red** ({colors.semantic-error}): Carbon red-60 — error states; danger button background.
 - **Info Blue** ({colors.semantic-info}): Identical to primary — informational badges.
