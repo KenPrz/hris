@@ -26,6 +26,12 @@ it('returns both catalogs to any authenticated user', function (): void {
     // Ordered by code, so the response is stable for a client rendering a dropdown.
     expect(collect($response->json('data.categories'))->pluck('code')->all())
         ->toBe(['COMPANY', 'PERSONNEL', 'PRE_EMPLOYMENT', 'STATUTORY']);
+
+    // Same ordering guarantee on the documents side (ShowCatalogController's second
+    // orderBy('code')) — the earlier assertions above use firstWhere, which would still pass
+    // if this orderBy were ever dropped, so this is the one assertion that actually pins it.
+    expect(collect($response->json('data.documents'))->pluck('code')->all())
+        ->toBe(['BUSINESS_PERMIT', 'CONTRACT', 'FILE_201', 'MEDICAL', 'NBI', 'POLICY']);
 });
 
 it('requires authentication', function (): void {
