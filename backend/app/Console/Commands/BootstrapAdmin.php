@@ -67,7 +67,7 @@ final class BootstrapAdmin extends Command
         // Seed the RBAC, profile, and document catalogs unconditionally — BEFORE the System-Admin guard
         // below — so a database that already has a System Admin (every M9 production
         // install, from the moment an M10a deploy lands) still gains any catalog data a
-        // later milestone introduces. Idempotent (findOrCreate/updateOrCreate throughout),
+        // later milestone introduces. Idempotent (firstOrCreate/updateOrCreate throughout),
         // so running this on a database that already has the catalogs is a no-op.
         $this->callSilent('db:seed', ['--class' => RbacSeeder::class, '--force' => true]);
         $this->callSilent('db:seed', ['--class' => ProfileCatalogSeeder::class, '--force' => true]);

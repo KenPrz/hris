@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\Document;
-use App\Models\Office;
 use App\Models\User;
 use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
