@@ -398,6 +398,18 @@ test('every Admin\Documents controller is guarded by a FormRequest whose authori
         return '';
     };
 
+    // Strips `//` line comments and `/* */` block comments before the str_contains checks
+    // below, so a mutated authorize() that merely comments out its gate (e.g.
+    // `// TODO(M10b-b): manageCatalog moves to the controller.` above a bare `return true;`)
+    // cannot pass by having its own name mentioned in prose. Block comments are stripped
+    // first — order matters if a block comment ever contained a `//` sequence, though that
+    // shape doesn't occur in this codebase's FormRequests.
+    $stripComments = function (string $code): string {
+        $withoutBlockComments = preg_replace('#/\*.*?\*/#s', '', $code) ?? $code;
+
+        return preg_replace('#//[^\n]*#', '', $withoutBlockComments) ?? $withoutBlockComments;
+    };
+
     $offenders = [];
 
     $controllerFiles = (new Finder)
@@ -454,9 +466,10 @@ test('every Admin\Documents controller is guarded by a FormRequest whose authori
         $authorizePos = strpos($requestContents, 'function authorize');
         $bracePos = $authorizePos === false ? false : strpos($requestContents, '{', $authorizePos);
         $authorizeBody = $bracePos === false ? '' : $extractBalanced($requestContents, $bracePos, '{', '}');
+        $authorizeBodyWithoutComments = $stripComments($authorizeBody);
 
-        $hasRealGate = $authorizeBody !== ''
-            && (str_contains($authorizeBody, '->can(') || str_contains($authorizeBody, 'Gate::') || str_contains($authorizeBody, 'manageCatalog'));
+        $hasRealGate = $authorizeBodyWithoutComments !== ''
+            && (str_contains($authorizeBodyWithoutComments, '->can(') || str_contains($authorizeBodyWithoutComments, 'Gate::') || str_contains($authorizeBodyWithoutComments, 'manageCatalog'));
 
         if (! $hasRealGate) {
             $offenders[$relativePath] = "{$guardingClass}::authorize() contains no ->can(/Gate::/manageCatalog gate expression";
