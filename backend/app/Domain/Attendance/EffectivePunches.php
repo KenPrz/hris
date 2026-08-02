@@ -8,6 +8,7 @@ use App\Domain\Schedule\ScheduleResolver;
 use App\Models\AttendanceAnnulment;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 
 /**
@@ -76,6 +77,61 @@ final class EffectivePunches
             ->map(fn (AttendanceLog $log): int => self::minutesFromMidnight($log, $localMidnight))
             ->values()
             ->all();
+    }
+
+    /**
+     * The business date(s) whose shift window claims $instant — what a caller needs when it
+     * holds a punch and must know which employee-day(s) to recompute.
+     *
+     * Only two dates can ever own an instant: its own office-local date, and the day before
+     * (whose window runs past midnight on a cross-midnight shift). Both are tested against
+     * the same bounds forDate() uses, so this and forDate() can never disagree about who
+     * owns a punch — which is the whole point of asking here rather than guessing in the
+     * caller. Consecutive windows tile without overlap (see windowStartMinutes), so on a
+     * cross-midnight schedule exactly one date matches; on an ordinary schedule the previous
+     * day's window ends at midnight and only the own-date matches.
+     *
+     * Falls back to the own-date when neither window claims the instant, so a punch is never
+     * left with no day to compute — an off-window punch (an employee clocking in on a rest
+     * day, say) still lands somewhere rather than silently producing no summary at all.
+     *
+     * @return list<string> ascending Y-m-d
+     */
+    public static function datesOwning(Employee $employee, CarbonInterface $instant): array
+    {
+        $timezone = $employee->currentOffice->timezone;
+        $local = $instant->copy()->setTimezone($timezone);
+        $ownDate = $local->format('Y-m-d');
+
+        $dates = [];
+
+        foreach ([$local->copy()->subDay()->format('Y-m-d'), $ownDate] as $date) {
+            if (self::windowClaims($employee, $date, $instant)) {
+                $dates[] = $date;
+            }
+        }
+
+        return $dates === [] ? [$ownDate] : $dates;
+    }
+
+    /** Whether $date's shift window claims $instant, on exactly forDate()'s bounds. */
+    private static function windowClaims(Employee $employee, string $date, CarbonInterface $instant): bool
+    {
+        $timezone = $employee->currentOffice->timezone;
+        $localMidnight = Carbon::parse($date, $timezone)->startOfDay();
+
+        $startMinute = self::windowStartMinutes($employee, $date);
+        $windowStart = $localMidnight->copy()->addMinutes($startMinute);
+        $windowEnd = $localMidnight->copy()->addMinutes(self::windowMinutes($employee, $date));
+
+        // Exclusive start when bounded by the previous day's window end — forDate() makes the
+        // same distinction for the same reason: that instant was already claimed inclusively
+        // by the earlier window, and claiming it twice would double-count the punch.
+        $afterStart = $startMinute > 0
+            ? $instant->greaterThan($windowStart)
+            : $instant->greaterThanOrEqualTo($windowStart);
+
+        return $afterStart && $instant->lessThanOrEqualTo($windowEnd);
     }
 
     /**
