@@ -48,7 +48,28 @@ final class PunchPairer
     /** @param  list<int>  $punchMinutes  Ascending, from the start of the business day. */
     public static function pair(array $punchMinutes): PairedPunches
     {
-        self::assertOrdered($punchMinutes);
+        $outOfOrder = self::firstOutOfOrder($punchMinutes);
+
+        if ($outOfOrder !== null) {
+            // Reported as incomplete, not thrown.
+            //
+            // EffectivePunches truncates each punch to a whole minute, so two punches inside
+            // one minute — a double-tap, two open tabs, an HR admin entering 08:00 twice
+            // through the deliberately non-idempotent manual route — collide here. This used
+            // to throw, and by then the punch was already durable: ComputeDailySummary runs
+            // in DB::afterCommit, outside the writing transaction. So the throw escaped as a
+            // 500 and NO summary row was ever written for that day — and a day with no
+            // summary row is invisible to CloseCutoff's incomplete-day gate, so the period
+            // closed with the day worth zero. Every later recompute threw identically, which
+            // made it permanent.
+            //
+            // An incomplete day is the right answer instead: it is exactly what an unpaired
+            // punch already produces, it blocks the cutoff close, and it puts the day in
+            // front of an HR admin to resolve through the adjustment flow. RecordPunch also
+            // refuses a duplicate minute at ingestion now (PunchOrdering), so this path only
+            // ever sees rows written before that guard existed.
+            return new PairedPunches(intervals: [], unpairedMinute: $outOfOrder);
+        }
 
         $intervals = [];
         $count = count($punchMinutes);
@@ -64,8 +85,17 @@ final class PunchPairer
         );
     }
 
-    /** @param  list<int>  $punchMinutes */
-    private static function assertOrdered(array $punchMinutes): void
+    /**
+     * The first minute that is not strictly greater than the one before it, or null when the
+     * list is properly ascending.
+     *
+     * A negative minute still throws: EffectivePunches measures from the window start, which
+     * is never after the first punch, so a negative is unreachable from real data and means
+     * the window arithmetic itself is broken — not something to absorb as an incomplete day.
+     *
+     * @param  list<int>  $punchMinutes
+     */
+    private static function firstOutOfOrder(array $punchMinutes): ?int
     {
         $previous = null;
 
@@ -75,12 +105,12 @@ final class PunchPairer
             }
 
             if ($previous !== null && $minute <= $previous) {
-                throw new InvalidArgumentException(
-                    "Punches must be in ascending order: {$previous} is followed by {$minute}."
-                );
+                return $minute;
             }
 
             $previous = $minute;
         }
+
+        return null;
     }
 }

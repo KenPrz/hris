@@ -6,6 +6,7 @@ namespace App\Actions\Attendance;
 
 use App\Actions\Compute\ComputeDailySummary;
 use App\Domain\Attendance\EffectivePunches;
+use App\Domain\Attendance\PunchOrdering;
 use App\Domain\Attendance\PunchVerifier;
 use App\Exceptions\Domain\EmployeeHasNoOffice;
 use App\Exceptions\Domain\OfficeHasNoDefaultTemplate;
@@ -47,11 +48,16 @@ final class RecordPunch
     public function execute(RecordPunchInput $in): AttendanceLog
     {
         return DB::transaction(function () use ($in): AttendanceLog {
-            $employee = Employee::query()->findOrFail($in->employeeId);
+            // lockForUpdate so two concurrent punches for the same employee serialize through
+            // PunchOrdering below rather than both finding the minute free and both inserting.
+            // The same row lock ComputeDailySummary, ApproveRequest and CloseCutoff take.
+            $employee = Employee::query()->lockForUpdate()->findOrFail($in->employeeId);
 
             // Snapshot the office the punch belongs to now, so a later transfer never
             // reinterprets this punch's timezone or geofence.
             $office = $employee->currentOffice()->firstOrFail();
+
+            PunchOrdering::assertOrderable($employee, $in->punchedAt ?? now(), $office->timezone);
 
             $result = $this->verifier->verify($office, $in->ipAddress, $in->geoLat, $in->geoLng);
 
