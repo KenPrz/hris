@@ -226,6 +226,129 @@ it('approves an event type (deducts_balance=false) with NO ledger row at all', f
     expect(RecomputeRun::query()->where('trigger_type', RecomputeTrigger::Leave)->exists())->toBeTrue();
 });
 
+// overlapping leave ---------------------------------------------------------------------
+
+it('refuses an approval whose span overlaps leave already approved, and debits only once', function (): void {
+    // The leave-span recompute would otherwise resolve a schedule this bare office has no
+    // template for; the overlap invariant is what this test is about.
+    Bus::fake();
+
+    // Nothing enforced this: leave_details has only a primary key, the schema has no
+    // exclusion constraints, and neither submit nor approve checked. Two overlapping
+    // requests both reached final approval, each writing a ledger debit, while the compute
+    // path emitted one leave_with_pay line per day — charged twice, paid once.
+    $office = leaveEffectOffice();
+    [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
+    [, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [$hrUser] = leaveEffectHrAdmin($office);
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => true]);
+
+    LeaveLedger::factory()->for($report, 'employee')->create([
+        'leave_type_id' => $leaveType->id,
+        'entry_type' => 'credit',
+        'minutes' => 10000,   // plenty — this test is about overlap, not balance
+    ]);
+
+    $first = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType, [
+        'start_date' => '2026-08-03',
+        'end_date' => '2026-08-07',
+        'amount_minutes' => 2400,
+    ]);
+    $second = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType, [
+        'start_date' => '2026-08-06',   // overlaps the 6th and 7th
+        'end_date' => '2026-08-11',
+        'amount_minutes' => 2400,
+    ]);
+
+    Sanctum::actingAs($hrUser);
+    $this->postJson("/api/v1/requests/{$first->id}/approve")->assertOk();
+
+    $this->postJson("/api/v1/requests/{$second->id}/approve")
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'overlapping_leave')
+        ->assertJsonPath('error.details.conflicting_request_id', $first->id);
+
+    // The whole approval rolled back: state unchanged, and exactly one debit exists.
+    expect($second->fresh()->state)->toBe(RequestState::ManagerApproved)
+        ->and(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(1);
+});
+
+it('allows a request that merely abuts an approved one', function (): void {
+    // The leave-span recompute would otherwise resolve a schedule this bare office has no
+    // template for; the overlap invariant is what this test is about.
+    Bus::fake();
+
+    // Ranges are closed on both ends, so 03-07 and 08-11 do not overlap. Off-by-one here
+    // would refuse legitimate back-to-back leave.
+    $office = leaveEffectOffice();
+    [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
+    [, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [$hrUser] = leaveEffectHrAdmin($office);
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => true]);
+
+    LeaveLedger::factory()->for($report, 'employee')->create([
+        'leave_type_id' => $leaveType->id,
+        'entry_type' => 'credit',
+        'minutes' => 10000,
+    ]);
+
+    $first = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType, [
+        'start_date' => '2026-08-03', 'end_date' => '2026-08-07', 'amount_minutes' => 2400,
+    ]);
+    $second = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType, [
+        'start_date' => '2026-08-08', 'end_date' => '2026-08-11', 'amount_minutes' => 1920,
+    ]);
+
+    Sanctum::actingAs($hrUser);
+    $this->postJson("/api/v1/requests/{$first->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$second->id}/approve")->assertOk();
+
+    expect(LeaveLedger::query()->where('entry_type', 'debit')->count())->toBe(2);
+});
+
+it('refuses an overlapping event type too, even though it has no balance to overdraw', function (): void {
+    // The leave-span recompute would otherwise resolve a schedule this bare office has no
+    // template for; the overlap invariant is what this test is about.
+    Bus::fake();
+
+    // The employee row lock used to be taken only inside the deducts_balance branch, so an
+    // event type reached the overlap check unserialized. It is taken for every type now.
+    $office = leaveEffectOffice();
+    [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
+    [, $report] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [$hrUser] = leaveEffectHrAdmin($office);
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => false]);
+
+    $first = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType);
+    $second = managerApprovedLeaveRequest($report, $manager, $managerUser, $leaveType);
+
+    Sanctum::actingAs($hrUser);
+    $this->postJson("/api/v1/requests/{$first->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$second->id}/approve")
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'overlapping_leave');
+});
+
+it('does not treat another employee\'s overlapping leave as a conflict', function (): void {
+    // The leave-span recompute would otherwise resolve a schedule this bare office has no
+    // template for; the overlap invariant is what this test is about.
+    Bus::fake();
+
+    $office = leaveEffectOffice();
+    [$managerUser, $manager] = leaveEffectEmployeeWithUser($office);
+    [, $first] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [, $second] = leaveEffectEmployeeWithUser($office, ['current_reports_to_id' => $manager->id]);
+    [$hrUser] = leaveEffectHrAdmin($office);
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => false]);
+
+    $firstRequest = managerApprovedLeaveRequest($first, $manager, $managerUser, $leaveType);
+    $secondRequest = managerApprovedLeaveRequest($second, $manager, $managerUser, $leaveType);
+
+    Sanctum::actingAs($hrUser);
+    $this->postJson("/api/v1/requests/{$firstRequest->id}/approve")->assertOk();
+    $this->postJson("/api/v1/requests/{$secondRequest->id}/approve")->assertOk();
+});
+
 it('resolves the leave effect for RequestType::Leave via the factory', function (): void {
     $effect = app(App\Actions\Requests\RequestEffectFactory::class)->for(RequestType::Leave);
 

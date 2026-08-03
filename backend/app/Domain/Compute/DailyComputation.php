@@ -72,7 +72,7 @@ final class DailyComputation
         }
 
         $grossTotal = $paired->totalWorked();
-        $net = MealBreakPolicy::assumed($in->breakMinutes, $in->scheduledMinutes)->netWorked($grossTotal);
+        $net = MealBreakPolicy::assumed($in->breakMinutes, $in->mealBreakAppliesOverMinutes)->netWorked($grossTotal);
         $breakDeducted = $grossTotal->value - $net->value;
 
         $keptIntervals = self::trimTail($paired->intervals, $breakDeducted);
@@ -86,9 +86,33 @@ final class DailyComputation
 
         $lines = self::buildLines($in, $regularDay, $regularNight, $overtimeDay, $overtimeNight);
 
+        // Leave can coexist with worked time. A half-day leave whose other half is worked
+        // must pay for both — this branch used to emit no leave line at all, because the
+        // leave check lived only on the no-punches path, so such an employee was debited
+        // half a day of balance and paid only for the hours they clocked.
+        //
+        // Capped at the unworked remainder of the scheduled day, so a full-day leave the
+        // employee ignored and worked through pays once rather than twice, and a partially
+        // worked day is topped up only by what is actually missing.
+        $leaveCredit = self::leaveCredit($in, $net->value);
+
+        if ($leaveCredit > 0) {
+            $lines[] = new ComputedLine(
+                kind: SummaryLineKind::LeaveWithPay,
+                minutes: $leaveCredit,
+                appliedBp: 10000,
+            );
+        }
+
         $firstPunch = $paired->intervals[0]->startMinute;
         $late = $in->scheduledStartMinute === null ? 0 : max(0, $firstPunch - $in->scheduledStartMinute);
-        $undertime = OvertimeThreshold::undertime($net, Minutes::of($in->scheduledMinutes))->value;
+
+        // Leave counts toward the scheduled day: an employee who worked half and holds leave
+        // for the other half owes nothing.
+        $undertime = OvertimeThreshold::undertime(
+            Minutes::of($net->value + $leaveCredit),
+            Minutes::of($in->scheduledMinutes),
+        )->value;
 
         return new ComputedDay(
             workedMinutes: $net->value,
@@ -106,11 +130,19 @@ final class DailyComputation
      *  (leave pays once, not leave + holiday premium). Never incomplete. */
     private static function computeUnworkedDay(DailyComputationInput $in): ComputedDay
     {
-        $undertime = OvertimeThreshold::undertime(Minutes::zero(), Minutes::of($in->scheduledMinutes))->value;
+        $leaveCredit = self::leaveCredit($in, 0);
+
+        // Leave counts toward the scheduled day — a day fully covered by leave is not
+        // undertime. This used to pass zero unconditionally, so a full-day leave recorded a
+        // full day of undertime beside its own leave_with_pay line.
+        $undertime = OvertimeThreshold::undertime(
+            Minutes::of($leaveCredit),
+            Minutes::of($in->scheduledMinutes),
+        )->value;
 
         $lines = [];
 
-        if ($in->onApprovedLeave && ! $in->isRestDay && $in->scheduledMinutes > 0) {
+        if ($leaveCredit > 0) {
             // Leave wins over a paid holiday that happens to fall on the same day — an
             // employee on approved leave is paid for the leave, not paid twice (leave +
             // holiday premium). A leave-with-pay minute is a normal-day minute: flat
@@ -123,7 +155,7 @@ final class DailyComputation
             // wage), not a premium, so an art82-exempt employee still receives it.
             $lines[] = new ComputedLine(
                 kind: SummaryLineKind::LeaveWithPay,
-                minutes: $in->scheduledMinutes,
+                minutes: $leaveCredit,
                 appliedBp: 10000,
             );
         } elseif (
@@ -147,6 +179,22 @@ final class DailyComputation
             isIncomplete: false,
             lines: $lines,
         );
+    }
+
+    /**
+     * Paid-leave minutes this day can actually credit, given how much of it was worked.
+     *
+     * Never more than the day's unworked remainder, so leave and worked time cannot sum past
+     * the scheduled day. Zero on a rest day (scheduledMinutes 0) — leave never charges a day
+     * off, and there is nothing scheduled to top up.
+     */
+    private static function leaveCredit(DailyComputationInput $in, int $workedMinutes): int
+    {
+        if ($in->isRestDay) {
+            return 0;
+        }
+
+        return min($in->leaveMinutes, max(0, $in->scheduledMinutes - $workedMinutes));
     }
 
     /** @return list<ComputedLine> */

@@ -50,9 +50,19 @@ final readonly class MealBreakPolicy
     /**
      * Net worked minutes after the policy is applied.
      *
-     * Clamps at zero rather than throwing: a threshold configured shorter than the break
-     * is a misconfiguration to surface in reporting, not a reason to fail a payroll run
-     * mid-computation.
+     * The break comes out of the time ABOVE the threshold, never out of the threshold
+     * itself — an employee on the clock for one minute past five hours cannot have taken a
+     * sixty-minute lunch inside that minute. So the deduction ramps in over the first
+     * $breakMinutes of overage and is whole thereafter.
+     *
+     * This used to subtract the full break the instant the threshold was crossed, which
+     * made net worked minutes non-monotonic in the out-punch: 300 gross credited 300, and
+     * 301 gross credited 241. Leaving earlier paid more. The floor below is what removes
+     * that — above the threshold the result can never fall beneath the threshold.
+     *
+     * Floors rather than throwing when a threshold is configured shorter than the break:
+     * that is a misconfiguration to surface in reporting, not a reason to fail a payroll
+     * run mid-computation.
      */
     public function netWorked(Minutes $gross): Minutes
     {
@@ -60,6 +70,9 @@ final readonly class MealBreakPolicy
             return $gross;
         }
 
-        return Minutes::of(max(0, $gross->value - $this->breakMinutes));
+        return Minutes::of(max(
+            $this->appliesOverMinutes,
+            $gross->value - $this->breakMinutes,
+        ));
     }
 }

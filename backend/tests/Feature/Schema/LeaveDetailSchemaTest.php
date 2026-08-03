@@ -22,6 +22,7 @@ function leaveDetailSchemaRow(string $requestId, string $leaveTypeId, array $ove
         'end_date' => '2026-08-10',
         'day_part' => 'full',
         'amount_minutes' => 480,
+        'minutes_per_day' => 480,
     ], $overrides);
 }
 
@@ -39,7 +40,19 @@ it('round-trips a leave detail row', function (): void {
         ->and($row->start_date)->toBe('2026-08-10')
         ->and($row->end_date)->toBe('2026-08-10')
         ->and($row->day_part)->toBe('full')
-        ->and($row->amount_minutes)->toBe(480);
+        ->and($row->amount_minutes)->toBe(480)
+        ->and($row->minutes_per_day)->toBe(480);
+});
+
+it('rejects a non-positive minutes_per_day via the CHECK constraint', function (): void {
+    $office = Office::factory()->create();
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+    $leaveType = LeaveType::factory()->create(['office_id' => $office->id]);
+    $request = Request::factory()->for($employee)->create();
+
+    expect(fn () => DB::table('leave_details')->insert(
+        leaveDetailSchemaRow($request->id, $leaveType->id, ['minutes_per_day' => 0])
+    ))->toThrow(QueryException::class);
 });
 
 it('rejects a day_part outside full/half via the CHECK constraint', function (): void {

@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 namespace App\Actions\Cutoff;
 
+use App\Actions\Compute\ComputeDailySummary;
 use App\Domain\Cutoff\CutoffCalendar;
 use App\Domain\Cutoff\CutoffState;
 use App\Domain\Cutoff\RequestAffectedDates;
 use App\Domain\Requests\RequestState;
 use App\Exceptions\Domain\CutoffAlreadyClosed;
 use App\Exceptions\Domain\CutoffHasUnresolvedExceptions;
+use App\Exceptions\Domain\EmployeeHasNoOffice;
 use App\Exceptions\Domain\InvalidCutoffStart;
+use App\Exceptions\Domain\OfficeHasNoDefaultTemplate;
 use App\Models\CutoffPeriod;
 use App\Models\DailyAttendanceSummary;
 use App\Models\Employee;
 use App\Models\Request;
+use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -46,6 +50,44 @@ final class CloseCutoff
 
             if ($period->state === CutoffState::Closed) {
                 throw new CutoffAlreadyClosed($period->id);
+            }
+
+            // --- Materialize the full employee x date grid ---
+            //
+            // A summary row is only ever CREATED by a punch, an adjustment, or LeaveEffect's
+            // date enumeration, so a day nobody punched had no row at all. Three things were
+            // therefore unreachable in production: an unworked regular holiday's statutory
+            // Art. 94 pay (computeUnworkedDay's holiday_unworked line was dead code), a plain
+            // absence, and any leave day LeaveEffect had not enumerated. An employee absent
+            // for a whole period did not appear in the payroll export at all, because
+            // PayrollExport groups over existing summary rows.
+            //
+            // Closing is the one moment the system knows the full grid payroll is about to be
+            // run over, so it is where the grid gets filled.
+            //
+            // Runs BEFORE the exception gate deliberately: a day that materializes as
+            // incomplete must be caught by the gate, not silently frozen behind it.
+            //
+            // Ascending employee id, the same total order the freeze below uses, so the row
+            // locks ComputeDailySummary takes here cannot deadlock against a concurrent close
+            // or reopen of the same office.
+            $employees = Employee::query()
+                ->where('current_office_id', $in->officeId)
+                ->orderBy('id')
+                ->get();
+
+            $compute = app(ComputeDailySummary::class);
+
+            foreach ($employees as $employee) {
+                foreach (CarbonPeriod::create($window['start'], $window['end']) as $day) {
+                    try {
+                        $compute->execute($employee, $day->toDateString());
+                    } catch (EmployeeHasNoOffice|OfficeHasNoDefaultTemplate) {
+                        // The same tolerance RecordPunch and ApplyAttendanceAdjustment apply:
+                        // an employee with no resolvable schedule for a date has no day to
+                        // compute, and that is not a reason to refuse the close.
+                    }
+                }
             }
 
             // --- Strict exception gate ---

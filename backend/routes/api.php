@@ -128,24 +128,31 @@ Route::prefix('v1')->group(function (): void {
         // Static reference data for the profile dropdowns — not scoped, not admin-gated.
         Route::get('/profile/catalog', ShowCatalogController::class);
 
+        // `idempotent` guards the mutations whose retry would duplicate a durable effect —
+        // a second request row, a second ledger entry, a second decision. It is a no-op when
+        // the caller sends no Idempotency-Key, so it protects whoever asks for protection.
+        //
+        // Worth knowing: of the frontend's writes, only usePunch mints a key today. These
+        // guards are therefore available rather than active for the rest — the server-side
+        // half of the guarantee, waiting on the client half. Read routes never carry it.
         Route::post('/attendance/punch', PunchController::class)->middleware('idempotent');
 
         // Any employee may file for their own attendance — deliberately not admin-gated
         // and not behind idempotency middleware (a considered one-off submission, not a
         // retryable network event). Submission stays type-specific; the read/decision
         // surface below is the shared, type-agnostic requests spine.
-        Route::post('/attendance/adjustments', SubmitAdjustmentController::class);
+        Route::post('/attendance/adjustments', SubmitAdjustmentController::class)->middleware('idempotent');
 
         // Same shape as the attendance-adjustment submission above: any employee may file
         // their own leave, not admin-gated, not behind idempotency middleware. The debit
         // amount is server-computed from the scheduled working days in range, never
         // client-supplied — see SubmitLeaveRequestController.
-        Route::post('/leave/requests', SubmitLeaveRequestController::class);
+        Route::post('/leave/requests', SubmitLeaveRequestController::class)->middleware('idempotent');
 
         // Same shape as the leave/attendance-adjustment submissions above: any employee may
         // file their own overtime pre-authorization, not admin-gated. Single-hop — the
         // manager (or office HR) approves it once and the compute engine reads the cap.
-        Route::post('/overtime/requests', SubmitOvertimeRequestController::class);
+        Route::post('/overtime/requests', SubmitOvertimeRequestController::class)->middleware('idempotent');
 
         // The two scope-filtered approval queues — a manager's direct reports and an HR
         // admin's office members — replace the old single combined
@@ -165,9 +172,9 @@ Route::prefix('v1')->group(function (): void {
         // requester themself may act — authority is enforced inside the actions
         // (RequestAuthority for approve/reject, requester-identity for cancel), not by a
         // route-level gate, so these stay in the plain auth:sanctum group.
-        Route::post('/requests/{request}/approve', ApproveController::class);
-        Route::post('/requests/{request}/reject', RejectController::class);
-        Route::post('/requests/{request}/cancel', CancelController::class);
+        Route::post('/requests/{request}/approve', ApproveController::class)->middleware('idempotent');
+        Route::post('/requests/{request}/reject', RejectController::class)->middleware('idempotent');
+        Route::post('/requests/{request}/cancel', CancelController::class)->middleware('idempotent');
 
         // Show and the attachment stream share one visibility check (requester, or an
         // authorized approver) — see ShowController/DownloadAttachmentController. The
@@ -298,8 +305,8 @@ Route::prefix('v1')->group(function (): void {
             // is a seeded permission (see RbacSeeder) but the enforced boundary here is
             // "administers this office", identical to leave-types/holidays.
             Route::get('/cutoffs', ListCutoffsController::class);
-            Route::post('/cutoffs/close', CloseCutoffController::class);
-            Route::post('/cutoffs/{period}/reopen', ReopenCutoffController::class);
+            Route::post('/cutoffs/close', CloseCutoffController::class)->middleware('idempotent');
+            Route::post('/cutoffs/{period}/reopen', ReopenCutoffController::class)->middleware('idempotent');
             Route::get('/cutoffs/{period}/export', ExportCutoffController::class);
 
             // Leave-type config — no delete route; a type is retired via PATCH
@@ -313,7 +320,9 @@ Route::prefix('v1')->group(function (): void {
         // current office (not EmployeeScope, which would also let a manager grant to
         // their own direct reports; see GrantController). One credit row per grant.
         Route::prefix('leave')->group(function (): void {
-            Route::post('/grants', GrantLeaveController::class);
+            // The highest-risk mutation in the system to retry: a grant writes a ledger CREDIT
+            // with no uniqueness guard behind it, so a duplicate silently inflates a balance.
+            Route::post('/grants', GrantLeaveController::class)->middleware('idempotent');
         });
     });
 });

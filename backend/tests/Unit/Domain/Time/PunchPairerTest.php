@@ -60,17 +60,37 @@ it('handles a day with no punches at all', function (): void {
         ->and($paired->totalWorked()->value)->toBe(0);
 });
 
-it('refuses punches that are not in ascending order', function (): void {
-    // Out-of-order punches mean the caller sorted wrong or the data is corrupt.
-    // Sorting them here would paper over that silently.
-    expect(fn () => PunchPairer::pair([720, 480]))
-        ->toThrow(InvalidArgumentException::class, 'ascending order');
+it('reports punches that are not in ascending order as incomplete', function (): void {
+    // Out-of-order punches mean the caller sorted wrong or the data is corrupt. Sorting them
+    // here would paper over that silently — but throwing bricked the day (see below), so the
+    // day is reported incomplete and reaches an HR admin through the exception gate instead.
+    $paired = PunchPairer::pair([720, 480]);
+
+    expect($paired->hasUnpaired())->toBeTrue()
+        ->and($paired->intervals)->toBe([])
+        ->and($paired->totalWorked()->value)->toBe(0);
 });
 
-it('refuses two punches at the same minute', function (): void {
-    // A zero-length interval is a double-punch, not a shift.
-    expect(fn () => PunchPairer::pair([480, 480]))
-        ->toThrow(InvalidArgumentException::class, 'ascending order');
+it('reports two punches at the same minute as incomplete rather than throwing', function (): void {
+    // A zero-length interval is a double-punch, not a shift. This used to throw — but by then
+    // the punch was durable (compute runs in afterCommit), so the throw escaped as a 500 and
+    // the day got no summary row at all: invisible to CloseCutoff's incomplete-day gate, so
+    // the period closed with it worth zero, permanently.
+    $paired = PunchPairer::pair([480, 480]);
+
+    expect($paired->hasUnpaired())->toBeTrue()
+        ->and($paired->intervals)->toBe([])
+        ->and($paired->unpairedMinute)->toBe(480);
+});
+
+it('still pairs the good punches around a later collision as incomplete, not partially', function (): void {
+    // All-or-nothing: a collision anywhere means the day's punch sequence is untrustworthy,
+    // so nothing is priced from it. Pricing the clean leading pair would pay a day that an
+    // HR admin has not yet reconciled.
+    $paired = PunchPairer::pair([480, 720, 900, 900]);
+
+    expect($paired->hasUnpaired())->toBeTrue()
+        ->and($paired->intervals)->toBe([]);
 });
 
 it('refuses a negative punch minute', function (): void {

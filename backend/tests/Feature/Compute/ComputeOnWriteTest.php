@@ -12,6 +12,7 @@ use App\Domain\Pay\DayType;
 use App\Domain\Schedule\Weekday;
 use App\Models\AttendanceAdjustmentDetail;
 use App\Models\AttendanceLog;
+use App\Models\CutoffPeriod;
 use App\Models\DailyAttendanceSummary;
 use App\Models\Department;
 use App\Models\Employee;
@@ -131,7 +132,7 @@ it('recomputes a fresh, computed summary after recording an in+out punch', funct
 
     $date = '2026-08-03'; // Monday
     onWritePunch($employee, $office, $date, '08:00', PunchDirection::In);
-    onWritePunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    onWritePunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = DailyAttendanceSummary::query()
         ->where('employee_id', $employee->id)
@@ -186,7 +187,7 @@ it('flips an incomplete day to a computed worked total after an approved add adj
         'operation' => AdjustmentOperation::Add,
         'target_log_id' => null,
         'direction' => PunchDirection::Out,
-        'punched_at' => Carbon::parse("{$date} 16:00", $office->timezone)->utc(),
+        'punched_at' => Carbon::parse("{$date} 17:00", $office->timezone)->utc(),
     ]);
 
     app(ApplyAttendanceAdjustment::class)->apply($request, $approver->id);
@@ -212,7 +213,7 @@ it('recomputes BOTH the old and new date when an amend moves a punch across the 
     $oldDate = '2026-08-05'; // Wednesday
     $newDate = '2026-08-06'; // Thursday
     onWritePunch($employee, $office, $oldDate, '08:00', PunchDirection::In);
-    $outLog = onWritePunch($employee, $office, $oldDate, '16:00', PunchDirection::Out);
+    $outLog = onWritePunch($employee, $office, $oldDate, '17:00', PunchDirection::Out);
 
     $before = DailyAttendanceSummary::query()
         ->where('employee_id', $employee->id)->whereDate('date', $oldDate)->first();
@@ -259,7 +260,7 @@ it('recomputes the annulled punch\'s own day after an approved void, back to inc
 
     $date = '2026-08-06'; // Thursday
     onWritePunch($employee, $office, $date, '08:00', PunchDirection::In);
-    $outLog = onWritePunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    $outLog = onWritePunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $before = DailyAttendanceSummary::query()
         ->where('employee_id', $employee->id)->whereDate('date', $date)->first();
@@ -283,4 +284,78 @@ it('recomputes the annulled punch\'s own day after an approved void, back to inc
     expect($after)->not->toBeNull()
         ->and($after->is_incomplete)->toBeTrue()
         ->and($after->worked_minutes)->toBe(0);
+});
+
+// cross-midnight ---------------------------------------------------------------------
+
+/** Every day 22:00-06:00 (1320-1800 minutes, no break) — a pure night-shift office. */
+function onWriteNightOffice(): Office
+{
+    $office = Office::factory()->create(['timezone' => 'Asia/Manila']);
+
+    $template = ShiftTemplate::create(['office_id' => $office->id, 'name' => 'Night']);
+    foreach (Weekday::cases() as $wd) {
+        ShiftTemplateDay::create([
+            'shift_template_id' => $template->id,
+            'weekday' => $wd,
+            'is_rest' => false,
+            'start_minute' => 1320,
+            'end_minute' => 1800,
+            'break_minutes' => 0,
+        ]);
+    }
+    $office->update(['default_shift_template_id' => $template->id]);
+
+    return $office;
+}
+
+it('completes the previous day when a night shift punches out after midnight', function (): void {
+    // EffectivePunches assigns a post-midnight punch to the PREVIOUS business day's shift
+    // window — that is what makes a 22:00-06:00 shift one day rather than two halves. This
+    // action used to compute only the punch's OWN local date, so the out-punch computed
+    // 08-04 (whose window correctly excludes it) and 08-03 was never revisited by the punch
+    // that completed it: permanently unpaired, worked 0, is_incomplete true. And because
+    // CloseCutoff refuses to close over an incomplete day, an office running night shifts
+    // could never close a cutoff at all.
+    $office = onWriteNightOffice();
+    $employee = onWriteEmployee($office);
+    onWritePayRule();
+
+    onWritePunch($employee, $office, '2026-08-03', '22:00', PunchDirection::In);
+
+    $afterIn = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)->whereDate('date', '2026-08-03')->first();
+    expect($afterIn->is_incomplete)->toBeTrue();
+
+    onWritePunch($employee, $office, '2026-08-04', '06:00', PunchDirection::Out);
+
+    $afterOut = DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)->whereDate('date', '2026-08-03')->first();
+
+    expect($afterOut->is_incomplete)->toBeFalse()
+        ->and($afterOut->worked_minutes)->toBe(480);
+});
+
+it('does not resurrect a closed previous day when a punch lands after midnight', function (): void {
+    // The extra date this action now computes must still respect the closed-period freeze.
+    // ComputeDailySummary's own guard does the refusing; this proves the new second compute
+    // is routed through it rather than around it.
+    $office = onWriteNightOffice();
+    $employee = onWriteEmployee($office);
+    onWritePayRule();
+
+    CutoffPeriod::create([
+        'office_id' => $office->id,
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-15',
+        'state' => 'closed',
+        'closed_at' => now(),
+    ]);
+
+    onWritePunch($employee, $office, '2026-08-04', '00:30', PunchDirection::In);
+
+    expect(DailyAttendanceSummary::query()
+        ->where('employee_id', $employee->id)
+        ->whereDate('date', '2026-08-03')
+        ->exists())->toBeFalse();
 });

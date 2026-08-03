@@ -7,6 +7,7 @@ use App\Actions\Attendance\RecordPunchInput;
 use App\Domain\Attendance\PunchDirection;
 use App\Domain\Attendance\PunchSource;
 use App\Domain\Attendance\PunchVerification;
+use App\Exceptions\Domain\DuplicatePunchMinute;
 use App\Models\AttendanceLog;
 use App\Models\Employee;
 use App\Models\Office;
@@ -111,4 +112,74 @@ it('flags a punch from an IP outside the office allowlist but still stores it', 
     expect($log->verification)->toBe(PunchVerification::Flagged)
         ->and($log->flag_reason)->toBe('ip_not_allowlisted')
         ->and(AttendanceLog::count())->toBe(1);   // stored, not rejected
+});
+
+// duplicate minute -------------------------------------------------------------------
+
+it('refuses a second punch in the same office-local minute', function (): void {
+    // EffectivePunches truncates to the minute, so two punches 40 seconds apart are the same
+    // minute downstream and collide in PunchPairer. That used to surface as a 500 from inside
+    // DB::afterCommit, AFTER the punch was durable — leaving the day with no summary row at
+    // all, invisible to CloseCutoff's incomplete-day gate. Refusing at ingestion is the only
+    // point that can still hand the caller an error.
+    $office = Office::factory()->create(['ip_allowlist' => null, 'timezone' => 'Asia/Manila']);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+
+    $punch = fn (string $at, PunchDirection $direction) => app(RecordPunch::class)->execute(new RecordPunchInput(
+        employeeId: $employee->id,
+        direction: $direction,
+        source: PunchSource::Manual,
+        punchedAt: Carbon::parse($at),
+        recordedBy: User::factory()->create()->id,
+        ipAddress: null, deviceId: null, geoLat: null, geoLng: null,
+    ));
+
+    $punch('2026-03-02 00:00:10', PunchDirection::In);
+
+    expect(fn () => $punch('2026-03-02 00:00:50', PunchDirection::Out))
+        ->toThrow(DuplicatePunchMinute::class);
+
+    // Append-only holds: the refused write simply never happened, nothing was edited.
+    expect(AttendanceLog::count())->toBe(1);
+});
+
+it('accepts the very next minute', function (): void {
+    // The guard is one minute wide, not a cooldown — an employee punching out at 08:01 after
+    // punching in at 08:00 is a (very short) shift, not a double-tap.
+    $office = Office::factory()->create(['ip_allowlist' => null, 'timezone' => 'Asia/Manila']);
+    $employee = Employee::factory()->create(['current_office_id' => $office->id]);
+
+    $punch = fn (string $at, PunchDirection $direction) => app(RecordPunch::class)->execute(new RecordPunchInput(
+        employeeId: $employee->id,
+        direction: $direction,
+        source: PunchSource::Manual,
+        punchedAt: Carbon::parse($at),
+        recordedBy: User::factory()->create()->id,
+        ipAddress: null, deviceId: null, geoLat: null, geoLng: null,
+    ));
+
+    $punch('2026-03-02 00:00:59', PunchDirection::In);
+    $punch('2026-03-02 00:01:00', PunchDirection::Out);
+
+    expect(AttendanceLog::count())->toBe(2);
+});
+
+it('does not refuse a punch in the same minute belonging to a different employee', function (): void {
+    $office = Office::factory()->create(['ip_allowlist' => null, 'timezone' => 'Asia/Manila']);
+    $first = Employee::factory()->create(['current_office_id' => $office->id]);
+    $second = Employee::factory()->create(['current_office_id' => $office->id]);
+
+    $punch = fn (Employee $employee) => app(RecordPunch::class)->execute(new RecordPunchInput(
+        employeeId: $employee->id,
+        direction: PunchDirection::In,
+        source: PunchSource::Manual,
+        punchedAt: Carbon::parse('2026-03-02 00:00:10'),
+        recordedBy: User::factory()->create()->id,
+        ipAddress: null, deviceId: null, geoLat: null, geoLng: null,
+    ));
+
+    $punch($first);
+    $punch($second);
+
+    expect(AttendanceLog::count())->toBe(2);
 });
