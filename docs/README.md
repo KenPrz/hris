@@ -10,7 +10,7 @@ Design-first. Read in order; each assumes the one before it.
 | [03-api.md](03-api.md) | REST surface, auth flows, the `/me` session envelope, error codes. |
 | [04-backend-conventions.md](04-backend-conventions.md) | Action-class architecture: controller → request → action → resource. Rules, layering, worked example, configuration. |
 | [05-rbac.md](05-rbac.md) | `spatie/laravel-permission` without teams: global roles, the `hr_admin_offices` scope pivot, `EmployeeScope`, policies. |
-| [06-roadmap.md](06-roadmap.md) | Milestones M0–M9 and M10a, the invariants they're measured against, and the deferred table. |
+| [06-roadmap.md](06-roadmap.md) | Milestones M0–M9, M10a, and M10b-a, the invariants they're measured against, and the deferred table. |
 
 Written as each milestone reaches it. `02`, `03`, and `05` arrived with M2; M3 extended
 `02` (the `attendance_logs` ledger and `idempotency_keys`), `03` (the punch and read
@@ -31,6 +31,7 @@ browser, the clock-in/out screen, the month ledger). All seven docs exist today.
 | [superpowers/specs/2026-07-24-attendance-adjustments-design.md](superpowers/specs/2026-07-24-attendance-adjustments-design.md) | M3.6: the shared `requests` spine, the annulment model, and the effective ledger. |
 | [superpowers/specs/2026-07-29-m9-containerization-production-design.md](superpowers/specs/2026-07-29-m9-containerization-production-design.md) | M9: the production stack, the single TLS edge, backups, and the first login on an empty database. |
 | [superpowers/specs/2026-07-30-m10a-employee-profiling-design.md](superpowers/specs/2026-07-30-m10a-employee-profiling-design.md) | M10a: the personnel file — profile-as-side-table, IDs as catalog rows against a category table, and why designation/labor type/region live off the profile. |
+| [superpowers/specs/2026-08-01-m10b-document-management-design.md](superpowers/specs/2026-08-01-m10b-document-management-design.md) | M10b (split into M10b-a/M10b-b): the document catalog, why there's no `Relation::morphMap()` — the codebase's first application-owned polymorphic relation — and the M10b-a/M10b-b scope split. |
 
 `docs/superpowers/specs/` holds one of these per milestone from M3 onward; the table above
 names only the ones that define structure the whole system inherits.
@@ -60,28 +61,33 @@ Two things deliberately differ, both argued in the foundation spec:
 
 ## Next step
 
-**M0 through M9 are complete, and M10a — employee profiling — has shipped on top of the
-finished roadmap.** The system does the whole path it set out to own: a punch lands in an
-append-only, forensically intact `attendance_logs` row; an employee corrects their own
-attendance through a request a manager or HR approves, the correction superseding the
-ledger via an append-only annulment rather than ever editing a punch; holidays, shift
-templates, and `pay_rules` are admin-editable per office; the compute engine resolves a
-schedule, overlays the holiday calendar, applies the DOLE premium matrix behind
-`is_art82_exempt`, and writes a daily summary; leave and overtime run through the shared
-approval spine; a cutoff locks a period and exports payroll; the admin portal configures a
-company from an empty database and the activity log shows every step; M9 puts all of it
-behind a single TLS edge, with a first-login command for an empty database and a backup
-whose restore has actually been drilled; and M10a adds the personnel file — contact and
-personal details, dependents, and government/financial IDs with a scanned copy of each —
-that an HR Admin configures per office, an employee reads for themselves, and a manager
-sees a redacted view of, at its own HR/manager-reachable route (`/employees/{id}/profile`)
-separate from the system-admin-only employee roster. **865 backend tests (20 of them Arch)
-+ 577 frontend tests**, plus a `scripts/e2e-*.sh` per milestone that walks its flow against
-a live stack.
+**M0 through M9 are complete, M10a — employee profiling — has shipped on top of the
+finished roadmap, and M10b-a — the document catalog — on top of that.** The system does
+the whole path it set out to own: a punch lands in an append-only, forensically intact
+`attendance_logs` row; an employee corrects their own attendance through a request a
+manager or HR approves, the correction superseding the ledger via an append-only annulment
+rather than ever editing a punch; holidays, shift templates, and `pay_rules` are
+admin-editable per office; the compute engine resolves a schedule, overlays the holiday
+calendar, applies the DOLE premium matrix behind `is_art82_exempt`, and writes a daily
+summary; leave and overtime run through the shared approval spine; a cutoff locks a period
+and exports payroll; the admin portal configures a company from an empty database and the
+activity log shows every step; M9 puts all of it behind a single TLS edge, with a
+first-login command for an empty database and a backup whose restore has actually been
+drilled; M10a adds the personnel file — contact and personal details, dependents, and
+government/financial IDs with a scanned copy of each — that an HR Admin configures per
+office, an employee reads for themselves, and a manager sees a redacted view of, at its own
+HR/manager-reachable route (`/employees/{id}/profile`) separate from the
+system-admin-only employee roster; and M10b-a adds the document catalog beneath it — the
+document kinds and categories an HR Admin configures, admin-editable and company-wide, that
+M10b-b will let HR and employees actually file documents against. **911 backend tests (21
+of them Arch) + 600 frontend tests (599 passing — one pre-existing, date-dependent red
+unrelated to any shipped feature; see `06-roadmap.md`'s M10b-a section)**, plus a
+`scripts/e2e-*.sh` per milestone that walks its flow against a live stack.
 
-No milestone is open. **M10b — a document management module (a `Document`/`DocumentBucket`/
-`DocumentCategory` catalog and a polymorphic file table) — was deliberately split out of
-M10a's design and is not built**; it is the nearest open follow-on. Beyond that,
+No milestone is open. **M10b-b — the document files** (upload/list/download/delete for
+both employees and offices, the two Documents sections on the profile and office admin
+screens, and the compliance view) is the nearest open follow-on, split from the same design
+that produced M10b-a and deliberately not built alongside it. Beyond that,
 [06-roadmap.md](06-roadmap.md)'s **Deferred** table is the list of what comes next and what
 would revive each item — gross-to-net payroll, biometric device ingestion, a mobile app
 with GPS geofence, rotating rosters, tenure-based leave accrual, recursive manager scope,
@@ -89,5 +95,5 @@ and multi-tenancy (the one flagged expensive-to-change: revisit early or not at 
 
 The one honest gap outside that table: **there is no browser-level e2e harness.** Every
 `e2e-*.sh` drives the API or the booted stack, never a rendered page, and M3.5's screens —
-and M10a's `/me/profile` and `/employees/{id}/profile` — have never been visually
-confirmed in a real browser.
+M10a's `/me/profile`/`/employees/{id}/profile`, and M10b-a's `/admin/documents` — have
+never been visually confirmed in a real browser.

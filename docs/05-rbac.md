@@ -49,6 +49,8 @@ them all:
 | `schedule.manage` | Manage schedules (M4) |
 | `holiday.manage` | Manage the holiday calendar (M4) |
 | `cutoff.manage` | Open and close cutoff periods (M7a) |
+| `document.manage` | Manage the document catalog (M10b-a); office-scoped file access (M10b-b) |
+| `document.manage.self` | File and read your OWN documents (M10b-b) — never delete |
 
 Five of these seven gate features that do not exist yet. They are seeded now anyway because
 the role catalog is the "fully configurable" surface the brief asked for, and naming a
@@ -573,6 +575,75 @@ notice shows before anyone submits anything — and when true, renders the read-
 An HR Admin can still read their own file in full (`viewFullProfile`'s self branch, above);
 they simply never see a form that was always going to 403.
 
+## The document catalog — one ability, unscoped *(M10b-a)*
+
+`document.manage` (permission table, above) is the second of the original seven-plus
+catalog to move from "seeded, unread" to a real, enforced gate — after `employee.pii.edit`
+(M10a). `leave.manage` and `leave.approve` remain catalogued-but-unread even today (see
+their own entries above: neither is ever passed to `can()` or `authorize()` anywhere in
+`app/`), so they don't count toward this total — a grep of `app/` for `can('` turns up only
+three permission strings, ever: `employee.manage` (referenced but, per above, never actually
+called), `employee.pii.edit`, and `document.manage`.
+
+**`document.manage.self` is catalogued in M10b-a but still reads nowhere.** It joins the
+seeded-but-unread set rather than leaving it, and becomes a real gate only when M10b-b
+wires the file routes. Do not build on it as though it already enforces something — see
+"grants nothing on the catalog" below, which is the shipped behaviour today.
+
+`App\Policies\DocumentPolicy::manageCatalog` reads only `document.manage`:
+
+```php
+public function manageCatalog(User $user): bool
+{
+    return $user->can('document.manage');
+}
+```
+
+**The check is deliberately unscoped — no `OfficeScope`, no `hr_admin_offices` pivot,
+nothing else composed in.** `documents` and `document_categories` have no `office_id`
+column; they are company-wide reference data the way `pay_rules` and the organization tree
+are, so holding `document.manage` **is** the whole check, the same shape M4c and M8a
+already established for a resource with no office to scope by. Every catalog `FormRequest`
+under `app/Http/Requests/Documents/` authorizes identically:
+`$this->user()?->can('manageCatalog', Document::class) === true`, and none overrides
+`failedAuthorization()` — the plain `403 forbidden` is correct, per the 404-not-403
+argument above (there is no owner id in a `/admin/document-categories`/`/admin/documents`
+URL for the enumeration guard to protect). `Gate::before` still grants a System Admin
+everything without needing the permission at all.
+
+**`document.manage.self` grants nothing on the catalog** — `DocumentCatalogScopeMatrixTest`
+proves this at the route level across all eight admin routes: an actor holding only
+`document.manage.self` is denied identically to a stranger holding neither. That is by
+design, not an oversight: `document.manage` and `document.manage.self` gate two entirely
+different resources. **`document.manage` is office-scoped at the FILE level** (M10b-b) —
+through the same `hr_admin_offices` pivot `OfficeScope` already reads for holidays,
+schedules, and cutoffs — while remaining unscoped for the company-wide catalog above; a
+Cebu HR Admin cannot upload against a Manila employee's record, but any HR Admin may add a
+new document kind to the shared catalog. **`document.manage.self` permits an employee to
+upload and read their own filed documents, but never delete one** — filing your own NBI
+clearance is ordinary self-service, the same way M10a treats attendance corrections and
+leave requests as self-service, but removing a filed document stays HR's act, keeping the
+personnel file append-ish in the same spirit as punches and corrections
+(`02-data-model.md`). Both verbs, and the office-scoped/self split they gate, apply to
+M10b-b's file routes — M10b-a ships only the catalog and its unscoped check. **Managers get
+no document access at all**, consistent with M10a's redacted profile view carrying no
+identifications and no dependents.
+
+**Both permission names are dotted, reinforcing the reserved-words rule `RbacSeeder`
+already carries** (above, and the M10a follow-ups): spatie's own `Gate::before` grants any
+ability whose **name** matches a permission the user holds, regardless of which policy
+method that ability maps to. `DocumentPolicy`'s ability is named `manageCatalog` — had the
+permission been seeded as the bare string `manageCatalog` instead of `document.manage`, any
+role holding it would have been granted *every* policy ability named `manageCatalog`
+anywhere in the codebase, present or future, bypassing whatever scope check that ability's
+real implementation performs. `document.manage`/`document.manage.self` cannot collide with
+a bare-word ability name because no policy ability is ever named with a literal `.` in it —
+the same reason `employee.pii.edit`, `leave.manage`, and every other seeded permission is
+dotted. `RbacSeeder`'s reserved-words comment names `viewFullProfile`/`viewRedactedProfile`/
+`updateProfile` explicitly because those are `EmployeePolicy`'s bare ability names; a future
+reader extending that comment for `DocumentPolicy` would add `manageCatalog` to the same
+list.
+
 ## Testing
 
 The milestone's proof is the **four-actor scope matrix**, as feature tests
@@ -598,3 +669,15 @@ own feature tests (`tests/Feature/Office/HolidayReadWriteTest.php`,
 `CloneHolidaysTest.php`) then assert the byte-identical-404 proof end to end — an out-of-scope
 office/holiday and a fabricated one produce `assertExactJson`-equal bodies, not just matching
 status codes.
+
+**The document catalog gets a four-actor matrix too**
+(`tests/Feature/Documents/DocumentCatalogScopeMatrixTest.php`), across all nine M10b-a
+routes: an **HR Admin** (holding `document.manage`) and a **System Admin** (via
+`Gate::before`) pass every route; an actor holding **only `document.manage.self`** and a
+plain **stranger** are denied every `/admin/*` route identically, both getting `403`
+specifically, not merely "not 2xx" — the same discipline `ProfileScopeMatrixTest` pins for
+`404`, applied here to the plain-`403` shape this catalog uses instead. `GET
+/documents/catalog` is included for all four actors (unlike `ProfileScopeMatrixTest`, which
+excludes `GET /profile/catalog` as noise) specifically to document that it is ungated by
+design, not by omission. `tests/Feature/Documents/DocumentPolicyTest.php` exercises
+`DocumentPolicy::manageCatalog` directly.

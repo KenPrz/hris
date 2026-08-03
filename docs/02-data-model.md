@@ -1921,6 +1921,191 @@ catalog (`05-rbac.md`) — seeded by `ProfileCatalogSeeder`, called from
 dev-only and pulls in the Manila/Cebu demo company). Idempotent throughout
 (`updateOrCreate` on `code`), so re-running a bootstrap-adjacent seed is safe.
 
+## Document management (M10b-a)
+
+M10a's personnel file can hold a government ID, but not a signed contract, an NBI
+clearance, a medical certificate, or a company policy — the paper an HR department
+actually files. M10b-a builds the catalog those documents are filed against: what kinds
+of document exist, which owner type each applies to, whether it's required, and how long
+it stays valid. It ships **empty** — three tables, a seeded starter catalog, and admin
+CRUD. **No endpoint writes `document_files` yet**; uploading, downloading, and deleting a
+file, plus the two compliance reads (`expiring`, `missing`), are M10b-b.
+
+```sql
+create table document_categories (
+  id          uuid primary key default uuidv7(),
+  code        text not null unique,
+  name        text not null,
+  description text,
+  created_at  timestamptz,
+  updated_at  timestamptz
+);
+
+create table documents (
+  id              uuid primary key default uuidv7(),
+  code            text not null unique,
+  name            text not null,
+  description     text,
+  category_id     uuid not null references document_categories(id),   -- RESTRICT, not cascade
+  applies_to      text,          -- 'employee' | 'office' | null (both) — App\Domain\Documents\Documentable
+  is_required     boolean not null default false,
+  validity_months integer,       -- null = never expires
+  created_at      timestamptz,
+  updated_at      timestamptz
+);
+create index documents_category_id on documents (category_id);
+
+create table document_files (
+  id                uuid primary key default uuidv7(),
+  document_id       uuid not null references documents(id),   -- RESTRICT, not cascade
+  documentable_type text not null,   -- the FULL CLASS NAME, e.g. App\Models\Employee — see below
+  documentable_id   uuid not null,
+  uploaded_by       uuid references users(id) on delete set null,
+  sha256            text not null,
+  issued_on         date,
+  expires_on        date,
+  created_at        timestamptz,
+  updated_at        timestamptz
+);
+create index document_files_documentable on document_files (documentable_type, documentable_id);
+create index document_files_document_id  on document_files (document_id);
+create index document_files_expires_on   on document_files (expires_on) where expires_on is not null;
+```
+
+Both `document_id` and `category_id` are `RESTRICT`, not `on delete cascade` (Laravel's
+`constrained()` default, emitted by Postgres as `NO ACTION` — behaviourally identical to
+`RESTRICT` for a single-statement `DELETE`, the same wrinkle M10a's `applies_to` FK
+carries). **Deleting a `documents` or `document_categories` row that still has dependents
+is refused, never cascaded** — `DeleteDocument`/`DeleteDocumentCategory` count the
+dependents first and throw `App\Exceptions\Domain\DocumentCatalogInUse` (`409
+document_catalog_in_use`, with the count in `details`) before the delete ever runs, so the
+common case is a clean domain refusal; the `RESTRICT` FK is the race-safe backstop for a
+concurrent write that slips past the count between the check and the delete. Losing a
+signed contract because someone tidied the catalog, or a document kind because someone
+deleted its category, is not an acceptable failure mode either way.
+
+**Spatie's `media` stays the file layer; `document_files` carries only what it doesn't.**
+`DocumentFile implements HasMedia` with a single-file `file` collection on the
+`attachments` disk (RustFS), accepting `pdf`/`jpg`/`jpeg`/`png` — the same mime allowlist
+`EmployeeIdentification`'s `scan` and `Request`'s `attachment` already use, set via
+`acceptsMimeTypes()` on the collection (`DocumentFile::registerMediaCollections()`). There
+is **no size ceiling yet**: `EmployeeIdentification`/`Request` get their 10 MB limit from
+`max:10240` on their upload `FormRequest`s, and M10b-a ships no `FormRequest` for
+`document_files` — the file routes, and the same 10 MB ceiling, arrive with M10b-b. There is
+**no path, no disk, no object key, and no `media` id** on
+`document_files`; the link is spatie's own `media.model_id → document_files.id`, in the
+direction medialibrary already maintains. Writing a second storage layer would reimplement
+four things that already work in production: RustFS storage, mime/size validation, the
+app-mediated stream, and delete-time cleanup. `singleFile()` is per **row**, not per
+document kind — re-uploading against the same `document_files` row is a *correction* and
+replaces the file; a *renewal* (this year's NBI clearance replacing last year's) is a new
+row, per the no-unique-constraint point below.
+
+**`DocumentBucket` and a separate `type_id` were both dropped — one grouping concept, not
+three.** An earlier sketch carried `DocumentCategory` ("the grouping of documents") *and*
+`DocumentBucket` ("mass bucketing") *and* a `type_id` on `Document` pointing at whatever
+grouping table existed. "Bucket" had three plausible readings — a retention class, an
+upload-batch id, or a second taxonomy level — and none was needed to ship, so it's dropped
+(if retention policy or bulk-upload tracking is ever required, each is a well-defined
+addition to a schema with room for it, not a speculative table nobody could define today).
+`type_id` and `DocumentCategory` were the same mistake from the other direction: no
+`DocumentType` table was ever defined, so `type_id` dangled at the one grouping table that
+did exist, and a real `DocumentType` would have carried columns identical to
+`DocumentCategory`'s — the signature of one concept drafted twice. The column shipped as
+`category_id`, matching `EmployeeIdentification.category_id`'s naming from M10a. What
+would have justified a second table is *behaviour* — expiry, required-ness, which owner
+type applies — and that behaviour exists, but as columns on `documents`
+(`applies_to`/`is_required`/`validity_months`), not a second taxonomy: a category is a
+shelf, a document is what's on it, and there is nothing a `DocumentType` would name that
+`documents` itself doesn't already.
+
+**`expires_on` is stored on `document_files`, not derived at read time from
+`documents.validity_months`.** When a client omits it and the kind has a
+`validity_months`, the write computes `issued_on + validity_months` **once**, and it never
+moves again. This is the same discipline that makes `employment_records` effective-dated:
+a later configuration change must not rewrite what was true. If HR changes NBI Clearance
+from 6 months to 12, already-filed clearances must not silently gain six months of
+validity — the certificate in the drawer says what it says, and a stored value also lets
+HR override the arithmetic when the document's own printed expiry disagrees with it, which
+happens often enough to matter. `validity_months IS NULL` means the kind never expires (a
+signed contract, a company policy); `expires_on IS NULL` on a file of an expiring kind
+means nobody supplied an issue date, and reads as *unknown*, never as *valid* — a
+distinction M10b-b's compliance reads depend on.
+
+**There is deliberately no unique constraint on `(document_id, documentable_type,
+documentable_id)`, and the absence is the design, not an oversight.** An employee (or an
+office) can hold several files of the same kind over time — last year's contract and this
+year's, an expired NBI clearance and its replacement — and both survive, ordered by upload
+date. Contrast M10a's `unique(employee_id, category_id)` on `employee_identifications`,
+which exists because one employee has exactly one TIN: a document kind is not a slot the
+way an identification category is. No version chain, no `is_current` flag — both are
+machinery for a problem an ordered list plus `expires_on` already solves.
+
+**`sha256` is integrity, not deduplication — a plain column with no unique index.** It's
+recorded at upload from the real bytes so a file can later be proven unaltered, the thing
+an inspector actually asks for. Deduplicating on it was rejected: the same PDF legitimately
+attaches to two employees (a shared company policy, a counter-signed contract), and sharing
+one stored object across rows would make deletion ambiguous about whose delete removes the
+file.
+
+**`document_files.documentable_type` stores the full class name
+(`App\Models\Employee`/`App\Models\Office`), matching `media.model_type` and
+`activity_log.subject_type` — there is NO `Relation::morphMap()` for this relation, and
+that reverses the original design.** The spec's decision 6 originally registered one so
+the column would hold `'employee'` instead of the FQCN. That was wrong, and worth recording
+with the mistake intact rather than quietly rewritten: `Relation::morphMap()` is
+**process-global** — it does not scope to one table, it changes `getMorphClass()` for
+every morph in the application. The original analysis checked spatie's `media` table,
+found neither `Employee` nor `Office` registered there, and concluded the map was safe. It
+never checked the *second* morphing package: **spatie/activitylog**. `Employee` and
+`Office` both use `LogsActivity` (M8a/M8b); `activity_log.subject_type` holds full class
+names today, and that column is **exposed on the API** (`ActivityResource`) and
+**filterable** (`ListActivityController`, `03-api.md`'s audit viewer). Registering the map
+would have made every *new* Office or Employee audit row write `'office'`/`'employee'`
+while every historical row kept the FQCN — the M8c audit viewer's `subject_type` filter
+silently missing half the data in both directions, for a module that has nothing to do
+with the audit trail. It broke five existing tests (`OfficeCrudTest` ×2, `CloneHolidaysTest`,
+`OfficeDefaultTemplateTest`, `ActivityViewerTest`), which is how it was caught during
+implementation, before it ever reached a review. Backfilling `activity_log` to match was
+rejected out of hand: this system's audit trail is evidence, and rewriting historical rows
+to suit a new module's storage preference is precisely what the append-only discipline
+exists to prevent.
+
+So `config/documents.php` is a **whitelist**, not a morph map — `['employee' =>
+Employee::class, 'office' => Office::class]`, used for validation, routing, and
+translating a stored FQCN back to its wire alias when a `DocumentFile` is serialized
+(M10b-b's `DocumentFileResource`). The wire contract is unaffected: a client only ever
+sees `"documentable_type": "employee"`, never the class name — only the database stores that. What is
+genuinely lost is database-level rename safety — moving `App\Models\Employee` to another
+namespace would orphan rows — a cost already accepted twice in this schema (`media`,
+`activity_log`) and mitigated the same way, a data migration at rename time rather than a
+global setting reaching into an unrelated module's storage. This is the codebase's
+**first application-owned polymorphic relation**; the only two `uuidMorphs` before it were
+vendor-published (Sanctum's `personal_access_tokens`, spatie's `media`).
+`app/Domain/Documents/Documentable.php`'s backed enum (`Employee = 'employee'`, `Office =
+'office'`) is the one place the alias spelling lives in code, matching `config/documents.php`'s
+keys — it does **not** describe what `document_files.documentable_type` stores; that
+column holds the FQCN, and the alias is a wire-layer concern only.
+
+`DocumentCatalogSeeder` seeds a Philippine starter set — NBI Clearance, Medical
+Certificate, Employment Contract, 201 File, Company Policy, Business Permit — grouped into
+four categories (Pre-employment, Statutory, Personnel, Company), called from
+`hris:bootstrap-admin` alongside `RbacSeeder`/`ProfileCatalogSeeder`
+(`05-rbac.md`, `06-roadmap.md`). **Idempotent by insert-if-absent (`firstOrCreate` on
+`code`), deliberately not by overwrite.** The original plan copied `ProfileCatalogSeeder`'s
+`updateOrCreate`, which is correct there because TIN/SSS/PhilHealth are fixed by Philippine
+law and no UI ever edits them — overwriting is a safe no-op. It is wrong here: this catalog
+is **admin-editable** (Tasks 6/7 ship the CRUD this section documents), and
+`hris:bootstrap-admin`'s own docblock instructs ops to re-run it whenever a later milestone
+adds catalog data. `updateOrCreate` would have force-written `name`/`description`/
+`applies_to`/`is_required`/`validity_months` on *every* run — so an HR Admin who changed
+NBI Clearance's validity from 6 months to 12 through the API would see that edit silently
+reset the next time ops re-ran the bootstrap command, exactly as instructed to. With
+`firstOrCreate`, a row that already exists (by `code`) is left completely alone. The trade
+this accepts: a later milestone cannot change a seeded *default* through the seeder alone —
+correct for an admin-editable catalog, where admin edits outrank seed defaults and a real
+default change should ship as an explicit migration that says so, not a seeder overwrite.
+
 ## What the schema refuses to allow
 
 Stated plainly, since these are the reasons for the constraints above:

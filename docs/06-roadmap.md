@@ -2107,6 +2107,212 @@ closes the M8b `EmployeeDetailResource` instance of the same bug as a side effec
 Next: no milestone is open. **M10b — document management** is the nearest unclaimed work
 (above); beyond that, the **Deferred** table below is unchanged by this milestone.
 
+## M10b-a — Document catalog *(complete)*
+
+M10a gave every employee a personnel file but nowhere to file a *document* — a signed
+contract, an NBI clearance, a medical certificate, a company policy. M10b was split into
+two milestones at the brainstorm (`docs/superpowers/specs/2026-08-01-m10b-document-management-design.md`,
+amended twice during implementation — read it alongside this section, not instead of it;
+task-by-task ledger: `.superpowers/sdd/2026-08-01-m10b-a-document-catalog/progress.md`).
+**M10b-a builds the catalog and ships it empty; M10b-b (not started) builds the files.**
+
+- **Three tables, no new columns anywhere else.** `document_categories` (shelves),
+  `documents` (kinds — `applies_to`/`is_required`/`validity_months` behaviour lives here,
+  not a second taxonomy table), `document_files` (empty after this milestone — no route
+  writes it). Full DDL and reasoning, including the dropped `DocumentBucket`, the
+  `expires_on`-is-stored-not-derived rule, and why there's no unique constraint on
+  `(document_id, documentable_type, documentable_id)`: `02-data-model.md`'s "Document
+  management" section.
+- **Nine routes, six `Action` classes.** The ungated dropdown read (`GET
+  /documents/catalog`) plus full CRUD on categories and kinds behind `document.manage`
+  (`GET`/`POST`/`PATCH`/`DELETE /admin/document-categories`, same four verbs on
+  `/admin/documents`) — three routes per resource are `create`/`update`/`delete` Actions,
+  the three `GET`s (the catalog read and the two admin list routes) are controller-only
+  reads with no Action, the same "a read with no domain behaviour" shape M10a's catalog and
+  scan-stream controllers already use. Full request/response shapes: `03-api.md`'s "Admin —
+  the document catalog" section.
+- **Two permissions, one policy ability.** `document.manage` (catalog CRUD today,
+  office-scoped file access in M10b-b) and `document.manage.self` (M10b-b: upload/read your
+  own, never delete) on `App\Policies\DocumentPolicy::manageCatalog` — deliberately
+  unscoped, since the catalog has no office to scope by. Full argument: `05-rbac.md`'s "The
+  document catalog" section.
+- **`DocumentCatalogSeeder`** ships a six-kind Philippine starter set (NBI Clearance,
+  Medical Certificate, Employment Contract, 201 File, Company Policy, Business Permit)
+  across four categories, called from `hris:bootstrap-admin` above the System-Admin guard —
+  same placement as `RbacSeeder`/`ProfileCatalogSeeder` — **and idempotent by
+  insert-if-absent, not overwrite**, so an admin's catalog edit survives a re-run of the
+  kind the bootstrap command's own docblock instructs ops to make. See below and
+  `02-data-model.md` for why this is the opposite idempotency shape from
+  `ProfileCatalogSeeder`.
+- **Frontend.** `/admin/documents` — two sections, Categories and Document kinds, each with
+  an inline create/edit form (see the open question below) and a delete control that
+  surfaces `document_catalog_in_use`'s dependent count verbatim. `useDocumentCatalog()`
+  (`GET /documents/catalog`) backs both lists; `useSaveDocumentCatalog()` bundles the six
+  mutations and invalidates all three document query keys on every success. No changes to
+  `/employees/{id}/profile` or the office admin screen — a Documents section on each is
+  M10b-b.
+
+**Done when:** `/admin/documents` renders, creates a kind with `applies_to: null` (both
+owner types), and surfaces the `409` with its dependents count when a delete is refused; a
+fresh database bootstrapped with `hris:bootstrap-admin` has the document catalog, **and so
+does one that already had a System Admin**; `document_files` exists and is empty — nothing
+writes it yet.
+
+**Status: complete. 911 backend tests (21 of them Arch, 3303 assertions) + 600 frontend
+tests (599 passed, 1 pre-existing red — see below), up from 865/577.** `lint`, `typecheck`,
+and `build` are green, native and inside the `make test` containers alike. (The final-fixes
+round below took it from 911/3302/590 to 911/3303/600 — no new backend test, ten new
+frontend tests, plus one new backend assertion on an existing test.)
+
+**Two rulings reversed the original design, both made mid-implementation with the
+developer asleep and the wheel deliberately delegated — recorded here with the mistake
+intact, not quietly corrected:**
+
+1. **There is no `Relation::morphMap()`.** The spec originally registered one so
+   `document_files.documentable_type` would store `'employee'` rather than
+   `App\Models\Employee`. That was wrong: the map is process-global and also governs
+   spatie/activitylog's `subject_type`, not just medialibrary's `model_type` — `Employee`
+   and `Office` both use `LogsActivity`, and the map would have written the alias onto every
+   *new* audit row while history kept the FQCN, silently breaking the M8c audit viewer's
+   `subject_type` filter in both directions. It broke five existing tests, which is how it
+   was caught before it ever reached a review. `document_files.documentable_type` stores
+   the full class name instead, matching `media.model_type` and `activity_log.subject_type`
+   — all three polymorphic tables in the schema now behave the same way, and
+   `config/documents.php` is a whitelist, not a morph map. Full argument, including what's
+   genuinely lost (rename safety) and why backfilling `activity_log` was rejected:
+   `02-data-model.md`. **Added to `CLAUDE.md`'s gotcha list verbatim**, since the mistake is
+   the kind of thing a future package integration will make again if nobody's read this.
+2. **`DocumentCatalogSeeder` is idempotent by `firstOrCreate` (insert-if-absent), not
+   `updateOrCreate` (overwrite).** The original plan copied `ProfileCatalogSeeder`'s
+   `updateOrCreate`, correct there because TIN/SSS/PhilHealth are fixed by Philippine law
+   and no UI ever edits them. It's wrong for this catalog, which **is** admin-editable —
+   `updateOrCreate` would have silently reset an HR Admin's catalog edit (NBI Clearance
+   changed from 6 to 12 months, say) every time ops re-ran `hris:bootstrap-admin`, which its
+   own docblock instructs them to do whenever a milestone adds catalog data. The trade
+   accepted: a later milestone cannot change a seeded *default* through the seeder — correct
+   for admin-editable data, where a real default change should ship as an explicit
+   migration, not a seeder overwrite. Full argument: `02-data-model.md`.
+
+**Other things worth knowing about the build:**
+
+- **A stale docblock the morph-map ruling created was left for this section to close.**
+  `app/Domain/Documents/Documentable.php` said its backed values "ARE the morph aliases
+  stored in `document_files.documentable_type`" — true under the original design, false
+  after ruling 1 reversed it. Corrected as part of this documentation pass; the column
+  stores the FQCN, and the alias is a wire-layer concern only.
+- **An arch guard that only checked for an import, not an authorization check, would have
+  passed a FormRequest that gates nothing.** `tests/Arch/ConventionsTest.php`'s new
+  "every Admin\Documents controller is guarded by a FormRequest whose authorize() gates"
+  rule started as an import-presence check — it caught "forgot a FormRequest entirely" but
+  not "imported one whose `authorize()` returns `true` unconditionally," which a reviewer
+  proved by constructing exactly that FormRequest and watching the rule pass it anyway.
+  Fixed to a two-hop check: the imported class must be the `__invoke` type-hint, and that
+  class's `authorize()` must contain `->can(`/`Gate::`/`manageCatalog`. Arch count: 20 → 21.
+- **The `document.manage.self` permission is seeded and cataloged in this milestone but
+  gates nothing yet** — the same "named ahead of the feature that reads it" pattern
+  `leave.manage`/`leave.approve`/`holiday.manage`/`cutoff.manage` all went through before
+  their features shipped (`05-rbac.md`). `DocumentCatalogScopeMatrixTest` proves it grants
+  nothing on the catalog specifically, so the gap is documented, not silent. It becomes a
+  real gate the moment M10b-b wires the file routes.
+
+**Final-fixes round (before merge) — seven findings from the whole-branch review, all
+fixed:**
+
+1. **`/admin/documents` was the only admin screen with no authorization affordance** — it
+   read no session field at all, so any authenticated employee could open it and see live
+   "New category"/"Edit"/"Delete" buttons that all 403'd with a network-fault-shaped message
+   ("That didn't save. Check your connection and try again."), the exact bug class the
+   immediately preceding M10a follow-ups branch fixed on `/employees/{employee}/profile`.
+   This closed the second open question below at the same time: `SideNav.tsx` gated the
+   whole `admin` group on `is_system_admin`, but catalog CRUD gates on `document.manage`,
+   which `RbacSeeder` grants to `HR Admin` too, so an HR Admin who could manage the catalog
+   had no link to reach it. Fixed both, keyed on one `canManage` value: `NavItem` gained an
+   optional `permission` field (set on the Documents entry only), and `navEntriesFor` now
+   adds the `admin` group with just that one item when the session lacks `is_system_admin`
+   but holds `document.manage`; the page reads `useSession()` and renders the sibling-style
+   `InlineNotification` plus hides the mutating controls when the actor holds neither — the
+   lists still render either way, since `GET /documents/catalog` is intentionally ungated.
+2. **The Arch guard for `Admin/Documents` FormRequests was comment-blind.** Its
+   `str_contains($authorizeBody, 'manageCatalog')` check ran over the raw brace body
+   *including comments* — a `// TODO(M10b-b): manageCatalog moves to the controller.` above
+   a bare `return true;` passed silently. Fixed by stripping `//` and `/* */` comments
+   before the check; a reintroduction of that exact mutation was verified to turn the guard
+   red.
+3. **`05-rbac.md` overstated the gate count.** It called `document.manage` "the fourth… to
+   move from 'seeded, unread' to a real, enforced gate — after `leave.manage`,
+   `leave.approve`, and `employee.pii.edit`" — contradicting the same file's own earlier
+   sections, which say neither `leave.manage` nor `leave.approve` is ever passed to `can()`
+   anywhere in `app/`. A grep confirms only `employee.manage` (referenced but never called),
+   `employee.pii.edit`, and `document.manage` appear in a `can()` call at all — corrected to
+   "the second… after `employee.pii.edit`."
+4. **`02-data-model.md` documented a size ceiling that doesn't exist.** It described the
+   `file` media collection as "accepting pdf/jpg/jpeg/png up to 10 MB," but
+   `DocumentFile::registerMediaCollections()` sets only `acceptsMimeTypes` — `max:10240`
+   lives in FormRequests that don't exist until M10b-b. Reworded so the mime allowlist reads
+   as shipped and the size ceiling as M10b-b's, matching how the section separates the two
+   everywhere else.
+5. **A docblock's stated rationale was false.** `ListDocumentCategoriesRequest` (and its
+   `ListDocumentsRequest` twin) said the gate exists so the list "isn't quietly open to more
+   actors than the mutations" — it already is, via the deliberately ungated
+   `GET /documents/catalog`, same rows, same order. Reworded: the gate is for uniformity
+   across the four-route CRUD set, not because the data is otherwise sensitive.
+6. **Two cheap test gaps.** `ShowDocumentCatalogTest` asserted category ordering but used
+   `firstWhere` for documents, so dropping `ShowCatalogController`'s second `orderBy('code')`
+   failed nothing — added the matching `pluck('code')->all()` exact-order assertion, verified
+   red when the `orderBy` is dropped. No test asserted `useSaveDocumentCatalog`'s three
+   `invalidateQueries` calls, and `useDocumentCatalog`'s 1-hour `staleTime` means a dropped
+   one would silently ship an hour of stale dropdowns in M10b-b — added
+   `useSaveDocumentCatalog.test.tsx`, verified red when one invalidation is dropped.
+7. **Three one-liners:** an unused `App\Models\Office` import in `DocumentPolicyTest`; a
+   `BootstrapAdmin` inline comment that said "findOrCreate/updateOrCreate throughout" and
+   omitted `firstOrCreate` (the class docblock was already correct); one `use` import in
+   `routes/api.php` out of alphabetical order.
+
+**One open question, deliberately left for the developer to decide, not resolved
+unilaterally while they were away** (a second question — HR Admins had no way to discover
+the screen — was resolved above, in the final-fixes round):
+
+1. **`/admin/documents` builds its forms inline, while all four sibling admin CRUD screens
+   (offices, departments, organizations, pay-rules) use a `Dialog`.** It is the sole outlier
+   of five. The implementing brief called for "inline create/edit" while also naming
+   `/admin/offices` as the closest mirror — which itself uses a `Dialog` — so the brief was
+   self-contradictory and the implementer picked the inline reading and disclosed it rather
+   than guessing silently. Unresolved: either this screen should gain a `Dialog` to match
+   its siblings, or the inline shape (arguably fine for forms this short) should be recorded
+   as the new house pattern and the other four left alone.
+
+**One pre-existing frontend failure, unrelated to this branch, recorded so it isn't
+mistaken for M10b-a's.** `src/app/(app)/me/attendance/attendance.test.tsx`'s "renders Clock
+in for today even when other days this month have punches" fails deterministically, not a
+flake. The fixture derives its dates from the real clock: `otherDay` is
+`` `${THIS_MONTH}-02` ``, and on any day the container clock resolves to the 2nd of the
+month in `OFFICE_TIME_ZONE` (Asia/Manila), that fixture punch lands on *today* rather than
+"another day," so the hero renders a clocked-in state and "Clock in" never appears — it
+breaks on the 2nd of every month in office time, not the 1st (an earlier same-day
+correction to this entry's own mechanism). `git diff --name-only` confirms the file is
+untouched by this branch; baseline frontend is 577 passed of 578 the moment the branch
+started, not 578 of 578, for reasons that have nothing to do with document management.
+**Not fixed here** — recorded for whoever next touches `attendance.test.tsx`.
+
+**There is still no browser-level e2e harness — `/admin/documents` carries the identical
+gap M3.5's and M10a's status blocks already record.** The screen is covered by component
+tests (`documents.test.tsx`) and the backend's live-API proof (`DocumentCatalogScopeMatrixTest`
+and friends), but nothing in this milestone confirmed it rendering in an actual browser.
+Load it yourself before trusting the UI.
+
+**What M10b-b still owes**, per the spec's scope split: file upload/list/download/delete
+for both owner types (`POST`/`GET`/`DELETE /employees/{employee}/documents[/{file}]`,
+the mirrored `/offices/{office}/documents` set, and the two download streams); the two
+compliance reads (`GET /admin/documents/expiring`, `GET /admin/documents/missing`, both of
+which must be registered before any future parameterised `GET /admin/documents/{document}`
+— `03-api.md`); a Documents section on `/employees/{id}/profile` and on the office admin
+screen; and a compliance view surfacing expiring-soon and missing-required documents for
+the actor's offices.
+
+Next: **M10b-b — the document files** (above): upload, list, download, delete, the two
+profile/office screens, and the compliance view. No milestone is open beyond that; the
+**Deferred** table below is unchanged by this milestone.
+
 ## Deferred
 
 | Item | Trigger that revives it |

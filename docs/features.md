@@ -665,3 +665,39 @@ report's to reach them.
   themselves and the HR Admin who administers their office can ever open a scan — a manager,
   even one who can see the rest of a redacted profile, never gets a link to a report's IDs
   at all.
+
+## The document catalog *(M10b-a)*
+
+An identification (M10a) is a numbered ID and its scan; it can't hold a signed contract, an
+NBI clearance, or a company-wide policy. M10b-a builds the catalog those get filed against
+— the part of the module an HR Admin configures before anyone can file anything. **The
+module ships empty**: this milestone is the catalog only, no upload screen yet.
+
+- **An HR Admin defines the document kinds the company files.** At `/admin/documents`, two
+  lists: **categories** (a shelf — "Pre-employment," "Statutory," "Company") and **document
+  kinds** on those shelves (a kind — "NBI Clearance," "Employment Contract," "Business
+  Permit"), each with a code, a name, and an optional description. A fresh company starts
+  with a Philippine six-kind seeded set across four categories, ready to file against on
+  day one, and an HR Admin can add, rename, or remove either as the company's own filing
+  needs grow beyond it.
+- **Every document kind says who it applies to, whether it's required, and how long it
+  stays valid.** Each kind is marked **employee**, **office**, or **both** — so the
+  eventual upload screen (M10b-b) never lets someone file a business permit against a
+  person or an NBI clearance against an office. Marking a kind **required** is what will
+  let HR ask "who's missing one" once files exist. Setting how many months it stays valid
+  (or leaving it blank for a document — a signed contract, a company policy — that never
+  expires) is what will let HR ask "what's expiring soon": the expiry date computed from
+  that setting is frozen onto the file the day it's filed, so raising NBI Clearance's
+  validity from 6 months to 12 later never quietly extends a clearance already on record.
+- **A category or kind still in use can't be deleted out from under its documents.** Once
+  files exist against a kind (M10b-b), or documents against a category, HR sees exactly how
+  many are still relying on it and the delete is refused rather than silently orphaning
+  them.
+- **Every HR Admin can edit the shared catalog — it isn't scoped to one office.** Unlike a
+  holiday calendar or a shift template, which are per-office, the document catalog is one
+  shared list every office files against, so any HR Admin (not just the ones administering
+  a particular office) can add or edit a kind.
+
+**What this milestone does *not* do yet, on purpose:** nobody can actually file a document
+against an employee or an office — there's no upload screen, no download, and no "what's
+expiring" or "who's missing one" view. Those are M10b-b, the next piece of this module.

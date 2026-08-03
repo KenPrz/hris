@@ -8,6 +8,14 @@ use App\Http\Controllers\Admin\Departments\CreateController as CreateDepartmentC
 use App\Http\Controllers\Admin\Departments\ListController as ListDepartmentsController;
 use App\Http\Controllers\Admin\Departments\UnarchiveController as UnarchiveDepartmentController;
 use App\Http\Controllers\Admin\Departments\UpdateController as UpdateDepartmentController;
+use App\Http\Controllers\Admin\Documents\Categories\CreateController as CreateDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Categories\DeleteController as DeleteDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Categories\ListController as ListDocumentCategoriesController;
+use App\Http\Controllers\Admin\Documents\Categories\UpdateController as UpdateDocumentCategoryController;
+use App\Http\Controllers\Admin\Documents\Kinds\CreateController as CreateDocumentController;
+use App\Http\Controllers\Admin\Documents\Kinds\DeleteController as DeleteDocumentController;
+use App\Http\Controllers\Admin\Documents\Kinds\ListController as ListDocumentsController;
+use App\Http\Controllers\Admin\Documents\Kinds\UpdateController as UpdateDocumentController;
 use App\Http\Controllers\Admin\Employees\CreateEmployeeController;
 use App\Http\Controllers\Admin\Employees\ListController as ListEmployeesAdminController;
 use App\Http\Controllers\Admin\Employees\ProvisionUserController;
@@ -43,6 +51,7 @@ use App\Http\Controllers\Cutoff\CloseCutoffController;
 use App\Http\Controllers\Cutoff\ExportCutoffController;
 use App\Http\Controllers\Cutoff\ListCutoffsController;
 use App\Http\Controllers\Cutoff\ReopenCutoffController;
+use App\Http\Controllers\Documents\ShowCatalogController as ShowDocumentCatalogController;
 use App\Http\Controllers\Admin\Profile\DeleteIdentificationController;
 use App\Http\Controllers\Admin\Profile\SaveIdentificationController;
 use App\Http\Controllers\Employees\DownloadScanController;
@@ -127,6 +136,10 @@ Route::prefix('v1')->group(function (): void {
 
         // Static reference data for the profile dropdowns — not scoped, not admin-gated.
         Route::get('/profile/catalog', ShowCatalogController::class);
+
+        // Static reference data for the document dropdowns — not scoped, not admin-gated,
+        // exactly like /profile/catalog above.
+        Route::get('/documents/catalog', ShowDocumentCatalogController::class);
 
         // `idempotent` guards the mutations whose retry would duplicate a durable effect —
         // a second request row, a second ledger entry, a second decision. It is a no-op when
@@ -272,6 +285,28 @@ Route::prefix('v1')->group(function (): void {
             // Same is_system_admin gating as the rest of this group: the log spans every
             // subject type company-wide, nothing to scope-check against a single office.
             Route::get('/activity', ListActivityController::class);
+
+            // The document catalog (M10b-a). Unlike most of this group these are NOT
+            // is_system_admin-gated: each FormRequest checks `manageCatalog`, so any HR Admin
+            // may edit the catalog. It is company-wide reference data with no office to
+            // scope by, which is why the denial is a plain 403 rather than the 404-not-403
+            // shape used where an owner id sits in the URL.
+            Route::get('/document-categories', ListDocumentCategoriesController::class);
+            Route::post('/document-categories', CreateDocumentCategoryController::class);
+            Route::patch('/document-categories/{category}', UpdateDocumentCategoryController::class);
+            Route::delete('/document-categories/{category}', DeleteDocumentCategoryController::class);
+
+            // The document catalog's other tier: document KINDS (M10b-a Task 7), one level
+            // down from categories, same manageCatalog gating and plain-403 denial shape.
+            // This task adds no parameterised GET show route, so there is no ordering
+            // collision yet — but M10b-b adds GET /admin/documents/expiring and /missing,
+            // both literal segments that MUST be registered before any future
+            // GET /admin/documents/{document}, or "expiring"/"missing" would bind as a
+            // {document} id and 404.
+            Route::get('/documents', ListDocumentsController::class);
+            Route::post('/documents', CreateDocumentController::class);
+            Route::patch('/documents/{document}', UpdateDocumentController::class);
+            Route::delete('/documents/{document}', DeleteDocumentController::class);
         });
 
         // Per-office config, gated by OfficeScope::administeredBy() inside each

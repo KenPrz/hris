@@ -37,6 +37,12 @@ final class RbacSeeder extends Seeder
         // Enforcement is via OfficeScope, same as holiday.manage/schedule.manage — this
         // widens the catalog, not a new code gate.
         'leave.manage',
+        // Documents (M10b). Two tiers: `document.manage` is office-scoped at the FILE level
+        // (M10b-b) and unscoped for the company-wide catalog; `document.manage.self` lets an
+        // employee file and read their OWN documents but never delete one — removing a filed
+        // document is HR's act. Both dotted, per the reserved-words note above.
+        'document.manage',
+        'document.manage.self',
     ];
 
     public function run(): void

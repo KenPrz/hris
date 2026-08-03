@@ -899,6 +899,55 @@ export type ProfileCatalog = {
   identification_categories: Array<{ id: string; code: string; name: string; description: string | null }>
 }
 
+// ---------------------------------------------------------------------------
+// Wire types — verified against app/Http/Resources/DocumentResource.php,
+// DocumentCategoryResource.php, ShowCatalogController.php, and the Documents
+// Create/Update/Delete FormRequests (M10b-a: the document catalog). `applies_to` is the
+// Documentable enum's backed value — 'employee' | 'office' | null — never an object, since
+// the resource emits `?->value`. Named DocumentKind, not Document: `Document` is a DOM
+// global, and shadowing it in a browser bundle is a real footgun.
+// ---------------------------------------------------------------------------
+
+export type DocumentCategory = {
+  id: string
+  code: string
+  name: string
+  description: string | null
+}
+
+export type DocumentKind = {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  category_id: string
+  applies_to: 'employee' | 'office' | null
+  is_required: boolean
+  validity_months: number | null
+}
+
+/** GET /documents/catalog — the ungated dropdown read. */
+export type DocumentCatalog = {
+  categories: DocumentCategory[]
+  documents: DocumentKind[]
+}
+
+export type DocumentCategoryWrite = {
+  code: string
+  name: string
+  description?: string | null
+}
+
+export type DocumentKindWrite = {
+  code: string
+  name: string
+  description?: string | null
+  category_id: string
+  applies_to?: 'employee' | 'office' | null
+  is_required?: boolean
+  validity_months?: number | null
+}
+
 export const api = {
   health: (): Promise<Health> => request<Health>('/health'),
   login: (email: string, password: string) =>
@@ -1302,5 +1351,46 @@ export const api = {
       request<EmployeeProfile>(`/admin/employees/${id}/identifications/${identificationId}`, {
         method: 'DELETE',
       }),
+  },
+  // The document catalog (M10b-a). `catalog` is the ungated dropdown read (not
+  // office-scoped, not admin-gated — see ShowCatalogController's own comment); the
+  // `admin/document-categories` and `admin/documents` (kinds) routes are the manageCatalog-
+  // gated writes behind them. `deleteCategory`/`deleteKind` return the remaining list, not
+  // 204 and not the deleted row, matching what the delete controllers return, so the client
+  // updates its cache in one round trip.
+  documents: {
+    catalog: () => request<DocumentCatalog>('/documents/catalog'),
+
+    listCategories: () => request<DocumentCategory[]>('/admin/document-categories'),
+    createCategory: (body: DocumentCategoryWrite) =>
+      request<DocumentCategory>('/admin/document-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    updateCategory: (id: string, body: DocumentCategoryWrite) =>
+      request<DocumentCategory>(`/admin/document-categories/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    deleteCategory: (id: string) =>
+      request<DocumentCategory[]>(`/admin/document-categories/${id}`, { method: 'DELETE' }),
+
+    listKinds: () => request<DocumentKind[]>('/admin/documents'),
+    createKind: (body: DocumentKindWrite) =>
+      request<DocumentKind>('/admin/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    updateKind: (id: string, body: DocumentKindWrite) =>
+      request<DocumentKind>(`/admin/documents/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    deleteKind: (id: string) =>
+      request<DocumentKind[]>(`/admin/documents/${id}`, { method: 'DELETE' }),
   },
 }

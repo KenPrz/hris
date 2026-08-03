@@ -17,6 +17,10 @@ import { useSession } from '@/hooks/useSession'
 export type NavItem = {
   href: string
   label: string
+  /** When the session lacks the group's own gate (system-admin, for `admin`), this one item
+   * still shows if the session holds this permission — e.g. Documents / `document.manage`.
+   * Absent means "no such fallback"; the item only ever shows via the group gate. */
+  permission?: string
 }
 
 export type NavGroupKey = 'me' | 'team' | 'office' | 'admin'
@@ -54,6 +58,7 @@ const ROUTES: Record<NavGroupKey, NavItem[]> = {
     { href: '/admin/departments', label: 'Departments' },
     { href: '/admin/employees', label: 'Employees' },
     { href: '/admin/activity', label: 'Activity log' },
+    { href: '/admin/documents', label: 'Documents', permission: 'document.manage' },
   ],
 }
 
@@ -85,6 +90,17 @@ export function navEntriesFor(session: Session | null): NavGroup[] {
 
   if (session?.is_system_admin) {
     groups.push({ key: 'admin', label: GROUP_LABEL.admin, items: ROUTES.admin })
+  } else if (session !== null) {
+    // Not a system admin, but a held permission can still unlock one Admin item without
+    // the rest of the group — document.manage does this for Documents (M10b-a final
+    // fixes): an HR Admin who can edit the catalog otherwise had no link to reach it.
+    const items = ROUTES.admin.filter(
+      (item) => item.permission !== undefined && session.permissions.includes(item.permission),
+    )
+
+    if (items.length > 0) {
+      groups.push({ key: 'admin', label: GROUP_LABEL.admin, items })
+    }
   }
 
   return groups

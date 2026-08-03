@@ -13,14 +13,15 @@ final class DatabaseSeeder extends Seeder
 
     /**
      * The RBAC catalog first (the 'HR Admin' role must exist before CompanySeeder assigns
-     * it), then the profile catalog (production config, same as RBAC), then the Manila/Cebu
-     * company. See docs/05-rbac.md.
+     * it), then the profile catalog (production config, same as RBAC), then the document catalog,
+     * then the Manila/Cebu company. See docs/05-rbac.md.
      */
     public function run(): void
     {
         $this->call([
             RbacSeeder::class,
             ProfileCatalogSeeder::class,
+            DocumentCatalogSeeder::class,
             CompanySeeder::class,
         ]);
     }
