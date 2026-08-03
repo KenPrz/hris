@@ -27,6 +27,7 @@ final class LeaveDetail extends Model
         'end_date',
         'day_part',
         'amount_minutes',
+        'minutes_per_day',
     ];
 
     public $timestamps = false;
@@ -37,6 +38,7 @@ final class LeaveDetail extends Model
             'start_date' => 'date',
             'end_date' => 'date',
             'amount_minutes' => 'integer',
+            'minutes_per_day' => 'integer',
         ];
     }
 

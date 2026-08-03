@@ -28,7 +28,7 @@ it('maps a leave request to every date in its range', function (): void {
     $type = LeaveType::factory()->create(['office_id' => $office->id]);
     $request = Request::factory()->create(['type' => 'leave']);
     LeaveDetail::query()->create(['request_id' => $request->id, 'leave_type_id' => $type->id,
-        'start_date' => '2026-07-14', 'end_date' => '2026-07-16', 'day_part' => 'full', 'amount_minutes' => 1440]);
+        'start_date' => '2026-07-14', 'end_date' => '2026-07-16', 'day_part' => 'full', 'amount_minutes' => 1440, 'minutes_per_day' => 480]);
     expect(RequestAffectedDates::for($request->fresh()))->toBe(['2026-07-14', '2026-07-15', '2026-07-16']);
 });
 

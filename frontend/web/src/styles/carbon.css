@@ -12,7 +12,10 @@
   --on-primary: #ffffff;
   --ink: #161616;
   --ink-muted: #525252;
-  --ink-subtle: #8c8c8c;
+  /* Carbon Gray 60, one step darker than Gray 50 (#8c8c8c). This is DESIGN.md's token for
+     helper text and captions — body text, used as such in ~20 files — and Gray 50 on
+     --canvas is 3.36:1, under WCAG AA's 4.5:1 floor. See contrast.test.ts. */
+  --ink-subtle: #6f6f6f;
   --canvas: #ffffff;
   --surface-1: #f4f4f4;
   --surface-2: #e0e0e0;
@@ -23,7 +26,8 @@
   --hairline: #e0e0e0;
   --hairline-strong: #161616;
   --field-border: #8d8d8d; /* Carbon's filled-input bottom rule — not in DESIGN.md's colors block */
-  --success: #24a148;
+  /* Carbon Green 60. Green 50 (#24a148) is 3.35:1 on --canvas, under the 4.5:1 floor. */
+  --success: #198038;
   --warning: #f1c21b;
   --error: #da1e28;
 

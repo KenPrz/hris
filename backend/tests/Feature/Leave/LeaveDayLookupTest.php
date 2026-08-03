@@ -16,9 +16,13 @@ uses(RefreshDatabase::class);
 
 /*
 | Task 9: LeaveDayLookup — the one fact ComputeDailySummary resolves and hands to the
-| pure DailyComputation calculator: does this employee have an APPROVED (final-hop, not
-| merely manager_approved) full-day `leave` request whose [start_date, end_date] span
-| covers this date. Domain-Eloquent-ok, same carve-out as EmployeeScope/ApprovalQueues.
+| pure DailyComputation calculator: how many PAID-leave minutes this employee holds for
+| this date, across every APPROVED (final-hop, not merely manager_approved) `leave`
+| request whose [start_date, end_date] span covers it. Domain-Eloquent-ok, same carve-out
+| as EmployeeScope/ApprovalQueues.
+|
+| Minutes rather than a boolean since M10c: as a boolean, leave_details.day_part was
+| written at submit and read by nothing, so a half-day leave was priced as a full day.
 */
 
 function leaveDayLookupRequest(Employee $employee, RequestState $state, string $start, string $end): Request
@@ -48,31 +52,31 @@ it('is true for a date inside an approved leave request\'s span', function (): v
     $employee = Employee::factory()->create();
     leaveDayLookupRequest($employee, RequestState::Approved, '2026-08-03', '2026-08-05');
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeTrue()
-        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-04'))->toBeTrue()
-        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-05'))->toBeTrue();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-03'))->toBe(480)
+        ->and(LeaveDayLookup::paidMinutesFor($employee, '2026-08-04'))->toBe(480)
+        ->and(LeaveDayLookup::paidMinutesFor($employee, '2026-08-05'))->toBe(480);
 });
 
 it('is false for a date outside the span', function (): void {
     $employee = Employee::factory()->create();
     leaveDayLookupRequest($employee, RequestState::Approved, '2026-08-03', '2026-08-05');
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-02'))->toBeFalse()
-        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-06'))->toBeFalse();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-02'))->toBe(0)
+        ->and(LeaveDayLookup::paidMinutesFor($employee, '2026-08-06'))->toBe(0);
 });
 
 it('is false for a pending leave request (not yet approved)', function (): void {
     $employee = Employee::factory()->create();
     leaveDayLookupRequest($employee, RequestState::Pending, '2026-08-03', '2026-08-05');
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-03'))->toBe(0);
 });
 
 it('is false for a manager_approved leave request (only the final hop counts)', function (): void {
     $employee = Employee::factory()->create();
     leaveDayLookupRequest($employee, RequestState::ManagerApproved, '2026-08-03', '2026-08-05');
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-03'))->toBe(0);
 });
 
 it('is false for another employee\'s approved leave request', function (): void {
@@ -80,7 +84,7 @@ it('is false for another employee\'s approved leave request', function (): void 
     $other = Employee::factory()->create();
     leaveDayLookupRequest($other, RequestState::Approved, '2026-08-03', '2026-08-05');
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-03'))->toBe(0);
 });
 
 it('is false for an approved leave request whose leave type is unpaid (is_paid=false)', function (): void {
@@ -103,7 +107,7 @@ it('is false for an approved leave request whose leave type is unpaid (is_paid=f
         'day_part' => 'full',
     ]);
 
-    expect(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-03'))->toBeFalse()
-        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-04'))->toBeFalse()
-        ->and(LeaveDayLookup::isOnApprovedLeave($employee, '2026-08-05'))->toBeFalse();
+    expect(LeaveDayLookup::paidMinutesFor($employee, '2026-08-03'))->toBe(0)
+        ->and(LeaveDayLookup::paidMinutesFor($employee, '2026-08-04'))->toBe(0)
+        ->and(LeaveDayLookup::paidMinutesFor($employee, '2026-08-05'))->toBe(0);
 });

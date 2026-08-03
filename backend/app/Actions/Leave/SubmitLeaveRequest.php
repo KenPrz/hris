@@ -46,6 +46,7 @@ final class SubmitLeaveRequest
                 'end_date' => $in->endDate,
                 'day_part' => $in->dayPart,
                 'amount_minutes' => $in->amountMinutes,
+                'minutes_per_day' => $in->minutesPerDay,
             ]);
 
             if ($in->attachment !== null) {

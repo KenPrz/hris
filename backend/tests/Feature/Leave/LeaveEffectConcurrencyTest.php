@@ -8,6 +8,7 @@ use App\Domain\Requests\RequestState;
 use App\Domain\Requests\RequestType;
 use App\Domain\Schedule\Weekday;
 use App\Exceptions\Domain\InsufficientLeaveBalance;
+use App\Exceptions\Domain\OverlappingLeave;
 use App\Models\Employee;
 use App\Models\LeaveDetail;
 use App\Models\LeaveLedger;
@@ -210,6 +211,171 @@ it('genuinely serializes two concurrent final-hop leave approvals for the SAME e
             ->and($freshB->state)->toBe(RequestState::ManagerApproved)
             ->and($freshB->decided_by)->toBeNull()
             ->and($freshB->decided_at)->toBeNull();
+    } finally {
+        if (isset($pipes[1]) && is_resource($pipes[1])) {
+            fclose($pipes[1]);
+        }
+        if (isset($pipes[2]) && is_resource($pipes[2])) {
+            fclose($pipes[2]);
+        }
+        if (is_resource($proc)) {
+            proc_terminate($proc, 9);
+            proc_close($proc);
+        }
+
+        DB::statement('SET lock_timeout = DEFAULT');
+
+        $cleanup();
+    }
+});
+
+/*
+| M10c: the same two-connection proof for the OVERLAP invariant. The test above proves the
+| employee row lock genuinely serializes two concurrent final-hop approvals; this one proves
+| the overlap check reads the result of that serialization rather than a stale snapshot —
+| the loser must see the winner's just-committed approval and refuse, not approve a second
+| debit over the same days. Balance is deliberately generous here so the refusal can only be
+| the overlap, never an overdraw.
+*/
+it('genuinely serializes the overlap check, so a concurrent approval cannot double-debit the same days', function (): void {
+    $office = Office::factory()->create(['ip_allowlist' => null]);
+
+    $template = ShiftTemplate::create(['office_id' => $office->id, 'name' => 'Office']);
+    foreach (Weekday::cases() as $wd) {
+        $rest = in_array($wd, [Weekday::Saturday, Weekday::Sunday], true);
+        ShiftTemplateDay::create([
+            'shift_template_id' => $template->id, 'weekday' => $wd, 'is_rest' => $rest,
+            'start_minute' => $rest ? null : 480, 'end_minute' => $rest ? null : 1080,
+            'break_minutes' => $rest ? null : 60,
+        ]);
+    }
+    $office->update(['default_shift_template_id' => $template->id]);
+
+    $hrUser = User::factory()->create();
+    $hrEmployee = Employee::factory()->for($hrUser)->create(['current_office_id' => $office->id]);
+    $hrUser->hrAdminOffices()->attach($office->id);
+
+    $managerUser = User::factory()->create();
+    $manager = Employee::factory()->for($managerUser)->create(['current_office_id' => $office->id]);
+
+    $reportUser = User::factory()->create();
+    $report = Employee::factory()->for($reportUser)->create([
+        'current_office_id' => $office->id,
+        'current_reports_to_id' => $manager->id,
+    ]);
+
+    $leaveType = LeaveType::factory()->for($office, 'office')->create(['deducts_balance' => true]);
+
+    // Generous on purpose: both requests would fit the balance, so an approval that slips
+    // through can only have slipped past the OVERLAP check.
+    LeaveLedger::factory()->for($report, 'employee')->create([
+        'leave_type_id' => $leaveType->id,
+        'entry_type' => 'credit',
+        'minutes' => 100000,
+    ]);
+
+    $requestA = Request::factory()->for($report)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::ManagerApproved,
+        'manager_decided_by' => $managerUser->id,
+        'manager_decided_at' => now(),
+    ]);
+    LeaveDetail::factory()->for($requestA)->create([
+        'leave_type_id' => $leaveType->id,
+        'start_date' => '2026-08-03',
+        'end_date' => '2026-08-07',
+        'day_part' => 'full',
+        'amount_minutes' => 2400,
+    ]);
+
+    $requestB = Request::factory()->for($report)->create([
+        'type' => RequestType::Leave,
+        'state' => RequestState::ManagerApproved,
+        'manager_decided_by' => $managerUser->id,
+        'manager_decided_at' => now(),
+    ]);
+    LeaveDetail::factory()->for($requestB)->create([
+        'leave_type_id' => $leaveType->id,
+        'start_date' => '2026-08-06',   // overlaps A on the 6th and 7th
+        'end_date' => '2026-08-11',
+        'day_part' => 'full',
+        'amount_minutes' => 2400,
+    ]);
+
+    $holderScript = __DIR__.'/Support/leave_effect_lock_holder.php';
+    $holdMs = 500;
+
+    $cleanup = function () use ($requestA, $requestB, $leaveType, $office, $template, $manager, $report, $hrEmployee, $managerUser, $reportUser, $hrUser): void {
+        LeaveLedger::where('employee_id', $report->id)->delete();
+        RecomputeRun::where('trigger_id', $requestA->id)->delete();
+        LeaveDetail::whereIn('request_id', [$requestA->id, $requestB->id])->delete();
+        Request::whereIn('id', [$requestA->id, $requestB->id])->delete();
+        LeaveType::whereKey($leaveType->id)->delete();
+        $office->update(['default_shift_template_id' => null]);
+        ShiftTemplateDay::where('shift_template_id', $template->id)->delete();
+        ShiftTemplate::whereKey($template->id)->delete();
+        Employee::whereIn('id', [$manager->id, $report->id, $hrEmployee->id])->delete();
+        User::whereIn('id', [$managerUser->id, $reportUser->id, $hrUser->id])->delete();
+        Office::whereKey($office->id)->delete();
+    };
+
+    $proc = proc_open(
+        ['php', $holderScript, $requestA->id, $report->id, $hrUser->id, (string) $holdMs],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        base_path(),
+    );
+
+    if (! is_resource($proc)) {
+        $cleanup();
+        $this->fail('proc_open failed to spawn the lock-holder process.');
+    }
+
+    try {
+        stream_set_timeout($pipes[1], 5);
+        $signal = fgets($pipes[1]);
+        $timedOut = stream_get_meta_data($pipes[1])['timed_out'] ?? false;
+
+        if ($timedOut || trim((string) $signal) !== 'LOCKED') {
+            $stderr = stream_get_contents($pipes[2]);
+            proc_terminate($proc, 9);
+
+            $this->fail('Lock-holder process never signalled LOCKED (got: '.var_export($signal, true).").\nstderr:\n{$stderr}");
+        }
+
+        DB::statement("SET lock_timeout = '5000ms'");
+
+        $start = microtime(true);
+        $caught = null;
+
+        try {
+            app(ApproveRequest::class)->execute($requestB->fresh(), $hrUser);
+        } catch (OverlappingLeave $e) {
+            $caught = $e;
+        }
+
+        $elapsedMs = (microtime(true) - $start) * 1000;
+
+        // Blocked for real, then refused on what it read AFTER the holder committed.
+        expect($elapsedMs)->toBeGreaterThan($holdMs * 0.5)
+            ->and($caught)->not->toBeNull()
+            ->and($caught->errorCode())->toBe('overlapping_leave')
+            ->and($caught->httpStatus())->toBe(409)
+            ->and($caught->details()['conflicting_request_id'])->toBe($requestA->id);
+
+        expect(trim((string) fgets($pipes[1])))->toBe('DONE');
+
+        $exitCode = proc_close($proc);
+        $proc = null;
+        expect($exitCode)->toBe(0);
+
+        // Exactly one debit over those days, ever.
+        $debits = LeaveLedger::where('employee_id', $report->id)->where('entry_type', 'debit')->get();
+        expect($debits)->toHaveCount(1)
+            ->and($debits->first()->request_id)->toBe($requestA->id);
+
+        expect($requestA->fresh()->state)->toBe(RequestState::Approved)
+            ->and($requestB->fresh()->state)->toBe(RequestState::ManagerApproved);
     } finally {
         if (isset($pipes[1]) && is_resource($pipes[1])) {
             fclose($pipes[1]);

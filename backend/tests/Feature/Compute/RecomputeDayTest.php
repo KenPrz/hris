@@ -65,7 +65,7 @@ it('recomputes a non-locked day: a holiday added out-of-band is reflected after 
 
     $date = '2026-08-03'; // Monday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $before = app(ComputeDailySummary::class)->execute($employee, $date);
     expect($before->status)->toBe('computed')
@@ -99,7 +99,7 @@ it('is idempotent: running the job twice yields one summary, identical', functio
 
     $date = '2026-08-03';
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     (new RecomputeDay($employee->id, $date))->handle(app(ComputeDailySummary::class));
     $first = DailyAttendanceSummary::query()

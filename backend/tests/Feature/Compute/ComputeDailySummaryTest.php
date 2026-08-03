@@ -32,7 +32,7 @@ it('computes an ordinary punched 8h day: one regular_day line at the floor, rule
 
     $date = '2026-08-03'; // Monday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -62,7 +62,7 @@ it('snapshots the resolved office_id on the summary', function (): void {
 
     $date = '2026-08-03'; // Monday
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -83,7 +83,7 @@ it('prices a special_non_working holiday (Aug 21) at 13000bp', function (): void
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -103,7 +103,7 @@ it('is idempotent: recomputing the same day yields one summary and identical lin
 
     $date = '2026-08-03';
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $first = app(ComputeDailySummary::class)->execute($employee, $date);
     $second = app(ComputeDailySummary::class)->execute($employee, $date);
@@ -156,7 +156,7 @@ it('reads applied_bp from a custom pay_rules version, not a hardcoded constant',
     ]);
 
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
-    recordManualPunch($employee, $office, $date, '16:00', PunchDirection::Out);
+    recordManualPunch($employee, $office, $date, '17:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
@@ -213,20 +213,22 @@ it('persists unpaid_overtime_minutes for worked overtime nobody pre-authorized (
     seedPayRule();
 
     $date = '2026-08-03'; // Monday: scheduled 540, 60m break.
-    // 08:00-19:00 gross 660, net 600 => 540 regular + 60 overtime. No approved OT => 60 unpaid.
+    // 08:00-19:00 gross 660, net 600. The boundary is the statutory 480, not the 540-minute
+    // schedule, so that is 480 regular + 120 overtime. No approved OT => all 120 unpaid.
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
     recordManualPunch($employee, $office, $date, '19:00', PunchDirection::Out);
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
     expect($summary->worked_minutes)->toBe(600)
-        ->and($summary->unpaid_overtime_minutes)->toBe(60)
+        ->and($summary->unpaid_overtime_minutes)->toBe(120)
         ->and($summary->lines)->toHaveCount(1); // regular_day only — the overtime went unpaid.
     expect($summary->lines->first()->kind)->toBe(SummaryLineKind::RegularDay);
+    expect($summary->lines->first()->minutes)->toBe(480);
 
     $this->assertDatabaseHas('daily_attendance_summaries', [
         'id' => $summary->id,
-        'unpaid_overtime_minutes' => 60,
+        'unpaid_overtime_minutes' => 120,
     ]);
 });
 
@@ -236,7 +238,7 @@ it('pays worked overtime up to an approved pre-authorization and leaves the rest
     seedPayRule();
 
     $date = '2026-08-03';
-    // 60 min of overtime worked (as above); only 30 approved => 30 paid overtime_day, 30 unpaid.
+    // 120 min of overtime worked (as above); only 30 approved => 30 paid overtime_day, 90 unpaid.
     $request = Request::factory()->create([
         'type' => 'overtime',
         'employee_id' => $employee->id,
@@ -250,10 +252,10 @@ it('pays worked overtime up to an approved pre-authorization and leaves the rest
 
     $summary = app(ComputeDailySummary::class)->execute($employee, $date);
 
-    expect($summary->unpaid_overtime_minutes)->toBe(30);
+    expect($summary->unpaid_overtime_minutes)->toBe(90);
 
     $byKind = $summary->lines->keyBy(fn (DailySummaryLine $l) => $l->kind->value);
-    expect($byKind['regular_day']->minutes)->toBe(540)
+    expect($byKind['regular_day']->minutes)->toBe(480)
         ->and($byKind['overtime_day']->minutes)->toBe(30)
         ->and($byKind['overtime_day']->applied_bp)->toBe(12500);
 });
@@ -264,8 +266,9 @@ it('collapses every line to 10000bp for an Art. 82-exempt employee, even with ov
     seedPayRule();
 
     $date = '2026-08-03'; // Monday
-    // 08:00 - 19:00 gross (660m), net of the 60m break = 600m against a 540m schedule:
-    // 540m regular + 60m overtime, both of which would normally price differently.
+    // 08:00 - 19:00 gross (660m), net of the 60m break = 600m against the statutory 480m
+    // boundary: 480m regular + 120m overtime, both of which would normally price
+    // differently. Never capped — an exempt employee has no overtime premium to withhold.
     recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
     recordManualPunch($employee, $office, $date, '19:00', PunchDirection::Out);
 
@@ -282,4 +285,43 @@ it('collapses every line to 10000bp for an Art. 82-exempt employee, even with ov
 
     $kinds = $summary->lines->pluck('kind')->map(fn (SummaryLineKind $k) => $k->value)->sort()->values()->all();
     expect($kinds)->toBe(['overtime_day', 'regular_day']);
+});
+
+it('prices the ninth hour of a nine-hour scheduled day as overtime', function (): void {
+    // The shared template is 08:00-18:00 with a 60-minute break => 540 scheduled minutes.
+    // The overtime boundary used to BE that 540, so an employee's ninth hour was priced as
+    // regular time at 100%. Art. 83 fixes the normal working day at eight hours whatever a
+    // shift template says, so the boundary is 480 and the ninth hour is overtime.
+    $office = computeOffice();
+    $employee = computeEmployee($office);
+    seedPayRule();
+
+    $date = '2026-08-03'; // Monday: scheduled 540, 60m break.
+
+    // Authorize the 60 overtime minutes, else the strict cap makes them unpaid excess and
+    // this test would prove the boundary moved without proving anything got PAID for it.
+    $request = Request::factory()->create([
+        'type' => 'overtime',
+        'employee_id' => $employee->id,
+        'state' => 'approved',
+        'decision_note' => null,
+    ]);
+    OvertimeDetail::query()->create(['request_id' => $request->id, 'date' => $date, 'minutes' => 60]);
+
+    recordManualPunch($employee, $office, $date, '08:00', PunchDirection::In);
+    recordManualPunch($employee, $office, $date, '18:00', PunchDirection::Out);
+
+    $summary = app(ComputeDailySummary::class)->execute($employee, $date);
+
+    expect($summary->scheduled_minutes)->toBe(540)
+        ->and($summary->worked_minutes)->toBe(540)
+        ->and($summary->undertime_minutes)->toBe(0)
+        ->and($summary->unpaid_overtime_minutes)->toBe(0)
+        ->and($summary->lines)->toHaveCount(2);
+
+    $byKind = $summary->lines->keyBy(fn (DailySummaryLine $l) => $l->kind->value);
+    expect($byKind['regular_day']->minutes)->toBe(480)
+        ->and($byKind['regular_day']->applied_bp)->toBe(10000)
+        ->and($byKind['overtime_day']->minutes)->toBe(60)
+        ->and($byKind['overtime_day']->applied_bp)->toBe(12500);
 });

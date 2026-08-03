@@ -83,7 +83,7 @@ final class ComputeDailySummary
 
         $schedule = (new ScheduleResolver)->resolve($employee, $date);
 
-        $onApprovedLeave = LeaveDayLookup::isOnApprovedLeave($employee, $date);
+        $leaveMinutes = LeaveDayLookup::paidMinutesFor($employee, $date);
 
         $approvedOvertimeMinutes = OvertimeAuthorizationLookup::approvedMinutesFor($employee, $date);
 
@@ -94,11 +94,26 @@ final class ComputeDailySummary
 
         $rates = $payRule !== null ? PayRatesFactory::fromVersion($payRule) : PayRatesFactory::statutory();
 
-        // The regular/overtime boundary is the actual scheduled length on a working day,
-        // but the statutory 8h (480) on a rest day (scheduledMinutes 0) — a rest-day
-        // worker's first 8 hours are still rest-day-worked BASE, not overtime. Zero would
-        // put the boundary at the start of the day and mis-price every worked minute as OT.
-        $overtimeThresholdMinutes = $schedule->scheduledMinutes > 0 ? $schedule->scheduledMinutes : 480;
+        // The regular/overtime boundary is the statutory 8h (Art. 83), and a shift template
+        // scheduled LONGER than that does not move it — the boundary used to BE the resolved
+        // scheduled length, so the 540-minute demo template priced an employee's ninth hour
+        // at 100% instead of 125%. A template scheduled SHORTER does move it down: a
+        // 240-minute half-day shift must not become overtime at minute 241.
+        //
+        // A rest day (scheduledMinutes 0) takes the statutory boundary too, so a rest-day
+        // worker's first 8 hours stay rest-day-worked BASE rather than overtime; zero would
+        // put the boundary at the start of the day and mis-price every worked minute.
+        //
+        // A legally compressed workweek (D.O. 02-04, e.g. 4x10) genuinely does begin overtime
+        // at 600. That needs an offices.is_compressed_workweek flag lifting the cap back to
+        // the scheduled length — not a change here, and not a config edit, since it is a
+        // per-office fact. DailyComputation already accepts any boundary the caller passes,
+        // so the flag is the only missing piece. See docs/06-roadmap.md's Deferred table.
+        $statutoryThresholdMinutes = (int) config('hris.overtime.statutory_threshold_minutes');
+
+        $overtimeThresholdMinutes = $schedule->scheduledMinutes > 0
+            ? min($schedule->scheduledMinutes, $statutoryThresholdMinutes)
+            : $statutoryThresholdMinutes;
 
         $computed = DailyComputation::compute(new DailyComputationInput(
             punches: EffectivePunches::forDate($employee, $date),
@@ -108,9 +123,10 @@ final class ComputeDailySummary
             overtimeThresholdMinutes: $overtimeThresholdMinutes,
             scheduledStartMinute: $schedule->startMinute,
             breakMinutes: $schedule->breakMinutes ?? 0,
+            mealBreakAppliesOverMinutes: (int) config('hris.meal_break.applies_over_minutes'),
             isArt82Exempt: $isArt82Exempt,
             rates: $rates,
-            onApprovedLeave: $onApprovedLeave,
+            leaveMinutes: $leaveMinutes,
             approvedOvertimeMinutes: $approvedOvertimeMinutes,
         ));
 

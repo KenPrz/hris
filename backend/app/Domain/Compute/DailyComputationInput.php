@@ -31,12 +31,22 @@ final readonly class DailyComputationInput
      * @param  ?int  $scheduledStartMinute  Null when there is no scheduled start (a rest
      *                                      day) — late is always 0 in that case, never a
      *                                      phantom lateness against minute 0.
-     * @param  bool  $onApprovedLeave  Whether this employee has an APPROVED full-day
-     *                                 `leave` request covering this date (LeaveDayLookup,
-     *                                 resolved by the caller — this class stays pure and
-     *                                 never queries the database itself). Only consulted
-     *                                 on the no-punches path; a day with punches prices
-     *                                 from worked time regardless.
+     * @param  int  $mealBreakAppliesOverMinutes  The gross span above which the assumed
+     *   meal break is deducted — the statutory 300 (five hours), from
+     *   config('hris.meal_break.applies_over_minutes'). Deliberately NOT $scheduledMinutes,
+     *   which is what it used to be: deducting only above the scheduled day makes worked
+     *   minutes non-monotonic in the out-punch, so leaving earlier can pay more than
+     *   staying.
+     * @param  int  $leaveMinutes  Paid-leave minutes attributable to this date
+     *   (LeaveDayLookup::paidMinutesFor, resolved by the caller — this class stays pure and
+     *   never queries the database itself). 0 when none.
+     *
+     *   Was a bool, which made a half-day pay like a full day: leave_details.day_part was
+     *   written at submit and read by nothing downstream. Consulted on BOTH the punched and
+     *   unpunched paths now — a half-day leave whose other half is worked must pay for both,
+     *   and previously emitted no leave line at all because punches existed. The credited
+     *   portion is capped at the unworked remainder of the scheduled day, so leave and
+     *   worked time can never sum past it.
      * @param  int  $approvedOvertimeMinutes  Overtime minutes pre-authorized for this
      *   date (OvertimeAuthorizationLookup, resolved by the caller). The paid-overtime
      *   ceiling is overtimeThresholdMinutes + this; worked minutes beyond it are unpaid
@@ -51,9 +61,10 @@ final readonly class DailyComputationInput
         public int $overtimeThresholdMinutes,
         public ?int $scheduledStartMinute,
         public int $breakMinutes,
+        public int $mealBreakAppliesOverMinutes,
         public bool $isArt82Exempt,
         public PayRates $rates,
-        public bool $onApprovedLeave,
+        public int $leaveMinutes,
         public int $approvedOvertimeMinutes,
     ) {}
 }

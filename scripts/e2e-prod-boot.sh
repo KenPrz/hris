@@ -189,7 +189,37 @@ echo "$SECOND" | sed 's/^/   | /'
 echo "$SECOND" | grep -q "already exists" || fail "the refusal did not explain itself"
 echo "7. a second System Admin is refused — PASS"
 
-# --- 8. backup, then drill it ---------------------------------------------------
+# --- 8. the queue worker is running and wired to the right connection ------------
+#
+# RecomputeDay implements ShouldQueue and QUEUE_CONNECTION is `database`, so every
+# recompute after a holiday edit, a pay-rule change, or an approval lands in the `jobs`
+# table. Nothing drained it before the `queue` service existed, and no backend test can
+# catch that: phpunit.xml forces QUEUE_CONNECTION=sync, so all of them run their jobs
+# inline and stay green with or without a worker.
+#
+# This asserts the service is up, running the right command, on the right connection —
+# the three ways this fix can regress. It deliberately does NOT claim a round-tripped job:
+# a freshly bootstrapped database has no employee to recompute, and a queued closure
+# cannot be serialized from `tinker --execute` (ReflectionClosure needs real source, which
+# eval'd code has none of). The round trip is proven against the dev stack instead, where
+# there is data to recompute.
+
+echo
+$COMPOSE ps queue --format '{{.State}}' | grep -q running \
+    || fail "the queue service is not running — recomputes would queue into a table nothing drains"
+
+$COMPOSE ps queue --format '{{.Command}}' | grep -q 'queue:work' \
+    || fail "the queue service is running something other than queue:work"
+
+QCONN=$($COMPOSE exec -T --user hris queue printenv QUEUE_CONNECTION | tr -d '[:space:]')
+[ "$QCONN" = "database" ] || fail "the worker's QUEUE_CONNECTION is '$QCONN', not 'database'"
+
+APICONN=$($COMPOSE exec -T --user hris api printenv QUEUE_CONNECTION | tr -d '[:space:]')
+[ "$APICONN" = "$QCONN" ] || fail "api enqueues to '$APICONN' but the worker drains '$QCONN'"
+
+echo "8. the queue worker is running, on the same connection the api enqueues to — PASS"
+
+# --- 9. backup, then drill it ---------------------------------------------------
 
 echo
 mkdir -p backups
@@ -197,12 +227,12 @@ DUMP="backups/e2e-prod-$(date -u +%Y%m%dT%H%M%SZ).dump"   # removed by cleanup()
 # `make backup` is not used here only because it targets the `hris` project by name and
 # this stack deliberately runs under its own; the dump itself is byte-identical in kind.
 $COMPOSE exec -T db pg_dump -U hris -d hris -Fc > "$DUMP" || fail "pg_dump failed"
-echo "8. pg_dump of the live production database -> $DUMP ($(du -h "$DUMP" | cut -f1))"
+echo "9. pg_dump of the live production database -> $DUMP ($(du -h "$DUMP" | cut -f1))"
 
 # This one IS the real target, run exactly as an operator would.
 make restore-drill 2>&1 | sed 's/^/   | /'
 [ "${PIPESTATUS[0]}" = 0 ] || fail "make restore-drill did not pass"
-echo "8. make restore-drill restored that dump into a throwaway db and counted rows — PASS"
+echo "9. make restore-drill restored that dump into a throwaway db and counted rows — PASS"
 
 echo
 echo "=== all M9 production checks PASSED ==="

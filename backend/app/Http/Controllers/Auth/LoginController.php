@@ -27,7 +27,11 @@ final class LoginController
             throw new InvalidCredentials;
         }
 
-        $token = $user->createToken('web')->plainTextToken;
+        // Explicit abilities, not Sanctum's implicit ['*']. There is one client and one
+        // session shape today, so this is a single grant — but naming it means a future
+        // device or integration token is a different grant rather than a silent superset
+        // of this one. Expiry comes from config/sanctum.php, not from here.
+        $token = $user->createToken('web', ['session'])->plainTextToken;
 
         return response()->json(['data' => [
             'token' => $token,

@@ -163,6 +163,17 @@ can never touch a real stack's volumes.
 
 Things worth knowing before you change any of it:
 
+- **The `queue` service is not optional, and no test can tell you it is missing.**
+  `RecomputeDay implements ShouldQueue` and `QUEUE_CONNECTION` is `database`, so every
+  recompute after a holiday edit, a pay-rule change, or an approval lands in the `jobs`
+  table. Without a worker draining it, the daily summaries behind payroll silently never
+  update — no error, no failed job, just stale numbers. `phpunit.xml` forces
+  `QUEUE_CONNECTION=sync`, so all backend tests run their jobs inline and stay green either
+  way; `scripts/e2e-prod-boot.sh` is the only place the real asynchronous path is
+  exercised. The service runs in **both** compose files on purpose — dev diverging from
+  production about what is synchronous is how the gap stayed invisible. Its environment is a
+  YAML anchor of the api's, not a copy: a worker on different config than the app enqueuing
+  to it fails in ways that look like data loss. `make prod-queue-logs` tails it.
 - **`.dockerignore` is a security boundary, not tidiness.** The prod stage is `COPY . .`;
   without it the host's `backend/.env` — a real `APP_KEY` and database password — is baked
   into an image layer.
@@ -192,11 +203,9 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-911 backend tests (21 of them Arch) + 600 frontend tests (599 passing — the one red,
-`(app)/me/attendance/attendance.test.tsx`, is a pre-existing, date-dependent fixture bug
-unrelated to any shipped feature; see `docs/06-roadmap.md`'s M10b-a section) today. The
-**Status** section below carries the same figures — if these two ever disagree, one of them
-was not updated with a milestone and both should be re-measured rather than guessed.
+945 backend tests (21 of them Arch) + 607 frontend tests today. The **Status** section
+below carries the same figures — if these two ever disagree, one of them was not updated
+with a milestone and both should be re-measured rather than guessed.
 
 The test database is created once:
 
@@ -316,6 +325,13 @@ Found while building M0. Each one cost real time.
   type-checks its keys; `rows.map((row) => ({…}))` assigned to `DependentWrite[]` does not. A
   misspelled wire field (`birthDate` for `birth_date`) then passes both the typechecker and the
   tests, and Laravel coerces the missing key to `null` — silent data loss, not a 400.
+- **`attendance.test.tsx` fails on the 2nd of every month, and only then.** Its fixture builds
+  `otherDay` as `${THIS_MONTH}-02` to mean "a different day this month than today" — which is
+  the same date as today whenever today *is* the 2nd, so the test that proves the punch hero
+  derives its direction from TODAY alone gets a today with punches and renders "Clock out".
+  Observed red on 2026-08-02 and green on 2026-08-03 with no code change between. It is a
+  fixture bug, not a regression: if CI is red on the 2nd with only this test failing, that is
+  why. Fixing it means deriving `otherDay` from today rather than pinning a literal.
 - **PHP's own `upload_max_filesize` overrides Laravel's validation, silently.** The base api
   image shipped `upload_max_filesize=2M` while every attachment route's `FormRequest` validates
   `max:10240` (10 MiB) — a file between 2 and 10 MB is dropped from `$_FILES` by PHP *before*
@@ -367,8 +383,7 @@ company files (NBI clearance, employment contract, business permit, and more), g
 into categories, each applying to employees, offices, or both, required or not, expiring
 after N months or never. **M10b-a ships the catalog only** — `document_files` exists and
 is empty; nobody can file an actual document against an employee or office until M10b-b.
-**911 backend tests (21 of them Arch) + 600 frontend tests (599 passing — see the caveat
-below).** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
+**945 backend tests (21 of them Arch) + 607 frontend tests.** See `docs/06-roadmap.md` for each milestone's status and `docs/features.md` for
 what a user can actually do today.
 
 One caveat worth knowing before you trust the UI: the frontend is covered by component
@@ -377,12 +392,10 @@ every `scripts/e2e-*.sh` drives the API (and, for M9, the booted production stac
 rendered page. M3.5's screens were never visually confirmed in a real browser, and M10a's
 `/me/profile`/`/employees/{id}/profile` and M10b-a's `/admin/documents` carry the identical
 gap — nothing since M3.5 has closed it. Load it yourself before assuming it looks right;
-see the M3.5, M10a, and M10b-a status blocks in `docs/06-roadmap.md`. Separately, one
-frontend test is currently red and pre-existing, not caused by this branch —
-`attendance.test.tsx`'s "renders Clock in for today even when other days this month have
-punches" derives its fixture dates from the real clock and fails whenever the container
-clock resolves to the 2nd of the month in `OFFICE_TIME_ZONE` — see `docs/06-roadmap.md`'s
-M10b-a section for the mechanism.
+see the M3.5, M10a, and M10b-a status blocks in `docs/06-roadmap.md`. Separately, the frontend suite
+is green on most days but not all: `attendance.test.tsx` derives its fixture dates from the
+real clock and fails on the 2nd of every month — see the gotcha above and
+`docs/06-roadmap.md`'s M10b-a section for the mechanism.
 
 Next: no milestone is open. **M10b-b — the document files** (upload/list/download/delete
 for both owner types, the two Documents sections on the profile and office admin screens,

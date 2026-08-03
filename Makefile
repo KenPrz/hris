@@ -12,7 +12,7 @@ STACK := $(if $(filter prod,$(COMPOSE)),hris,hris-dev)
 
 .DEFAULT_GOAL := help
 .PHONY: help dev dev-down dev-key test test-backend test-web clean \
-        build prod-up prod-down prod-logs backup restore restore-drill
+        build prod-up prod-down prod-logs prod-queue-logs backup restore restore-drill
 
 help: ## List every target
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -74,6 +74,9 @@ prod-down: ## Stop the production stack (volumes survive)
 
 prod-logs: ## Tail production logs
 	$(PROD) logs -f --tail=100
+
+prod-queue-logs: ## Tail the production queue worker
+	docker compose -f compose.prod.yml logs -f queue
 
 # pg_dump and the attachments tar both write to the HOST via shell stdout redirection,
 # never through a bind mount — so the files land owned by whoever ran `make`, not root.
