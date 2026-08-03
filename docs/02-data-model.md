@@ -1828,11 +1828,20 @@ value in exactly one place. It is computed against the office's timezone specifi
 a naive `now()`: `APP_TIMEZONE` is `UTC` by rule (`01-architecture.md`), so an unzoned
 `now()` would roll an age over up to eight hours early in Manila. An employee with no
 office yet falls back to `Asia/Manila`, the same default `offices.timezone` itself carries.
-**This is one of two places M10a reads "today," and the other one does not agree with
-it** — `EmployeeAssignmentPresenter`'s `work_shift` resolution and `EmployeeProfileResource`/
-`EmployeeProfileSummaryResource`'s `EmploymentResolver::on()` call both use `Carbon::today()`,
-which is UTC-today, not office-local today; see `06-roadmap.md`'s M10a section for the
-resulting disagreement inside one payload.
+**This used to be one of two places M10a reads "today," disagreeing with the other —
+fixed by the M10a follow-ups round.** `EmployeeAssignmentPresenter`'s `work_shift`
+resolution and `EmployeeProfileResource`/`EmployeeProfileSummaryResource`'s
+`EmploymentResolver::on()` call originally used `Carbon::today()`, which is UTC-today, not
+office-local today, so the two could disagree for up to eight hours a day. All three call
+sites — plus the pre-existing M8b `EmployeeDetailResource`, which had the identical bug —
+now go through a shared `App\Http\Resources\EmployeeLocalToday::for($employee)` helper that
+anchors to `$employee->currentOffice?->timezone ?? 'Asia/Manila'`, the same fallback `age`
+already used, so the whole payload now agrees on what day it is.
+`App\Domain\Employment\EmploymentResolver` itself was **not** changed — it already took an
+explicit date argument; only the callers that were choosing `today()` for themselves needed
+fixing. See `06-roadmap.md`'s M10a section for the full account, including the correction
+to that section's earlier claim that the fix required threading office timezone through
+`EmploymentResolver`.
 
 **Deleting an employee would orphan their ID scans — verified unreachable today, recorded
 rather than guarded against.** `employee_identifications.employee_id` cascades at the
@@ -1849,6 +1858,33 @@ ruling was to record the trap rather than build cleanup for a path that does not
 through Eloquent first** (iterating and calling `->delete()` on each row, not a bulk
 query-builder delete), so the model event fires and the media/RustFS cleanup happens before
 the FK cascade ever runs.
+
+**`SaveEmployeeIdentification` attaches the scan only after the DB write commits, not inside
+the same transaction (M10a follow-ups).** The `scan` collection is `singleFile()`, so
+replacing a scan makes medialibrary delete the OLD RustFS object as part of adding the new
+one — that deletion cannot be undone by a Postgres rollback. The original version ran the
+`updateOrCreate` and the `addMedia(...)->toMediaCollection('scan')` call inside one
+`DB::transaction()`; if anything after the media attach had then thrown, the transaction
+would roll the `number`/`issued_on`/`expires_on` write back to its old values while the old
+scan object was already gone from RustFS — a media row surviving the rollback but pointing
+at nothing, or worse, a row correctly restored but with no way back to the file it used to
+reference. The action now runs the `updateOrCreate` alone inside the transaction, returns
+once that closure commits, and only then calls `addMedia()`. A failure in the media step can
+no longer revert an already-durable DB row, and a DB failure can no longer happen after the
+old object is already unrecoverable — the ordering makes each half of the write fail
+independently instead of coupling a RustFS side effect to a Postgres commit that a Postgres
+rollback cannot see.
+
+The trade is deliberate but not free, and the residual is worth knowing. If `addMedia()` now
+fails *after* the commit — RustFS unreachable, or a file that satisfies
+`SaveIdentificationRequest`'s rules but not medialibrary's own mime check — the row is
+durable with the **new** `number` while the **old** scan is still attached: a record reading
+`TIN 222…` over a scanned card reading `TIN 111…`, surfaced as a generic 500 that looks to
+the user like nothing saved. That is strictly the better half of the trade (the alternative
+lost the scan outright, permanently), and retrying is safe because the write is an upsert on
+`(employee_id, category_id)`. But it means **a 500 from this endpoint does not mean "nothing
+happened"** — the number may have changed. Anyone adding a reconciliation or import path
+here should verify the scan matches the number rather than assuming the pair is atomic.
 
 **`number` is deliberately excluded from `EmployeeIdentification`'s `logOnly()`, and the
 profile's contact fields from `EmployeeProfile`'s.** All three new models carry spatie's

@@ -177,6 +177,14 @@ Things worth knowing before you change any of it:
 - **`.dockerignore` is a security boundary, not tidiness.** The prod stage is `COPY . .`;
   without it the host's `backend/.env` — a real `APP_KEY` and database password — is baked
   into an image layer.
+- **The api image sets `upload_max_filesize=12M` / `post_max_size=20M` in the shared `base`
+  stage (M10a follow-ups).** The base image's own defaults are 2M/8M, well under the
+  `max:10240` (10 MiB) every attachment route validates against — an over-2M scan or photo
+  was silently dropped by PHP before Laravel ever saw it, surfacing as a misleading `400
+  "must be a file"` instead of a size error. This is baked into the image, not read at
+  runtime, so **an already-running api container keeps serving the old 2M/8M until it is
+  recreated** — `docker compose -f compose.prod.yml up -d --no-deps --build api` (or the
+  equivalent for whichever compose file) after pulling this change, not merely a restart.
 - **Next's `/api` rewrite does not run in production.** Caddy splits `/api/*` off before
   Next ever sees it. The browser still sees one origin; the mechanism differs from dev.
 - **Required production vars are guarded in `entrypoint.sh`, not with compose `:?`.** A
@@ -195,8 +203,9 @@ cd backend && ./vendor/bin/pest              # needs Postgres on 127.0.0.1:5433,
 cd frontend/web && npm test && npm run typecheck && npm run build
 ```
 
-888 backend tests (19 of them Arch) + 582 frontend tests today — 581 passing; the one
-red is the pre-existing, date-dependent `attendance.test.tsx` fixture described below.
+899 backend tests (20 of them Arch) + 584 frontend tests today. The **Status** section
+below carries the same figures — if these two ever disagree, one of them was not updated
+with a milestone and both should be re-measured rather than guessed.
 
 The test database is created once:
 
@@ -316,6 +325,23 @@ Found while building M0. Each one cost real time.
   type-checks its keys; `rows.map((row) => ({…}))` assigned to `DependentWrite[]` does not. A
   misspelled wire field (`birthDate` for `birth_date`) then passes both the typechecker and the
   tests, and Laravel coerces the missing key to `null` — silent data loss, not a 400.
+- **`attendance.test.tsx` fails on the 2nd of every month, and only then.** Its fixture builds
+  `otherDay` as `${THIS_MONTH}-02` to mean "a different day this month than today" — which is
+  the same date as today whenever today *is* the 2nd, so the test that proves the punch hero
+  derives its direction from TODAY alone gets a today with punches and renders "Clock out".
+  Observed red on 2026-08-02 and green on 2026-08-03 with no code change between. It is a
+  fixture bug, not a regression: if CI is red on the 2nd with only this test failing, that is
+  why. Fixing it means deriving `otherDay` from today rather than pinning a literal.
+- **PHP's own `upload_max_filesize` overrides Laravel's validation, silently.** The base api
+  image shipped `upload_max_filesize=2M` while every attachment route's `FormRequest` validates
+  `max:10240` (10 MiB) — a file between 2 and 10 MB is dropped from `$_FILES` by PHP *before*
+  Laravel's `file` rule ever runs, so the response is a generic `400 "must be a file"`, not a
+  size-limit error, and nothing in the Laravel-side validation code is wrong. It predates M10a
+  (M3.6's `SubmitAdjustmentRequest`/`SubmitLeaveRequestRequest` had the same gap) but a scanned
+  government ID was the first upload realistically likely to land in that 2–10 MB range. Fixed
+  in `backend/Dockerfile`'s shared `base` stage (M10a follow-ups); see the Production section.
+  If a future attachment route's validation ceiling changes, the `.ini` values must move with
+  it — nothing keeps them in sync automatically.
 
 ## Where things are
 
@@ -343,7 +369,7 @@ contact and personal details, dependents, and government/financial IDs with a sc
 of each — that an HR Admin configures per office, an employee reads for themselves, and a
 manager sees a redacted view of, at its own HR/manager-reachable route
 (`/employees/{id}/profile`) separate from the system-admin-only employee roster.
-**888 backend tests (19 of them Arch) + 582 frontend tests (581 passing).** See `docs/06-roadmap.md` for
+**899 backend tests (20 of them Arch) + 584 frontend tests.** See `docs/06-roadmap.md` for
 each milestone's status and `docs/features.md` for what a user can actually do today.
 
 One caveat worth knowing before you trust the UI: the frontend is covered by component

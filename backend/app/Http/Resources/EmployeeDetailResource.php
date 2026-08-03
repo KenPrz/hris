@@ -8,7 +8,6 @@ use App\Domain\Employment\EmploymentResolver;
 use App\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Carbon;
 
 /** @mixin Employee */
 final class EmployeeDetailResource extends JsonResource
@@ -18,7 +17,11 @@ final class EmployeeDetailResource extends JsonResource
         // "Current" is resolved the same way the pay engine will: the employment record
         // whose effective_from covers today, per EmploymentResolver — never a denormalized
         // guess. A brand-new employee with no employment record yet gets null, not an error.
-        $current = EmploymentResolver::on($this->resource, Carbon::today());
+        //
+        // "Today" is resolved in the employee's OWN OFFICE TIMEZONE (EmployeeLocalToday),
+        // not the server's UTC today — see that class's docblock. Pre-existing from M8b;
+        // fixed alongside the M10a profile resources that share the same bug.
+        $current = EmploymentResolver::on($this->resource, EmployeeLocalToday::for($this->resource));
 
         return [
             'id' => $this->id,

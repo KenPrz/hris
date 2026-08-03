@@ -52,4 +52,22 @@ describe('Select', () => {
 
     expect(onChange).toHaveBeenCalledWith('special_working')
   })
+
+  it('shows the blank option label as the placeholder when the value is blank', () => {
+    render(
+      <Select
+        id="day-type"
+        label="Day type"
+        value=""
+        onChange={vi.fn()}
+        options={[{ value: '', label: 'Select day type' }, ...OPTIONS]}
+      />,
+    )
+
+    // Radix refuses to portal the selected item's text when value === '' — it treats that
+    // as "nothing selected" — so the closed trigger must fall back to the blank option's
+    // own label rather than rendering empty (an empty box with just the caret).
+    const trigger = screen.getByLabelText('Day type')
+    expect(trigger).toHaveTextContent('Select day type')
+  })
 })

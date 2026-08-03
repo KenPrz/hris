@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Actions\Profile\SaveEmployeeIdentification;
+use App\Actions\Profile\SaveEmployeeIdentificationInput;
 use App\Models\Employee;
 use App\Models\EmployeeIdentification;
 use App\Models\EmployeeIdentificationCategory;
@@ -9,6 +11,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Activitylog\Models\Activity;
+use Spatie\MediaLibrary\MediaCollections\Exceptions\FileUnacceptableForCollection;
 
 uses(RefreshDatabase::class);
 
@@ -84,6 +87,51 @@ it('never writes an identification number into the activity log', function (): v
     expect(Activity::query()->count())->toBeGreaterThan(0)
         ->and($properties)->not->toContain('653536955000')
         ->and($properties)->not->toContain('999999999999');
+});
+
+// The M10a follow-up: SaveEmployeeIdentification used to attach the replacement scan
+// INSIDE the same DB::transaction() as the number/issued_on/expires_on write. singleFile()
+// on the 'scan' collection replaces, which means medialibrary deletes the OLD RustFS object
+// as part of adding the new one — so a rollback after that point left a committed media row
+// pointing at a deleted object. The fix moves the media write to run only after the DB
+// transaction has returned (i.e. committed). This proves the new ordering by forcing the
+// media step to fail (a disallowed mime type, rejected by the model's own
+// acceptsMimeTypes() inside addMedia() — bypassing the FormRequest's belt-and-braces
+// validation on purpose, to exercise the ACTION directly) and checking that (a) the DB
+// write already committed despite the later failure, and (b) the previous scan was never
+// touched.
+it('commits the DB write and leaves the previous scan untouched when the post-commit media attach fails', function (): void {
+    Storage::fake('attachments');
+
+    $employee = Employee::factory()->create();
+    $tin = EmployeeIdentificationCategory::factory()->create(['code' => 'TIN']);
+
+    $identification = EmployeeIdentification::query()->create([
+        'employee_id' => $employee->id,
+        'category_id' => $tin->id,
+        'number' => '111111111111',
+    ]);
+    $identification->addMedia(UploadedFile::fake()->createWithContent('tin.pdf', str_repeat('%PDF-1.4'.PHP_EOL, 20)))
+        ->toMediaCollection('scan');
+
+    $originalMediaId = $identification->fresh()->getFirstMedia('scan')->id;
+
+    $badScan = UploadedFile::fake()->create('malware.exe', 20, 'application/x-msdownload');
+
+    expect(fn () => app(SaveEmployeeIdentification::class)->execute(new SaveEmployeeIdentificationInput(
+        employeeId: $employee->id,
+        categoryId: $tin->id,
+        number: '222222222222',
+        scan: $badScan,
+    )))->toThrow(FileUnacceptableForCollection::class);
+
+    // The number write committed even though the media step, which runs strictly after it,
+    // subsequently failed.
+    expect($identification->fresh()->number)->toBe('222222222222');
+
+    // The PREVIOUS scan is untouched — the failed attach never reached the point of
+    // replacing it, so no RustFS object was orphaned or lost.
+    expect($identification->fresh()->getFirstMedia('scan')?->id)->toBe($originalMediaId);
 });
 
 it('cascades identifications away when the employee is deleted', function (): void {
